@@ -8,3 +8,5 @@ Please make a commit adding your name below:
 - Johann Traum
 - Sara Keriakes
 - Andrew White
+
+https://discord.gg/hszhxZw53H

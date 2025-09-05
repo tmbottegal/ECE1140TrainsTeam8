@@ -1,4 +1,4 @@
-# ECE1140TrainsGroup6
+# ECE1140TrainsTeam8
 we love trains!!!
 https://discord.gg/hszhxZw53H
 

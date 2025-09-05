@@ -1,5 +1,6 @@
 # ECE1140TrainsGroup6
 we love trains!!!
+https://discord.gg/hszhxZw53H
 
 
 Please make a commit adding your name below:
@@ -9,4 +10,3 @@ Please make a commit adding your name below:
 - Sara Keriakes
 - Andrew White
 - Deni Ephraim
-https://discord.gg/hszhxZw53H

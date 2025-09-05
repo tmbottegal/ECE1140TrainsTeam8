@@ -10,3 +10,4 @@ Please make a commit adding your name below:
 - Sara Keriakes
 - Andrew White
 - Deni Ephraim
+- Jay Fu

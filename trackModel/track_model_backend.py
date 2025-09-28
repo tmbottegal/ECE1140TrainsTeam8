@@ -1,0 +1,406 @@
+from enum import Enum
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+
+@dataclass
+class TrainCommand:
+    """Command packet for per-train instructions.
+    
+    Attributes:
+        train_id: ID of the target train.
+        commanded_speed: Speed command for the train in m/s.
+        authority: Movement authority for the train in meters.
+        command_ID: Unique identifier for the command.
+    """
+    train_id: int
+    commanded_speed: int
+    authority: int
+    command_ID: int
+
+class FailureType(Enum):
+    """Enumeration of possible track failure types."""
+    BROKEN_RAIL = "broken_rail"
+    TRACK_CIRCUIT_FAILURE = "track_circuit_failure"
+    POWER_FAILURE = "power_failure"
+
+
+class SignalState(Enum):
+    """Enumeration of signal states for track segments."""
+    RED = "red"
+    YELLOW = "yellow"
+    GREEN = "green"
+    SUPERGREEN = "super_green"
+
+class TrackSegment:
+    """Base class for all track segments in the railway network.
+    
+    Represents a single block in the track model with properties for
+    occupancy tracking and failure states.
+    
+    Attributes:
+        block_id: Unique identifier for the track block.
+        length: Length of the segment in meters.
+        commanded_speed: Maximum allowed speed in m/s.
+        grade: Grade percentage.
+    """
+    
+    def __init__(self, block_id: str, length: int, grade: int) -> None:
+        """Initialize a track segment.
+        
+        Args:
+            block_id: Unique identifier for the track block.
+            length: Length of the segment in meters.
+            grade: Grade percentage (+ is uphill, - is downhill).
+        """
+        # Basic track properties
+        self.block_id = block_id
+        self.length = length
+        self.grade = grade
+        
+        # Graph connections
+        self.connected_segments: List['TrackSegment'] = []
+        self.previous_segments: List['TrackSegment'] = []
+        
+        # Track status
+        self.occupied = False
+        
+        # Failure states
+        self.failures: set[FailureType] = set()
+        
+        # Signal status
+        self.signal_state = SignalState.RED
+        
+        # Station properties
+        self.is_station = False
+        self.station_name = None
+        self.passengers_waiting = 0
+        
+        # Beacon information
+        self.beacon_data = ""
+        
+    def set_occupancy(self, occupied: bool) -> None:
+        """Update block occupancy status.
+        
+        Args:
+            occupied: Whether the block is currently occupied.
+        """
+        pass
+
+    def set_signal_state(self, state: SignalState) -> None:
+        """Set the signal state for this track segment.
+        
+        Args:
+            state: The new signal state to set.
+        """
+        pass
+
+    def set_beacon_data(self, beacon_data: str) -> None:
+        """Set beacon data for this track segment.
+        
+        Args:
+            beacon_data: The beacon information to set.
+        """
+        pass
+        
+    def set_failure(self, failure_type: FailureType) -> None:
+        """Add a failure condition (activated by Murphy).
+        
+        Args:
+            failure_type: The type of failure to add.
+        """
+        pass
+        
+    def clear_failure(self, failure_type: FailureType) -> None:
+        """Clear a failure condition.
+        
+        Args:
+            failure_type: The type of failure to clear.
+        """
+        pass
+            
+    def _report_failure(self, failure_type: FailureType) -> None:
+        """Report failure to necessary modules.
+        
+        Args:
+            failure_type: The type of failure that occurred.
+        """
+        pass
+        
+class TrackSwitch(TrackSegment):
+    """Switch segment that inherits from TrackSegment.
+    
+    Simple two-position switch that can route trains between two paths.
+    Position 0 is straight through, Position 1 is diverging path.
+    
+    Attributes:
+        straight_segment: Segment for straight-through path (position 0).
+        diverging_segment: Segment for diverging path (position 1).
+        current_position: Current switch position (0 or 1).
+    """
+    
+    def __init__(self, block_id: str, length: int, grade: int) -> None:
+        """Initialize a track switch.
+        
+        Args:
+            block_id: Unique identifier for the switch block.
+            length: Length of the switch in meters.
+            grade: Grade percentage (+ is uphill, - is downhill).
+        """
+        super().__init__(block_id, length, grade)
+        
+        # Switch-specific properties
+        self.straight_segment: Optional['TrackSegment'] = None
+        self.diverging_segment: Optional['TrackSegment'] = None
+        self.current_position = 0
+        
+    def set_switch_paths(self, straight_segment: 'TrackSegment', 
+                        diverging_segment: 'TrackSegment') -> None:
+        """Set the two possible paths for this switch.
+        
+        Args:
+            straight_segment: Segment for straight-through path.
+            diverging_segment: Segment for diverging path.
+        """
+        pass
+        
+    def set_switch_position(self, position: int) -> bool:
+        """Set switch to specified position.
+        
+        Args:
+            position: Desired switch position (0 = straight, 1 = diverging).
+            
+        Returns:
+            True if switch was successfully set, False otherwise.
+        """
+        pass
+        
+    def get_active_segment(self) -> Optional['TrackSegment']:
+        """Get the currently active next segment.
+        
+        Returns:
+            The active segment based on current position, None if failures exist.
+        """
+        pass
+            
+    def is_straight(self) -> bool:
+        """Check if switch is in straight position.
+        
+        Returns:
+            True if switch is in straight position (0).
+        """
+        pass
+        
+
+class Station(TrackSegment):
+    """Station segment with passenger management capabilities.
+    
+    Extends TrackSegment with functionality for managing passengers,
+    ticket sales, and station-specific operations.
+    
+    Attributes:
+        station_name: Human-readable name of the station.
+        passengers_waiting: Current number of passengers waiting.
+        passengers_boarded_total: Total passengers boarded in total.
+        passengers_exited_total: Total passengers who exited in total.
+        tickets_sold_total: Number of tickets sold in total.
+        ticket_sales_log: Historical record of ticket sales.
+    """
+    
+    def __init__(self, block_id: str, length: int, grade: int, station_name: str) -> None:
+        """Initialize a station.
+        
+        Args:
+            block_id: Unique identifier for the station block.
+            length: Length of the station platform in meters.
+            grade: Grade percentage (+ is uphill, - is downhill).
+            station_name: Human-readable name of the station.
+        """
+        super().__init__(block_id, length, grade)
+        
+        self.is_station = True
+        self.station_name = station_name
+        
+        # Passenger management
+        self.passengers_waiting = 0
+        self.passengers_boarded_total = 0
+        self.passengers_exited_total = 0
+        
+        # Ticket sales tracking
+        self.tickets_sold_total = 0
+        self.ticket_sales_log: List[Dict] = []
+        
+    def passengers_board(self, count: int) -> int:
+        """Record passengers boarding.
+        
+        Args:
+            count: Number of passengers attempting to board.
+            
+        Returns:
+            Actual number of passengers who boarded.
+        """
+        pass
+        
+    def passengers_exit(self, count: int) -> None:
+        """Record passengers exiting.
+        
+        Args:
+            count: Number of passengers exiting the train.
+        """
+        pass
+
+class TrackNetwork:
+    """Main Track Model class implementing the graph structure.
+    
+    Manages the entire railway network including segments, switches, and stations.
+    Provides interfaces for track layout loading, failure injection, and status
+    reporting.
+    
+    Attributes:
+        segments: Dictionary mapping block IDs to TrackSegment objects.
+        switches: Dictionary mapping switch IDs to TrackSwitch objects.
+        stations: Dictionary mapping station IDs to Station objects.
+        global_temperature: System-wide environmental temperature.
+        heater_threshold: Temperature threshold for heater activation.
+        heaters_active: Current status of global track heaters.
+        failure_log: Historical record of system failures.
+    """
+    
+    def __init__(self) -> None:
+        """Initialize an empty track network."""
+        self.segments: Dict[str, TrackSegment] = {}
+        self.switches: Dict[str, TrackSwitch] = {}
+        self.stations: Dict[str, Station] = {}
+        
+        # System-wide properties
+        self.global_temperature = 20       # Celsius
+        self.heater_threshold = 0          # Celsius
+        self.heaters_active = False
+        
+        # Command broadcasting system
+        self.active_commands: List[TrainCommand] = []
+        self.command_history: List[TrainCommand] = []
+        
+        # Logging
+        self.failure_log: List[Dict] = []
+        
+    def add_segment(self, segment: TrackSegment) -> None:
+        """Add a track segment to the network.
+        
+        Args:
+            segment: The track segment to add to the network.
+        """
+        pass
+            
+    def connect_segments(self, seg1_id: str, seg2_id: str, 
+                        bidirectional: bool = True) -> None:
+        """Connect two segments in the graph.
+        
+        Args:
+            seg1_id: ID of the first segment.
+            seg2_id: ID of the second segment.
+            bidirectional: Whether connection works in both directions.
+        """
+        pass
+                
+    def load_track_layout(self, layout_file: str) -> None:
+        """Load track layout from file.
+        
+        Args:
+            layout_file: Path to the track layout configuration file.
+        """
+        pass
+        
+    def set_global_temperature(self, temperature: int) -> None:
+        """Set environmental temperature (Murphy interface).
+        
+        Args:
+            temperature: New global temperature in Celsius.
+        """
+        pass
+        
+    def _manage_heaters(self) -> None:
+        """Automatically manage track heaters based on global temperature."""
+        pass
+                        
+    def get_heater_status(self) -> bool:
+        """Get current status of global track heaters.
+        
+        Returns:
+            True if heaters are active, False otherwise.
+        """
+        pass
+        
+    def set_heater_threshold(self, threshold: int) -> None:
+        """Set temperature threshold for heater activation.
+        
+        Args:
+            threshold: Temperature in Celsius below which heaters activate.
+        """
+        pass
+        
+    def broadcast_train_command(self, train_id: int, commanded_speed: int, 
+                               authority: int) -> None:
+        """Broadcast a command to a specific train through all track segments.
+        
+        Args:
+            train_id: ID of the target train.
+            commanded_speed: Speed command for the train in m/s.
+            authority: Movement authority for the train in meters.
+        """
+        pass
+        
+    def get_active_commands(self) -> List[TrainCommand]:
+        """Get all currently active train commands.
+        
+        Returns:
+            List of active command packets that trains can receive.
+        """
+        pass
+        
+    def get_commands_for_train(self, train_id: int) -> List[TrainCommand]:
+        """Get all active commands for a specific train.
+        
+        Args:
+            train_id: ID of the train to get commands for.
+            
+        Returns:
+            List of command packets intended for the specified train.
+        """
+        pass
+        
+    def clear_train_commands(self, train_id: int) -> None:
+        """Clear all active commands for a specific train.
+        
+        Args:
+            train_id: ID of the train to clear commands for.
+        """
+        pass
+            
+    def inject_failure(self, block_id: str, failure_type: FailureType) -> None:
+        """Inject failure for testing (Murphy interface).
+        
+        Args:
+            block_id: ID of the block to inject failure into.
+            failure_type: Type of failure to inject.
+        """
+        pass
+            
+    def get_network_status(self) -> Dict[str, Any]:
+        """Get complete network status for Track Builder display.
+        
+        Returns:
+            Dictionary containing comprehensive network status information.
+        """
+        pass
+        
+    def _get_segment_status(self, segment: TrackSegment) -> Dict[str, Any]:
+        """Get status information for a single segment.
+        
+        Args:
+            segment: The track segment to get status for.
+            
+        Returns:
+            Dictionary containing segment status information.
+        """
+        pass
+            

@@ -1,5 +1,5 @@
 """
-Track Model Interface - Access layer for the track model backend for testing.
+Track Model Frontend
 """
 
 from track_model_backend import (
@@ -11,8 +11,13 @@ from track_model_backend import (
     TrackFailureType,
     SignalState
 )
-from datetime import datetime
 from typing import List, Dict, Optional
+import sys
+from PyQt6.QtWidgets import QApplication, QWidget
+from sys import argv
 
 if __name__ == "__main__":
-    print("Test") 
+    app = QApplication([])
+    window = QWidget()
+    window.show()
+    app.exec()

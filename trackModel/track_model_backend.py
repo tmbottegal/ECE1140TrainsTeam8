@@ -32,6 +32,12 @@ class SignalState(Enum):
     GREEN = "green"
     SUPERGREEN = "super_green"
 
+class StationSide(Enum):
+    """Enumeration of station platform sides."""
+    LEFT = "left"
+    RIGHT = "right"
+    BOTH = "both"
+
 class TrackSegment:
     """Base class for all track segments in the railway network.
     
@@ -54,18 +60,22 @@ class TrackSegment:
 
     """
     
-    def __init__(self, block_id: str, length: int, grade: int) -> None:
+    def __init__(self, block_id: str, length: int, speed_limit:int, grade: int, underground: bool) -> None:
         """Initialize a track segment.
         
         Args:
             block_id: Unique identifier for the track block.
             length: Length of the segment in meters.
+            speed_limit: Speed limit of the segment in km/h.
             grade: Grade percentage (+ is uphill, - is downhill).
+            underground: Whether the segment is underground (tunnel).
         """
         # Basic track properties
         self.block_id = block_id
         self.length = length
+        self.speed_limit = speed_limit
         self.grade = grade
+        self.underground = underground
         
         # Graph connections
         self.connected_segments: List['TrackSegment'] = []
@@ -215,7 +225,7 @@ class Station(TrackSegment):
         ticket_sales_log: Historical record of ticket sales.
     """
     
-    def __init__(self, block_id: str, length: int, grade: int, station_name: str) -> None:
+    def __init__(self, block_id: str, length: int, grade: int, station_name: str, station_side: StationSide) -> None:
         """Initialize a station.
         
         Args:
@@ -223,12 +233,15 @@ class Station(TrackSegment):
             length: Length of the station segment in meters.
             grade: Grade percentage (+ is uphill, - is downhill).
             station_name: Human-readable name of the station.
+            station_side: Side(s) of the platform (left, right, both).
         """
-        super().__init__(block_id, length, grade)
-        
+        super().__init__(block_id, length, grade, underground=False)
+       
+        # Station-specific properties
         self.is_station = True
         self.station_name = station_name
-        
+        self.station_side = station_side
+
         # Passenger management
         self.passengers_waiting = 0
         self.passengers_boarded_total = 0

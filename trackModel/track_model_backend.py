@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+from random import Random
 
 @dataclass
 class TrainCommand:
@@ -17,7 +18,7 @@ class TrainCommand:
     authority: int
     command_ID: int
 
-class FailureType(Enum):
+class TrackFailureType(Enum):
     """Enumeration of possible track failure types."""
     BROKEN_RAIL = "broken_rail"
     TRACK_CIRCUIT_FAILURE = "track_circuit_failure"
@@ -40,8 +41,17 @@ class TrackSegment:
     Attributes:
         block_id: Unique identifier for the track block.
         length: Length of the segment in meters.
-        commanded_speed: Maximum allowed speed in m/s.
         grade: Grade percentage.
+        connected_segments: List of segments directly reachable from this one.
+        previous_segments: List of segments that lead into this one.
+        occupied: Whether the block is currently occupied.
+        failures: Set of current failure conditions on this block.
+        signal_state: Current signal state for this block.
+        is_station: Whether this block is a station.
+        station_name: Name of the station if applicable.
+        passengers_waiting: Number of passengers currently waiting at the station if applicable.
+        beacon_data: Beacon information for trains entering this block.
+
     """
     
     def __init__(self, block_id: str, length: int, grade: int) -> None:
@@ -65,7 +75,7 @@ class TrackSegment:
         self.occupied = False
         
         # Failure states
-        self.failures: set[FailureType] = set()
+        self.failures: set[TrackFailureType] = set()
         
         # Signal status
         self.signal_state = SignalState.RED
@@ -102,7 +112,7 @@ class TrackSegment:
         """
         pass
         
-    def set_failure(self, failure_type: FailureType) -> None:
+    def set_track_failure(self, failure_type: TrackFailureType) -> None:
         """Add a failure condition (activated by Murphy).
         
         Args:
@@ -110,7 +120,7 @@ class TrackSegment:
         """
         pass
         
-    def clear_failure(self, failure_type: FailureType) -> None:
+    def clear_track_failure(self, failure_type: TrackFailureType) -> None:
         """Clear a failure condition.
         
         Args:
@@ -118,7 +128,7 @@ class TrackSegment:
         """
         pass
             
-    def _report_failure(self, failure_type: FailureType) -> None:
+    def _report_track_failure(self, failure_type: TrackFailureType) -> None:
         """Report failure to necessary modules.
         
         Args:
@@ -132,7 +142,7 @@ class TrackSwitch(TrackSegment):
     Simple two-position switch that can route trains between two paths.
     Position 0 is straight through, Position 1 is diverging path.
     
-    Attributes:
+    Additional Attributes:
         straight_segment: Segment for straight-through path (position 0).
         diverging_segment: Segment for diverging path (position 1).
         current_position: Current switch position (0 or 1).
@@ -190,7 +200,6 @@ class TrackSwitch(TrackSegment):
         """
         pass
         
-
 class Station(TrackSegment):
     """Station segment with passenger management capabilities.
     
@@ -211,7 +220,7 @@ class Station(TrackSegment):
         
         Args:
             block_id: Unique identifier for the station block.
-            length: Length of the station platform in meters.
+            length: Length of the station segment in meters.
             grade: Grade percentage (+ is uphill, - is downhill).
             station_name: Human-readable name of the station.
         """
@@ -224,32 +233,57 @@ class Station(TrackSegment):
         self.passengers_waiting = 0
         self.passengers_boarded_total = 0
         self.passengers_exited_total = 0
+        self.passanger_rand_range = (1, 20)
         
         # Ticket sales tracking
         self.tickets_sold_total = 0
         self.ticket_sales_log: List[Dict] = []
-        
-    def passengers_board(self, count: int) -> int:
-        """Record passengers boarding.
+    
+    def sell_tickets(self, count: int=None) -> None:
+        """Record ticket sales at the station.
         
         Args:
-            count: Number of passengers attempting to board.
-            
-        Returns:
-            Actual number of passengers who boarded.
+            count: Number of tickets sold.
+            (If no count argument, randomly generates a number between set range.)
         """
+        if count is None:
+            rng = Random()
+            count = rng.randint(self.passanger_rand_range[0], self.passanger_rand_range[1])
+        self.tickets_sold_total += count
+        self.passengers_waiting += count
+        pass
+    
+    def passengers_board(self, trainID: int, count: int=None,) -> None:
+        """Record passengers boarding. Adds to total number, and passes to the Train Model.
+        
+        Args:
+            trainID: ID of the train that is boarding passengers.
+            count: Number of passengers to board.
+            (If no count argument, randomly generates a number between set range.)
+        """
+        if count is None:
+            rng = Random()
+            count = rng.randint(self.passanger_rand_range[0], self.passanger_rand_range[1])
+        self.passengers_boarded_total += count
+        self.passengers_waiting = max(0, self.passengers_waiting - count)
+        # pseudo: train_model.board_passengers(trainID, count)
         pass
         
-    def passengers_exit(self, count: int) -> None:
-        """Record passengers exiting.
+    def passengers_exit(self, trainID: int, count: int=None) -> None:
+        """Record passengers exiting. Adds to total number, and passes to the Train Model.
         
         Args:
+            trainID: ID of the train that is letting passengers exit.
             count: Number of passengers exiting the train.
+            (If no count argument, randomly generates a number between set range.)
+        """
+        """ NOTE: Possible future issue.  This does not account for number of passangers leaving the train being greater than the number of passangers on the train.
+            Possible fix: pass the number of passangers on the train to this function to avoid this.
         """
         pass
 
 class TrackNetwork:
-    """Main Track Model class implementing the graph structure.
+    """Main Track Model class implementing the Model through a graph data structure.
     
     Manages the entire railway network including segments, switches, and stations.
     Provides interfaces for track layout loading, failure injection, and status
@@ -376,7 +410,7 @@ class TrackNetwork:
         """
         pass
             
-    def inject_failure(self, block_id: str, failure_type: FailureType) -> None:
+    def inject_track_failure(self, block_id: str, failure_type: TrackFailureType) -> None:
         """Inject failure for testing (Murphy interface).
         
         Args:

@@ -60,7 +60,7 @@ class TrackSegment:
 
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit:int, grade: int, underground: bool) -> None:
+    def __init__(self, block_id: str, length: int, speed_limit:int, grade: float, underground: bool) -> None:
         """Initialize a track segment.
         
         Args:
@@ -104,6 +104,7 @@ class TrackSegment:
         Args:
             occupied: Whether the block is currently occupied.
         """
+        #pseudo: self.occupied = occupied
         pass
 
     def set_signal_state(self, state: SignalState) -> None:
@@ -111,7 +112,8 @@ class TrackSegment:
         
         Args:
             state: The new signal state to set.
-        """
+        """       
+        #pseudo: self.signal_state = state
         pass
 
     def set_beacon_data(self, beacon_data: str) -> None:
@@ -120,6 +122,7 @@ class TrackSegment:
         Args:
             beacon_data: The beacon information to set.
         """
+        #pseudo: self.beacon_data = beacon_data
         pass
         
     def set_track_failure(self, failure_type: TrackFailureType) -> None:
@@ -128,6 +131,9 @@ class TrackSegment:
         Args:
             failure_type: The type of failure to add.
         """
+        #pseudo: if failure_type not in self.failures:
+        #          self.failures.add(failure_type)
+        #          self._report_track_failure(failure_type)
         pass
         
     def clear_track_failure(self, failure_type: TrackFailureType) -> None:
@@ -136,6 +142,8 @@ class TrackSegment:
         Args:
             failure_type: The type of failure to clear.
         """
+        #pseudo: if failure_type in self.failures:
+        #          self.failures.remove(failure_type)
         pass
             
     def _report_track_failure(self, failure_type: TrackFailureType) -> None:
@@ -144,6 +152,8 @@ class TrackSegment:
         Args:
             failure_type: The type of failure that occurred.
         """
+        #pseudo: log failure event with timestamp
+        # report to track controller
         pass
         
 class TrackSwitch(TrackSegment):
@@ -158,7 +168,7 @@ class TrackSwitch(TrackSegment):
         current_position: Current switch position (0 or 1).
     """
     
-    def __init__(self, block_id: str, length: int, grade: int) -> None:
+    def __init__(self, block_id: str, length: int, grade: float) -> None:
         """Initialize a track switch.
         
         Args:
@@ -181,6 +191,8 @@ class TrackSwitch(TrackSegment):
             straight_segment: Segment for straight-through path.
             diverging_segment: Segment for diverging path.
         """
+        #pseudo: self.straight_segment = straight_segment
+        #      self.diverging_segment = diverging_segment
         pass
         
     def set_switch_position(self, position: int) -> bool:
@@ -192,14 +204,20 @@ class TrackSwitch(TrackSegment):
         Returns:
             True if switch was successfully set, False otherwise.
         """
+        #pseudo: if position in [0, 1]:
+        #          self.current_position = position
+        #          return True
+        #      else:
+        #          return False
         pass
         
     def get_active_segment(self) -> Optional['TrackSegment']:
         """Get the currently active next segment.
         
         Returns:
-            The active segment based on current position, None if failures exist.
+            The active segment based on current position.
         """
+        # psedo:  return self.straight_segment if self.current_position == 0 else self.diverging_segment
         pass
             
     def is_straight(self) -> bool:
@@ -208,6 +226,7 @@ class TrackSwitch(TrackSegment):
         Returns:
             True if switch is in straight position (0).
         """
+        #pseudo: return self.current_position == 0
         pass
         
 class Station(TrackSegment):
@@ -225,7 +244,7 @@ class Station(TrackSegment):
         ticket_sales_log: Historical record of ticket sales.
     """
     
-    def __init__(self, block_id: str, length: int, grade: int, station_name: str, station_side: StationSide) -> None:
+    def __init__(self, block_id: str, length: int, grade: float, station_name: str, station_side: StationSide) -> None:
         """Initialize a station.
         
         Args:
@@ -266,7 +285,7 @@ class Station(TrackSegment):
         self.passengers_waiting += count
         pass
     
-    def passengers_board(self, trainID: int, count: int=None,) -> None:
+    def passengers_boarding(self, trainID: int, count: int=None) -> None:
         """Record passengers boarding. Adds to total number, and passes to the Train Model.
         
         Args:
@@ -282,14 +301,13 @@ class Station(TrackSegment):
         # pseudo: train_model.board_passengers(trainID, count)
         pass
         
-    def passengers_exit(self, trainID: int, count: int=None) -> None:
+    def passengers_exiting(self, trainID: int, count: int) -> None:
         """Record passengers exiting. Adds to total number, and passes to the Train Model.
         
         Args:
             trainID: ID of the train that is letting passengers exit.
             count: Number of passengers exiting the train.
-            (If no count argument, randomly generates a number between set range.)
-        """
+                        """
         """ NOTE: Possible future issue.  This does not account for number of passangers leaving the train being greater than the number of passangers on the train.
             Possible fix: pass the number of passangers on the train to this function to avoid this.
         """
@@ -326,6 +344,7 @@ class TrackNetwork:
         # Command broadcasting system
         self.active_commands: List[TrainCommand] = []
         self.command_history: List[TrainCommand] = []
+        self.current_command_id = 0
         
         # Logging
         self.failure_log: List[Dict] = []
@@ -336,6 +355,7 @@ class TrackNetwork:
         Args:
             segment: The track segment to add to the network.
         """
+        #pseudo: self.segments[segment.block_id] = segment
         pass
             
     def connect_segments(self, seg1_id: str, seg2_id: str, 
@@ -347,6 +367,7 @@ class TrackNetwork:
             seg2_id: ID of the second segment.
             bidirectional: Whether connection works in both directions.
         """
+        #pseudo: find segments by ID and update connected_segments and previous_segments lists
         pass
                 
     def load_track_layout(self, layout_file: str) -> None:
@@ -363,10 +384,16 @@ class TrackNetwork:
         Args:
             temperature: New global temperature in Celsius.
         """
+        #pseudo: self.global_temperature = temperature
+        #self._manage_heaters()
         pass
         
     def _manage_heaters(self) -> None:
         """Automatically manage track heaters based on global temperature."""
+        #pseudo: if self.global_temperature < self.heater_threshold:
+        #          self.heaters_active = True
+        #      else:
+        #          self.heaters_active = False
         pass
                         
     def get_heater_status(self) -> bool:
@@ -375,6 +402,7 @@ class TrackNetwork:
         Returns:
             True if heaters are active, False otherwise.
         """
+        #pseudo: return self.heaters_active
         pass
         
     def set_heater_threshold(self, threshold: int) -> None:
@@ -383,6 +411,8 @@ class TrackNetwork:
         Args:
             threshold: Temperature in Celsius below which heaters activate.
         """
+        #pseudo: self.heater_threshold = threshold
+        #self._manage_heaters()
         pass
         
     def broadcast_train_command(self, train_id: int, commanded_speed: int, 
@@ -394,6 +424,9 @@ class TrackNetwork:
             commanded_speed: Speed command for the train in m/s.
             authority: Movement authority for the train in meters.
         """
+        #pseudo: command_ID++
+        # create TrainCommand object
+        # add to active_commands and command_history
         pass
         
     def get_active_commands(self) -> List[TrainCommand]:
@@ -402,6 +435,7 @@ class TrackNetwork:
         Returns:
             List of active command packets that trains can receive.
         """
+        #pseudo: return copy of active_commands
         pass
         
     def get_commands_for_train(self, train_id: int) -> List[TrainCommand]:
@@ -413,6 +447,7 @@ class TrackNetwork:
         Returns:
             List of command packets intended for the specified train.
         """
+        #pseudo: filter active_commands for train_id
         pass
         
     def clear_train_commands(self, train_id: int) -> None:
@@ -421,15 +456,17 @@ class TrackNetwork:
         Args:
             train_id: ID of the train to clear commands for.
         """
+        #pseudo: remove commands from active_commands for train_id
         pass
             
-    def inject_track_failure(self, block_id: str, failure_type: TrackFailureType) -> None:
+    def inject_track_failure(self, block_id: int, failure_type: TrackFailureType) -> None:
         """Inject failure for testing (Murphy interface).
         
         Args:
             block_id: ID of the block to inject failure into.
             failure_type: Type of failure to inject.
         """
+        #pseudo: find segment by block_id and call set_track_failure
         pass
             
     def get_network_status(self) -> Dict[str, Any]:
@@ -438,6 +475,7 @@ class TrackNetwork:
         Returns:
             Dictionary containing comprehensive network status information.
         """
+        #pseudo: iterate over all segments and compile status into a dictionary
         pass
         
     def _get_segment_status(self, segment: TrackSegment) -> Dict[str, Any]:
@@ -449,5 +487,6 @@ class TrackNetwork:
         Returns:
             Dictionary containing segment status information.
         """
+        #pseudo: compile segment properties into a dictionary
         pass
             

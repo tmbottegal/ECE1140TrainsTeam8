@@ -1,15 +1,22 @@
 """
 Track Model Frontend
 """
+import sys
+sys.path.append('../')
+
+from universal.universal import (
+    SignalState,
+    TrainCommand,
+    ConversionFunctions
+)
 
 from track_model_backend import (
     TrackNetwork, 
     TrackSegment, 
     TrackSwitch, 
+    LevelCrossing,
     Station,
-    TrainCommand,
-    TrackFailureType,
-    SignalState
+    TrackFailureType
 )
 from typing import List, Dict, Optional
 import sys

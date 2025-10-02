@@ -61,8 +61,8 @@ def main() -> None:
         "Switch",
         "Crossing",
     ])
-    table_other.setMaximumHeight(160)
-    table_other.setMaximumWidth(300)
+    table_other.setMaximumHeight(146)
+    table_other.setMaximumWidth(315)
     table_other.verticalHeader().setVisible(False)
     pergatory = QHBoxLayout()
     pergatory.addWidget(table_other)

@@ -3,23 +3,67 @@ Track Model Backend
 """
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from datetime import datetime
 from random import Random
+import csv
+import re
 
 import sys
-sys.path.append('../')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from universal.universal import (
     SignalState, 
     TrainCommand
 )
 
+#TEMPORARY until Train class is implemented in Train Model
+class Train:
+    def __init__(self, train_id: int) -> None:
+
+        self.train_id = train_id
+        self.current_segment: Optional['TrackSegment'] = None
+        self.segment_displacement: float = 0.0
+        if self.current_segment is not None:
+           self.current_segment.set_occupancy(True) 
+
+    def get_next_segment(self) -> Optional['TrackSegment']:
+        """Get the next connected track segment.
+        
+        Returns:
+            The next connected TrackSegment, or None if there is no connection.
+        """
+        if self.current_segment is not None:
+            return self.current_segment.get_next_segment()
+        return None
+    
+    def get_previous_segment(self) -> Optional['TrackSegment']:
+        """Get the previous connected track segment.
+        
+        Returns:
+            The previous connected TrackSegment, or None if there 
+                    is no connection.
+        """
+        if self.current_segment is not None:
+            return self.current_segment.get_previous_segment()
+        return None
+    
+    def move(self, distance: float) -> None:
+        """Move the train along the track by a specified distance.
+        
+        Args:
+            distance: Distance to move in meters.
+        """
+        if self.current_segment is None:
+            raise ValueError("Train is not currently on any track segment.")
+        
+        print("Balls!") #TODO: implement temp train displacement logic
+
 class TrackFailureType(Enum):
     """Enumeration of possible track failure types."""
     BROKEN_RAIL = "broken_rail"
     TRACK_CIRCUIT_FAILURE = "track_circuit_failure"
     POWER_FAILURE = "power_failure"
-
 
 class StationSide(Enum):
     """Enumeration of station platform sides."""
@@ -44,12 +88,15 @@ class TrackSegment:
         signal_state: Current signal state for this block.
         is_station: Whether this block is a station.
         station_name: Name of the station if applicable.
-        passengers_waiting: Number of passengers currently waiting at the station if applicable.
+        passengers_waiting: Number of passengers currently waiting at the
+          station if applicable.
         beacon_data: Beacon information for trains entering this block.
+        closed: Whether the block is closed for maintenance.
 
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit:int, grade: float, underground: bool) -> None:
+    def __init__(self, block_id: str, length: int, speed_limit:int, 
+                 grade: float, underground: bool) -> None:
         """Initialize a track segment.
         
         Args:
@@ -61,14 +108,16 @@ class TrackSegment:
         """
         # Basic track properties
         self.block_id = block_id
-        self.length = length
-        self.speed_limit = speed_limit
+        self.length = length            # meters
+        self.speed_limit = speed_limit  # m/s
         self.grade = grade
         self.underground = underground
+        self.closed = False
         
         # Graph connections
-        self.connected_segments: List['TrackSegment'] = []
-        self.previous_segments: List['TrackSegment'] = []
+        self.next_segment: Optional['TrackSegment'] = None
+        self.previous_segment: Optional['TrackSegment'] = None
+        self.network = None
         
         # Track status
         self.occupied = False
@@ -78,11 +127,6 @@ class TrackSegment:
         
         # Signal status
         self.signal_state = SignalState.RED
-        
-        # Station properties
-        self.is_station = False
-        self.station_name = None
-        self.passengers_waiting = 0
         
         # Beacon information
         self.beacon_data = ""
@@ -117,9 +161,10 @@ class TrackSegment:
         Args:
             failure_type: The type of failure to add.
         """
+
         if failure_type not in self.failures:
             self.failures.add(failure_type)
-            self._report_track_failure(failure_type)
+            self._report_track_failure(failure_type, active=True)
 
     def clear_track_failure(self, failure_type: TrackFailureType) -> None:
         """Clear a failure condition.
@@ -129,16 +174,48 @@ class TrackSegment:
         """
         if failure_type in self.failures:
             self.failures.remove(failure_type)
+            self._report_track_failure(failure_type, active=False)
 
-    def _report_track_failure(self, failure_type: TrackFailureType) -> None:
+    def _report_track_failure(self, failure_type: TrackFailureType,
+                              active: bool) -> None:
         """Report failure to necessary modules.
         
         Args:
             failure_type: The type of failure that occurred.
+            active: Whether the failure is currently active (True) or has
+                been repaired (False).
         """
-        #TODO pseudo: log failure event with timestamp
-        # report to track controller
+        if self.network is not None:
+            self.network.add_failure_log_entry(self.block_id, 
+                                               failure_type, active)
+
+        # TODO: report to track controller
         pass
+
+    def get_next_segment(self) -> Optional['TrackSegment']:
+        """Get the next connected track segment.
+        
+        Returns:
+            The next connected TrackSegment, or None if there is no connection.
+        """
+        return self.next_segment
+    
+    def get_previous_segment(self) -> Optional['TrackSegment']:
+        """Get the previous connected track segment.
+        
+        Returns:
+            The previous connected TrackSegment, or None if there 
+                    is no connection.
+        """
+        return self.previous_segment
+
+    def close(self) -> None:
+        """Close the block for maintenance."""
+        self.closed = True
+
+    def open(self) -> None:
+        """Open the block after maintenance."""
+        self.closed = False
         
 class TrackSwitch(TrackSegment):
     """Switch segment that inherits from TrackSegment.
@@ -152,7 +229,8 @@ class TrackSwitch(TrackSegment):
         current_position: Current switch position (0 or 1).
     """
     
-    def __init__(self, block_id: str, length: int, grade: float) -> None:
+    def __init__(self, block_id: str, length: int, speed_limit: int, 
+                 grade: float, underground: bool) -> None:
         """Initialize a track switch.
         
         Args:
@@ -160,7 +238,7 @@ class TrackSwitch(TrackSegment):
             length: Length of the switch in meters.
             grade: Grade percentage (+ is uphill, - is downhill).
         """
-        super().__init__(block_id, length, grade)
+        super().__init__(block_id, length, speed_limit, grade, underground)
         
         # Switch-specific properties
         self.straight_segment: Optional['TrackSegment'] = None
@@ -175,34 +253,29 @@ class TrackSwitch(TrackSegment):
             straight_segment: Segment for straight-through path.
             diverging_segment: Segment for diverging path.
         """
-        #pseudo: self.straight_segment = straight_segment
-        #      self.diverging_segment = diverging_segment
-        pass
+        self.straight_segment = straight_segment
+        self.diverging_segment = diverging_segment
+        self._update_connected_segments()
         
-    def set_switch_position(self, position: int) -> bool:
+    def set_switch_position(self, position: int) -> None:
         """Set switch to specified position.
         
         Args:
             position: Desired switch position (0 = straight, 1 = diverging).
-            
-        Returns:
-            True if switch was successfully set, False otherwise.
         """
-        #pseudo: if position in [0, 1]:
-        #          self.current_position = position
-        #          return True
-        #      else:
-        #          return False
-        pass
+        if position not in [0, 1]:
+            raise ValueError("Invalid switch position. Must be 0 or 1.")
+        self.current_position = position
+        self._update_connected_segments()
         
-    def get_active_segment(self) -> Optional['TrackSegment']:
-        """Get the currently active next segment.
         
-        Returns:
-            The active segment based on current position.
-        """
-        # psedo:  return self.straight_segment if self.current_position == 0 else self.diverging_segment
-        pass
+    def _update_connected_segments(self) -> None:
+        """Update connected segments based on current switch position."""
+        match self.current_position:
+            case 0:
+                self.next_segment = self.straight_segment
+            case 1:
+                self.next_segment = self.diverging_segment
             
     def is_straight(self) -> bool:
         """Check if switch is in straight position.
@@ -210,8 +283,7 @@ class TrackSwitch(TrackSegment):
         Returns:
             True if switch is in straight position (0).
         """
-        #pseudo: return self.current_position == 0
-        pass
+        return self.current_position == 0
         
 class LevelCrossing(TrackSegment):
     """Level crossing segment with road traffic gate control.
@@ -220,10 +292,12 @@ class LevelCrossing(TrackSegment):
     Gate status is automatically tied to track occupancy.
 
     Attributes:
-        gate_status: Whether the crossing gates are closed (True = closed, False = open).
+        gate_status: Whether the crossing gates are closed 
+                (True = closed, False = open).
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit: int, grade: float, underground: bool) -> None:
+    def __init__(self, block_id: str, length: int, speed_limit: int, 
+                 grade: float, underground: bool) -> None:
         """Initialize a level crossing segment.
         
         Args:
@@ -248,17 +322,17 @@ class LevelCrossing(TrackSegment):
         Args:
             occupied: Whether the block is currently occupied.
         """
-        # Call parent method
+
         super().set_occupancy(occupied)
         
-        # Set gate status to match occupancy
         self.gate_status = occupied
 
     def set_gate_status(self, status: bool) -> None:
         """ Update the gate status independantly of the occupaancy.
 
         Args:
-            status: Whether the crossing gates are closed (True = closed, False = open)
+            status: Whether the crossing gates are closed 
+                    (True = closed, False = open)
         """
 
         self.gate_status = status
@@ -278,7 +352,9 @@ class Station(TrackSegment):
         ticket_sales_log: Historical record of ticket sales.
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit: int, grade: float, station_name: str, station_side: StationSide) -> None:
+    def __init__(self, block_id: str, length: int, speed_limit: int,
+                 grade: float, station_name: str,
+                 station_side: StationSide) -> None:
         """Initialize a station.
         
         Args:
@@ -288,10 +364,10 @@ class Station(TrackSegment):
             station_name: Human-readable name of the station.
             station_side: Side(s) of the platform (left, right, both).
         """
-        super().__init__(block_id, length, speed_limit, grade, underground=False)
+        super().__init__(block_id, length, speed_limit, grade,
+                         underground=False)
        
         # Station-specific properties
-        self.is_station = True
         self.station_name = station_name
         self.station_side = station_side
 
@@ -309,63 +385,82 @@ class Station(TrackSegment):
         
         Args:
             count: Number of tickets sold.
-            (If no count argument, randomly generates a number between set range.)
+            (If no count argument, randomly generates a number
+            between set range.)
         """
+        if count is not None and count < 0:
+            raise ValueError("Ticket sale count cannot be negative.")
         if count is None:
             rng = Random()
-            count = rng.randint(self.passenger_rand_range[0], self.passenger_rand_range[1])
+            count = rng.randint(self.passenger_rand_range[0], 
+                                self.passenger_rand_range[1])
         self.tickets_sold_total += count
         self.passengers_waiting += count
         pass
     
-    def passengers_boarding(self, trainID: int, count: int=None) -> None:
-        """Record passengers boarding. Adds to total number, and passes to the Train Model.
+    def passengers_boarding(self, trainID: int=-1, count: int=None) -> None:
+        """Record passengers boarding. Adds to total number, and passes
+        to the Train Model.
         
         Args:
             trainID: ID of the train that is boarding passengers.
             count: Number of passengers to board.
-            (If no count argument, randomly generates a number between set range.)
+            (If no count argument, randomly generates a number
+            between set range.)
         """
+        if count is not None and count > self.passengers_waiting:
+            raise ValueError("Cannot board more passengers than are waiting.")
+        if count is not None and count < 0:
+            raise ValueError("Passenger boarding count cannot be negative.")
         if count is None:
             rng = Random()
-            count = rng.randint(self.passenger_rand_range[0], self.passenger_rand_range[1])
+            if self.passengers_waiting > 0:
+                count = rng.randint(self.passenger_rand_range[0], 
+                                    max(self.passenger_rand_range[0], 
+                                        min(self.passenger_rand_range[1], 
+                                            self.passengers_waiting)))
+            else:
+                count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        # EVENTUAL pseudo: train_model.board_passengers(trainID, count)
+        # TODO: train_model.board_passengers(trainID, count)
         pass
         
     def passengers_exiting(self, count: int) -> None:
-        """Record passengers exiting and add them to the total. Called by the Train Model.
+        """Record passengers exiting and add them to the total.
+        Called by the Train Model.
         
         Args:
             count: Number of passengers exiting the train.
        """
+        if count < 0:
+            raise ValueError("Passenger exit count cannot be negative.")
         self.passengers_exited_total += count
         pass
 
 class TrackNetwork:
-    """Main Track Model class implementing the Model through a graph data structure.
+    """Main Track Model class implementing the Model through a graph
+    data structure.
     
-    Manages the entire railway network including segments, switches, and stations.
+    Manages the entire railway network including segments, switches,
+    and stations.
     Provides interfaces for track layout loading, failure injection, and status
     reporting.
     
     Attributes:
-        segments: Dictionary mapping block IDs to TrackSegment objects.
-        switches: Dictionary mapping switch IDs to TrackSwitch objects.
-        stations: Dictionary mapping station IDs to Station objects.
+        segments: Dictionary of TrackSegment objects.
+        trains: Dictionary of Train objects.
         global_temperature: System-wide environmental temperature.
         heater_threshold: Temperature threshold for heater activation.
         heaters_active: Current status of global track heaters.
+        active_commands: List of currently active train commands.
         failure_log: Historical record of system failures.
     """
     
     def __init__(self) -> None:
         """Initialize an empty track network."""
-        self.segments: Dict[str, TrackSegment] = {}
-        self.switches: Dict[str, TrackSwitch] = {}
-        self.stations: Dict[str, Station] = {}
-        
+        self.segments: Dict[TrackSegment] = {}
+        self.trains: Dict[Train] = {}  # EVENTUAL: import train class from train model
         # System-wide properties
         self.global_temperature = 20       # Celsius
         self.heater_threshold = 0          # Celsius
@@ -373,8 +468,6 @@ class TrackNetwork:
         
         # Command broadcasting system
         self.active_commands: List[TrainCommand] = []
-        self.command_history: List[TrainCommand] = []
-        self.current_command_id = 0
         
         # Logging
         self.failure_log: List[Dict] = []
@@ -385,48 +478,255 @@ class TrackNetwork:
         Args:
             segment: The track segment to add to the network.
         """
-        # TODO pseudo: self.segments[segment.block_id] = segment
+        block_id = segment.block_id
+        if block_id in self.segments:
+            raise ValueError(f"Block ID {block_id} already exists in network.")
+        segment.network = self
+        self.segments[segment.block_id] = segment
         pass
-            
-    def connect_segments(self, seg1_id: str, seg2_id: str, 
-                        bidirectional: bool = True) -> None:
+
+    def connect_segments(self, seg1_block_id: int, seg2_block_id: int,
+                         bidirectional: bool = False,
+                         diverging_seg_block_id: int = None) -> None:
         """Connect two segments in the graph.
         
         Args:
-            seg1_id: ID of the first segment.
-            seg2_id: ID of the second segment.
+            seg1_block_id: ID of the first segment.
+            seg2_block_id: ID of the second segment.
             bidirectional: Whether connection works in both directions.
+            diverging_seg_block_id: ID of diverging segment if connecting
+                a switch.
         """
-        # TODO pseudo: find segments by ID and update connected_segments and previous_segments lists
-        pass
-                
+
+        segment1 = self.segments.get(seg1_block_id)
+        segment2 = self.segments.get(seg2_block_id)
+        diverging_segment = (
+            self.segments.get(diverging_seg_block_id)
+            if diverging_seg_block_id else None
+        )
+
+        if ((segment1 is None and segment2 is not None) or
+                (segment1 is not None and segment2 is None)):
+            raise ValueError(
+                f"One of the segment IDs ({seg1_block_id}, "
+                f"{seg2_block_id}) not found in track network."
+            )
+        if segment1 is None and segment2 is None:
+            raise ValueError("Both segment IDs not found in track network.")
+        
+        if isinstance(segment1, TrackSwitch):
+            if diverging_segment is None:
+                raise ValueError(
+                    "Diverging segment must be provided for switch connections."
+                )
+            segment1.set_switch_paths(segment2, diverging_segment)
+            if bidirectional:
+                segment2.previous_segment = segment1
+                diverging_segment.previous_segment = segment1
+            else:
+                segment2.previous_segment = None
+                diverging_segment.previous_segment = None
+
+
+        else:
+            if diverging_segment is not None:
+                raise ValueError(
+                    "Diverging segment should only be provided when "
+                    "connecting a switch."
+                )
+            segment1.next_segment = segment2
+            if bidirectional:
+                segment2.previous_segment = segment1
+            else:
+                segment2.previous_segment = None
+
+    def _set_connections(self, block_id: int, previous_id: int, next_id: int=None, straight_id: int = None, diverging_id: int = None) -> None:
+        """Set connections between track segments.
+
+        Args:
+            block_id: ID of the segment being manipulated.
+            previous_id: ID of the previous segment.
+            next_id: ID of the next segment.
+            straight_id: ID of the straight segment (if applicable).
+            diverging_id: ID of the diverging segment (if applicable).
+        """
+        manipulated_segment = self.segments.get(block_id)
+        if manipulated_segment is None:
+            raise ValueError(f"Block ID {block_id} not found when setting connections.")
+            
+        previous_segment = self.segments.get(previous_id) if previous_id is not None else None
+        next_segment = self.segments.get(next_id) if next_id is not None else None
+        straight_segment = self.segments.get(straight_id) if straight_id is not None else None
+        diverging_segment = self.segments.get(diverging_id) if diverging_id is not None else None
+
+        manipulated_segment.previous_segment = previous_segment
+        if isinstance(manipulated_segment, TrackSwitch):
+            manipulated_segment.straight_segment = straight_segment
+            manipulated_segment.diverging_segment = diverging_segment
+            manipulated_segment._update_connected_segments()
+        else:
+            manipulated_segment.next_segment = next_segment
+
     def load_track_layout(self, layout_file: str) -> None:
         """Load track layout from file.
         
         Args:
             layout_file: Path to the track layout configuration file.
         """
-        #TODO pseudo: parse file and create segments, switches, stations, and connections
-        # connect segments based on file data
+
+        # First pass to create segments
+        with open(layout_file, mode='r') as file:
+            csvFile = csv.DictReader(file)
+            current_line = 0
+            for lines in csvFile:
+                if lines["block_id"] in self.segments:
+                    raise ValueError(
+                        f"Block ID {lines['block_id']} already exists in network."
+                    )
+                if "Type" not in lines or not re.match("^[a-zA-Z]+$", lines["Type"]):
+                    raise ValueError(
+                        f"Invalid 'Type' field in layout file at row {current_line}. "
+                    )
+                if "block_id" not in lines or not re.match("^[0-9]+$", lines["block_id"]):
+                  raise ValueError(
+                        f"Invalid 'block_id' field in layout file at row {current_line}. "
+                        )
+                if "length" not in lines or not re.match("^[0-9]+$", lines["length"]):
+                    raise ValueError(
+                        f"Invalid 'length' field in layout file at row {current_line}. "
+                    )
+                if "speed_limit" not in lines or not re.match("^[0-9]+$", lines["speed_limit"]):
+                    raise ValueError(
+                        f"Invalid 'speed_limit' field in layout file at row {current_line}. "
+                    )
+                if "grade" not in lines or not re.match("^[0-9.-]+$", lines["grade"]):
+                    raise ValueError(
+                        f"Invalid 'grade' field in layout file at row {current_line}. "
+                    )
+                if "underground" not in lines or not re.match("^(TRUE|FALSE|true|false)$", lines["underground"]):
+                    raise ValueError(
+                        f"Invalid 'underground' field in layout file at row {current_line}. "
+                    )
+
+                match lines["Type"]:
+                    case "TrackSegment":
+                        segment = TrackSegment(
+                            block_id=int(lines["block_id"]),
+                            length=int(lines["length"]),
+                            speed_limit=int(lines["speed_limit"]),
+                            grade=float(lines["grade"]),
+                            underground=lines["underground"].lower() == "true"
+                        )
+                        self.add_segment(segment)
+                    case "TrackSwitch":
+                        switch = TrackSwitch(
+                            block_id=int(lines["block_id"]),
+                            length=int(lines["length"]),
+                            speed_limit=int(lines["speed_limit"]),
+                            grade=float(lines["grade"]),
+                            underground=lines["underground"].lower() == "true"
+                        )
+                        self.add_segment(switch)
+                    case "LevelCrossing":
+                        crossing = LevelCrossing(
+                            block_id=int(lines["block_id"]),
+                            length=int(lines["length"]),
+                            speed_limit=int(lines["speed_limit"]),
+                            grade=float(lines["grade"]),
+                            underground=lines["underground"].lower() == "true"
+                        )
+                        self.add_segment(crossing)
+                    case "Station":
+                        if "station_name" not in lines or not re.match("^[a-zA-Z0-9 _-]+$", lines["station_name"]):
+                            raise ValueError(
+                                f"Invalid 'station_name' field in layout file at row {current_line}. "
+                            )
+                        if "station_side" not in lines or not re.match("^(left|right|both)$", lines["station_side"], re.IGNORECASE):
+                            raise ValueError(
+                                f"Invalid 'station_side' field in layout file at row {current_line}. "
+                            )
+                        station = Station(
+                            block_id=int(lines["block_id"]),
+                            length=int(lines["length"]),
+                            speed_limit=int(lines["speed_limit"]),
+                            grade=float(lines["grade"]),
+                            station_name=lines["station_name"],
+                            station_side=StationSide(lines["station_side"].lower())
+                        )
+                        self.add_segment(station)
+                    case _:
+                        raise ValueError(f"Unknown segment type {lines['Type']} at row {current_line}.")
+                current_line += 1
+
+        # Second pass to set connections
+        current_line = 0
+        with open(layout_file, mode='r') as file:
+            csvFile = csv.DictReader(file)
+            for lines in csvFile:
+                if lines["previous_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["previous_segment"]):
+                    raise ValueError(
+                        f"Invalid 'previous_segment' field in layout file at row {current_line}. "
+                    )
+                if lines["next_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["next_segment"]):
+                    raise ValueError(
+                        f"Invalid 'next_segment' field in layout file at row {current_line}. "
+                    )
+                if lines["straight_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["straight_segment"]):
+                    raise ValueError(
+                        f"Invalid 'straight_segment' field in layout file at row {current_line}. "
+                    )
+                if lines["diverging_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["diverging_segment"]):
+                    raise ValueError(
+                        f"Invalid 'diverging_segment' field in layout file at row {current_line}. "
+                    )
+                match lines["Type"]:
+                    case "TrackSegment" | "LevelCrossing" | "Station":
+                        self._set_connections(
+                            int(lines["block_id"]), 
+                            int(lines["previous_segment"]) if lines["previous_segment"] else None, 
+                            int(lines["next_segment"]) if lines["next_segment"] else None, 
+                            None, 
+                            None
+                        )
+                    case "TrackSwitch":
+                        self._set_connections(
+                            int(lines["block_id"]), 
+                            int(lines["previous_segment"]) if lines["previous_segment"] else None, 
+                            None, 
+                            int(lines["straight_segment"]) if lines["straight_segment"] else None, 
+                            int(lines["diverging_segment"]) if lines["diverging_segment"] else None
+                        )
+                    case _:
+                        raise ValueError(f"Unknown segment type {lines['Type']} at row {current_line}.")
+                current_line += 1
         pass
-        
+
     def set_global_temperature(self, temperature: int) -> None:
         """Set environmental temperature (Murphy interface).
         
         Args:
             temperature: New global temperature in Celsius.
         """
-        # TODO pseudo: self.global_temperature = temperature
-        #self._manage_heaters()
+        self.global_temperature = temperature
+        self._manage_heaters()
         pass
         
+    def set_heater_threshold(self, threshold: int) -> None:
+        """Set temperature threshold for heater activation.
+
+        Args:
+            threshold: Temperature in Celsius below which heaters activate.
+        """
+        self.heater_threshold = threshold
+        self._manage_heaters()
+        pass
+
     def _manage_heaters(self) -> None:
         """Automatically manage track heaters based on global temperature."""
-        # TODO pseudo: if self.global_temperature < self.heater_threshold:
-        #          self.heaters_active = True
-        #      else:
-        #          self.heaters_active = False
-        pass
+        if self.global_temperature < self.heater_threshold:
+            self.heaters_active = True
+        else:
+            self.heaters_active = False
                         
     def get_heater_status(self) -> bool:
         """Get current status of global track heaters.
@@ -436,18 +736,8 @@ class TrackNetwork:
         """
         return self.heaters_active
  
-    def set_heater_threshold(self, threshold: int) -> None:
-        """Set temperature threshold for heater activation.
-        
-        Args:
-            threshold: Temperature in Celsius below which heaters activate.
-        """
-        self.heater_threshold = threshold
-        self._manage_heaters()
-        pass
-        
-    def broadcast_train_command(self, train_id: int, commanded_speed: int, 
-                               authority: int) -> None:
+    def broadcast_train_command(self, train_id: int, commanded_speed: int=None, 
+                               authority: int=None) -> None:
         """Broadcast a command to a specific train through all track segments.
         
         Args:
@@ -455,71 +745,381 @@ class TrackNetwork:
             commanded_speed: Speed command for the train in m/s.
             authority: Movement authority for the train in meters.
         """
-        # search for existing command to update
-        # if found, update commanded_speed and authority
-        # else
-        # create TrainCommand object
-        # add to active_commands and command_history
-        pass
-        
+        # search for existing command with matching train_id to update
+        found = False
+        for cmd in self.active_commands:
+            if cmd.train_id == train_id:
+                found = True
+                if commanded_speed is not None:
+                    cmd.commanded_speed = commanded_speed
+                if authority is not None:
+                    cmd.authority = authority
+                break
+        # if no existing command, create a new one
+        if not found:
+            if commanded_speed is None or authority is None:
+                raise ValueError(
+                    "New commands must specify both commanded_speed "
+                    "and authority."
+                )
+            new_command = TrainCommand(
+                train_id=train_id,
+                commanded_speed=commanded_speed,
+                authority=authority
+            )
+            self.active_commands.append(new_command)
+
     def get_active_commands(self) -> List[TrainCommand]:
         """Get all currently active train commands.
         
         Returns:
             List of active command packets that trains can receive.
         """
-        # TODO pseudo: return copy of active_commands
-        pass
+        return self.active_commands
         
-    def get_commands_for_train(self, train_id: int) -> List[TrainCommand]:
-        """Get all active commands for a specific train.
+    def get_command_for_train(self, train_id: int) -> List[TrainCommand]:
+        """Get the active command for a specific train.
         
         Args:
             train_id: ID of the train to get commands for.
             
         Returns:
-            List of command packets intended for the specified train.
+            Current command for the specified train, or None if no
+            command exists.
         """
-        # TODOpseudo: filter active_commands for train_id
-        pass
+        for cmd in self.active_commands:
+            if cmd.train_id == train_id:
+                return cmd
+        return None
         
     def clear_train_commands(self, train_id: int) -> None:
-        """Clear all active commands for a specific train.
+        """Clear active command for a specific train.
         
         Args:
             train_id: ID of the train to clear commands for.
         """
-        # TODO pseudo: remove commands from active_commands for train_id
-        pass
-            
-    def inject_track_failure(self, block_id: int, failure_type: TrackFailureType) -> None:
-        """Inject failure for testing (Murphy interface).
         
+        self.active_commands = [
+            cmd for cmd in self.active_commands
+            if cmd.train_id != train_id
+        ]
+        pass
+    
+    def set_occupancy(self, block_id: int, occupied: bool) -> None:
+        """Set occupancy status for a specific block.
+        
+        Args:
+            block_id: ID of the block to set occupancy for.
+            occupied: Whether the block is currently occupied.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.set_occupancy(occupied)
+        pass
+    
+    def set_signal_state(self, block_id: int,
+                         signal_state: SignalState) -> None:
+        """Set the signal state for a specific block.
+        
+        Args:
+            block_id: ID of the block to set signal for.
+            signal_state: The new signal state to set.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.set_signal_state(signal_state)
+        pass
+
+    def set_beacon_data(self, block_id: int, beacon_data: str) -> None:
+        """Set beacon data for a specific block.
+        
+        Args:
+            block_id: ID of the block to set beacon data for.
+            beacon_data: The beacon information to set.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.set_beacon_data(beacon_data)
+        pass
+
+    def set_track_failure(self, block_id: int,
+                          failure_type: TrackFailureType) -> None:
+        """Inject failure for testing (Murphy interface).
+
         Args:
             block_id: ID of the block to inject failure into.
             failure_type: Type of failure to inject.
         """
-        # TODO pseudo: find segment by block_id and call set_track_failure
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.set_track_failure(failure_type)
         pass
-            
-    def get_network_status(self) -> Dict[str, Any]:
-        """Get complete network status for Track Builder display.
+
+    def clear_track_failure(self, block_id: int,
+                            failure_type: TrackFailureType) -> None:
+        """Repair a specific failure on a block.
+        
+        Args:
+            block_id: ID of the block to repair.
+            failure_type: Type of failure to repair.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.clear_track_failure(failure_type)
+        pass
+    
+    def add_failure_log_entry(self, block_id: int,
+                              failure_type: TrackFailureType,
+                              active: bool) -> None:
+        """Add an entry to the failure log.
+        
+        Args:
+            block_id: ID of the block where the failure occurred.
+            failure_type: Type of failure that occurred.
+            active: Whether the failure is currently active (True) or has
+                been repaired (False).
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "block_id": block_id,
+            "failure_type": failure_type,
+            "active": active
+        }
+        self.failure_log.append(entry)
+
+    def get_failure_log(self) -> List[Dict[str, Any]]:
+        """Get the complete failure log.
         
         Returns:
-            Dictionary containing comprehensive network status information.
+            List of failure log entries.
         """
-        # TODO pseudo: iterate over all segments and compile status into a dictionary
-        pass
+        return self.failure_log
+    
+    def get_next_segment(self, block_id: int) -> Optional[TrackSegment]:
+        """Get the next connected segment for a specific block.
         
-    def _get_segment_status(self, segment: TrackSegment) -> Dict[str, Any]:
+        Args:
+            block_id: ID of the block to get the next segment for.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        return segment.next_segment
+    
+    def get_previous_segment(self, block_id: int) -> Optional[TrackSegment]:
+        """Get the previous connected segment for a specific block.
+        
+        Args:
+            block_id: ID of the block to get the previous segment for.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        return segment.previous_segment
+
+    def close_block(self, block_id: int) -> None:
+        """Close a specific block for maintenance.
+        
+        Args:
+            block_id: ID of the block to close.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.close()
+        pass
+
+    def open_block(self, block_id: int) -> None:
+        """Open a specific block after maintenance.
+        
+        Args:
+            block_id: ID of the block to open.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.open()
+        pass
+
+    def sell_tickets(self, block_id : int, count: int=None) -> None:
+        """Sell tickets at a specific station.
+        
+        Args:
+            block_id: ID of the station block to sell tickets at.
+            count: Number of tickets to sell.
+            (If no count argument, randomly generates a number
+            between set range.)
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, Station):
+            raise ValueError(f"Block ID {block_id} is not a station.")
+        segment.sell_tickets(count)
+        pass
+
+    def passengers_boarding(self, block_id: int, trainID: int=-1, count: int=None) -> None:
+        """Record passengers boarding at a specific station.
+        
+        Args:
+            block_id: ID of the station block where passengers are boarding.
+            trainID: ID of the train that is boarding passengers.
+            count: Number of passengers to board.
+            (If no count argument, randomly generates a number
+            between set range.)
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, Station):
+            raise ValueError(f"Block ID {block_id} is not a station.")
+        segment.passengers_boarding(trainID, count)
+        # TODO: remove -1 count when train model is integrated
+        pass
+
+    def passengers_exiting(self, block_id: int, count: int) -> None:
+        """Record passengers exiting at a specific station.
+        
+        Args:
+            block_id: ID of the station block where passengers are exiting.
+            count: Number of passengers exiting the train.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, Station):
+            raise ValueError(f"Block ID {block_id} is not a station.")
+        segment.passengers_exiting(count)
+        pass
+
+    
+    def set_switch_position(self, block_id: int, position: int) -> None:
+        """Set the position of a specific track switch.
+        
+        Args:
+            block_id: ID of the switch block to set position for.
+            position: Desired switch position (0 = straight, 1 = diverging).
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, TrackSwitch):
+            raise ValueError(f"Block ID {block_id} is not a switch.")
+        segment.set_switch_position(position)
+        pass
+    
+    def set_signal_state(self, block_id: int,
+                         signal_state: SignalState) -> None:
+        """Set the signal state for a specific block.
+        Args:
+            block_id: ID of the block to set signal for.
+            signal_state: The new signal state to set.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.set_signal_state(signal_state)
+        pass
+
+    def set_occupancy(self, block_id: int, occupied: bool) -> None:
+        """Set occupancy status for a specific block.
+        
+        Args:
+            block_id: ID of the block to set occupancy for.
+            occupied: Whether the block is currently occupied.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.set_occupancy(occupied)
+        pass
+
+    def get_segment_status(self, block_id: int) -> Dict[str, Any]:
         """Get status information for a single segment.
         
         Args:
-            segment: The track segment to get status for.
-            
+            block_id: The ID of the track segment to get status for.
         Returns:
             Dictionary containing segment status information.
         """
-        # TODO pseudo: compile segment properties into a dictionary
-        pass
-            
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        
+        segment_status = {
+            "block_id": segment.block_id,
+            "type": type(segment).__name__,
+            "length": segment.length,
+            "speed_limit": segment.speed_limit,
+            "grade": segment.grade,
+            "underground": segment.underground,
+            "occupied": segment.occupied,
+            "signal_state": segment.signal_state,
+            "failures": list(segment.failures),
+            "beacon_data": segment.beacon_data,
+            "closed": segment.closed,
+            "next_segment": (
+                segment.next_segment.block_id
+                if segment.next_segment else None
+            ),
+            "previous_segment": (
+                segment.previous_segment.block_id
+                if segment.previous_segment else None
+            ),
+        }
+
+        if isinstance(segment, LevelCrossing):
+            segment_status["gate_status"] = segment.gate_status
+
+        if isinstance(segment, Station):
+            segment_status["station_name"] = segment.station_name
+            segment_status["station_side"] = segment.station_side
+            segment_status["passengers_waiting"] = segment.passengers_waiting
+            segment_status["passengers_boarded_total"] = (
+                segment.passengers_boarded_total
+            )
+            segment_status["passengers_exited_total"] = (
+                segment.passengers_exited_total
+            )
+            segment_status["tickets_sold_total"] = segment.tickets_sold_total
+        
+        if isinstance(segment, TrackSwitch):
+            segment_status["current_position"] = segment.current_position
+            segment_status["straight_segment"] = (
+                segment.straight_segment.block_id
+                if segment.straight_segment else None
+            )
+            segment_status["diverging_segment"] = (
+                segment.diverging_segment.block_id
+                if segment.diverging_segment else None
+            )
+
+        return segment_status
+    
+    def get_network_status(self) -> Dict[str, Any]:
+        """Get complete network status.
+
+        Returns:
+            Dictionary containing comprehensive network status information.
+        """
+        network_status = {
+            "segments": {
+                block_id: self.get_segment_status(block_id)
+                for block_id in self.segments
+            },
+            "global_temperature": self.global_temperature,
+            "heater_threshold": self.heater_threshold,
+            "heaters_active": self.heaters_active,
+            "active_commands": self.get_active_commands(),
+            "failure_log": self.get_failure_log()
+        }
+        return network_status

@@ -54,3 +54,13 @@ class ConversionFunctions:
     def fahrenheit_to_celsius(fahrenheit):
         return (fahrenheit - 32) * 5/9  # conversion formula
     
+    @staticmethod
+    def meters_to_yards(meters):
+        """Convert meters to yards."""
+        return meters * 1.0936132983377078
+
+    @staticmethod
+    def yards_to_meters(yards):
+        """Convert yards to meters."""
+        return yards / 1.0936132983377078
+    

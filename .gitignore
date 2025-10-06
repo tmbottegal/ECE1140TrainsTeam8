@@ -5,3 +5,5 @@ universal/__pycache__/universal.cpython-312.pyc
 universal/__pycache__/universal_test.cpython-312-pytest-8.4.2.pyc
 trackModel/__pycache__/track_model_test.cpython-312-pytest-8.4.2.pyc
 .vscode/
+__pycache__/
+*.pyc

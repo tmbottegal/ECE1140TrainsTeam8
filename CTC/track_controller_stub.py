@@ -139,6 +139,10 @@ class TrackControllerStub:
         if block_key in self._closed_by_maintenance:
             self._closed_by_maintenance[block_key] = bool(closed)
             self._recompute_occupancy()
+            self._recompute_signals()
+            self._recompute_crossings()
+            self.broadcast()  # optional, but makes the UI update instantly
+
 
     def set_switch(self, switch_id: str, position: str) -> None:
         if switch_id:
@@ -148,9 +152,16 @@ class TrackControllerStub:
     def unlock_switches(self) -> None:
         self._manual_switch_lock = False
 
+    # track_controller_stub.py  (inside TrackControllerStub)
     def set_broken_rail(self, block_key: str, broken: bool) -> None:
         if block_key in self._broken_rail:
             self._broken_rail[block_key] = bool(broken)
+            # refresh everything so signals/occupancy reflect the fault
+            self._recompute_occupancy()
+            self._recompute_signals()
+            self._recompute_crossings()
+            self.broadcast()   # instant UI update (optional but nice)
+
 
         # change your add_train to accept a branch and store it
     def add_train(self, tid: str, start_block: str, desired_branch: str = "B"):

@@ -59,9 +59,12 @@ class TrackState:
             self._by_key[key] = b
 
     # ----- UI -> backend (forward to stub) -----
-    def set_status(self, bid: str, new_status: str):
-        if self._stub:
-            self._stub.set_block_maintenance(bid, new_status == "closed")
+    # inside TrackState
+    def set_status(self, block_id: str, status: str) -> None:
+        # Only toggle the maintenance closure; do NOT touch the static track_status
+        is_closed = (str(status).lower() == "closed")
+        self._stub.set_block_maintenance(block_id, is_closed)
+
 
     def set_suggested_speed(self, tid: str, mps: float):
         if self._stub:

@@ -22,7 +22,12 @@ from track_model_backend import (
 )
 from typing import List, Dict, Optional
 import sys
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QTextEdit, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QLineEdit, QHBoxLayout, QComboBox, QCheckBox
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QTextEdit, 
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem, 
+    QHeaderView, QTabWidget, QLineEdit, QHBoxLayout, 
+    QComboBox, QCheckBox
+)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
@@ -97,7 +102,8 @@ class NetworkStatusUI(QWidget):
         
         self.command_input = QLineEdit()
         self.command_input.setFont(QFont("Courier", 9))
-        self.command_input.setPlaceholderText("Enter backend command (e.g., set_global_temperature(25.0))")
+        self.command_input.setPlaceholderText(
+            "Enter backend command (e.g., set_global_temperature(25.0))")
         self.command_input.returnPressed.connect(self.execute_command)
         input_layout.addWidget(self.command_input)
         
@@ -206,7 +212,8 @@ class NetworkStatusUI(QWidget):
         try:
             # Load track layout with proper path
             csv_path = os.path.join(os.path.dirname(__file__), "blue_line.csv")
-            self.status_display.append(f"Loading track layout from {csv_path}...")
+            self.status_display.append(
+                f"Loading track layout from {csv_path}...")
             self.track_network.load_track_layout(csv_path)
             self.status_display.append("Track layout loaded successfully!\n")
             
@@ -257,13 +264,16 @@ class NetworkStatusUI(QWidget):
             if 'global_temperature' in network_status:
                 # Convert temperature from Celsius to Fahrenheit
                 temp_celsius = network_status['global_temperature']
-                temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(temp_celsius)
+                temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
+                    temp_celsius)
                 track_info['Global Temperature (°F)'] = f"{temp_fahrenheit:.1f}"
             if 'heater_threshold' in network_status:
                 # Convert threshold temperature from Celsius to Fahrenheit
                 threshold_celsius = network_status['heater_threshold']
-                threshold_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(threshold_celsius)
-                track_info['Heater Threshold (°F)'] = f"{threshold_fahrenheit:.1f}"
+                threshold_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
+                    threshold_celsius)
+                track_info['Heater Threshold (°F)'] = (
+                    f"{threshold_fahrenheit:.1f}")
             if 'heaters_active' in network_status:
                 track_info['Heaters Active'] = network_status['heaters_active']
             self.populate_track_info_table(track_info)
@@ -288,7 +298,8 @@ class NetworkStatusUI(QWidget):
             self.segment_table.setRowCount(1)
             self.segment_table.setColumnCount(1)
             self.segment_table.setHorizontalHeaderLabels(["Network Status"])
-            self.segment_table.setItem(0, 0, QTableWidgetItem(str(network_status)))
+            self.segment_table.setItem(
+                0, 0, QTableWidgetItem(str(network_status)))
     
     def clear_all_tables(self):
         """Clear all tables"""
@@ -299,26 +310,36 @@ class NetworkStatusUI(QWidget):
         self.failure_table.clear()
         self.station_table.clear()
     
-    def populate_dict_as_table(self, table_widget, data_dict, id_column_name="ID", details_column_name="Details"):
-        """Helper function to populate a table with dictionary data, handling nested structures"""
+    def populate_dict_as_table(self, table_widget, data_dict, 
+                               id_column_name="ID", 
+                               details_column_name="Details"):
+        """Helper function to populate a table with dictionary data.
+        
+        Handles nested structures for display.
+        """
         if not data_dict:
             return
         
         # Define attributes to exclude from Segment Info
         excluded_segment_attributes = {
             'diverging_segment', 'failures', 'gate_status', 
-            'passengers_boarded_total', 'passengers_exited_total', 'passengers_waiting', 
-            'station_side', 'straight_segment', 'tickets_sold_total', 'station_name'
+            'passengers_boarded_total', 'passengers_exited_total', 
+            'passengers_waiting', 'station_side', 'straight_segment', 
+            'tickets_sold_total', 'station_name'
         }
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'closed', 'signal_state', 'speed_limit', 
-            'length', 'grade', 'underground', 'previous_segment', 'next_segment', 'current_position', 'beacon_data',
+            'block_id', 'type', 'occupied', 'closed', 'signal_state', 
+            'speed_limit', 'length', 'grade', 'underground', 
+            'previous_segment', 'next_segment', 'current_position', 
+            'beacon_data',
         ]
         
-        # Check if this is being called for segments (based on table widget or column name)
-        is_segment_table = (table_widget == self.segment_table) or ("Segment" in id_column_name)
+        # Check if this is being called for segments (based on table widget 
+        # or column name)
+        is_segment_table = ((table_widget == self.segment_table) or 
+                           ("Segment" in id_column_name))
         
         # Count total rows needed (including nested dict items)
         total_rows = 0
@@ -337,7 +358,8 @@ class NetworkStatusUI(QWidget):
             if isinstance(value, dict):
                 for sub_key in value.keys():
                     # Filter out excluded attributes for segment tables
-                    if not (is_segment_table and sub_key in excluded_segment_attributes):
+                    if not (is_segment_table and 
+                           sub_key in excluded_segment_attributes):
                         all_keys.add(sub_key)
         
         if all_keys:
@@ -364,91 +386,106 @@ class NetworkStatusUI(QWidget):
             row = 0
             for key, value in data_dict.items():
                 if isinstance(value, dict):
-                    table_widget.setRowCount(max(table_widget.rowCount(), row + 1))
+                    table_widget.setRowCount(
+                        max(table_widget.rowCount(), row + 1))
                     
                     if is_segment_table:
                         # For segments, don't add ID column
                         for col_idx, col_name in enumerate(columns):
                             if col_name in value:
-                                # Apply unit conversions and formatting for segment display
+                                # Apply unit conversions and formatting 
+                                # for segment display
                                 cell_value = value[col_name]
                                 item = None
                                 
-                                if col_name == 'length' and isinstance(cell_value, (int, float)):
+                                if (col_name == 'length' and 
+                                        isinstance(cell_value, (int, float))):
                                     # Convert length from meters to yards
-                                    yards_value = ConversionFunctions.meters_to_yards(cell_value)
+                                    yards_value = (
+                                        ConversionFunctions.meters_to_yards(
+                                            cell_value))
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
-                                elif col_name == 'speed_limit' and isinstance(cell_value, (int, float)):
+                                elif (col_name == 'speed_limit' and 
+                                      isinstance(cell_value, (int, float))):
                                     # Convert speed from m/s to mph
-                                    mph_value = ConversionFunctions.mps_to_mph(cell_value)
+                                    mph_value = ConversionFunctions.mps_to_mph(
+                                        cell_value)
                                     display_value = f"{mph_value:.1f} mph"
                                     item = QTableWidgetItem(display_value)
                                 elif col_name == 'signal_state':
-                                    # Convert signal state to user-friendly display with colors
+                                    # Convert signal state to user-friendly 
+                                    # display with colors
                                     if hasattr(cell_value, 'name'):
                                         signal_name = cell_value.name
                                     else:
                                         signal_name = str(cell_value)
                                     
-                                    # Map signal states to user-friendly names and colors
-                                    if signal_name == 'RED' or str(cell_value) == 'SignalState.RED':
+                                    # Map signal states to user-friendly names
+                                    # and colors
+                                    if (signal_name == 'RED' or 
+                                            str(cell_value) == 'SignalState.RED'):
                                         display_value = "🔴 Red"
-                                        color = QColor(255, 200, 200)  # Light red background
-                                    elif signal_name == 'YELLOW' or str(cell_value) == 'SignalState.YELLOW':
+                                        color = QColor(255, 200, 200)
+                                    elif (signal_name == 'YELLOW' or 
+                                          str(cell_value) == 'SignalState.YELLOW'):
                                         display_value = "🟡 Yellow"
-                                        color = QColor(255, 255, 200)  # Light yellow background
-                                    elif signal_name == 'GREEN' or str(cell_value) == 'SignalState.GREEN':
+                                        color = QColor(255, 255, 200)
+                                    elif (signal_name == 'GREEN' or 
+                                          str(cell_value) == 'SignalState.GREEN'):
                                         display_value = "🟢 Green"
-                                        color = QColor(200, 255, 200)  # Light green background
-                                    elif signal_name == 'SUPERGREEN' or str(cell_value) == 'SignalState.SUPERGREEN':
+                                        color = QColor(200, 255, 200)
+                                    elif (signal_name == 'SUPERGREEN' or 
+                                          str(cell_value) == 
+                                          'SignalState.SUPERGREEN'):
                                         display_value = "🟢 Super Green"
-                                        color = QColor(150, 255, 150)  # Brighter green background
+                                        color = QColor(150, 255, 150)
                                     else:
                                         display_value = str(cell_value)
-                                        color = QColor(240, 240, 240)  # Light gray background
+                                        color = QColor(240, 240, 240)
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
                                 elif col_name == 'occupied':
-                                    # Convert occupied status to user-friendly display with colors
+                                    # Convert occupied status to user-friendly 
+                                    # display with colors
                                     if isinstance(cell_value, bool):
                                         if cell_value:  # True = occupied
                                             display_value = "🟢 Occupied"
-                                            color = QColor(200, 255, 200)  # Light green background
+                                            color = QColor(200, 255, 200)
                                         else:  # False = unoccupied
                                             display_value = "🔴 Unoccupied"
-                                            color = QColor(255, 200, 200)  # Light red background
+                                            color = QColor(255, 200, 200)
                                     else:
                                         # Handle string representations
                                         str_value = str(cell_value).lower()
                                         if str_value in ['true', '1', 'occupied']:
                                             display_value = "🟢 Occupied"
-                                            color = QColor(200, 255, 200)  # Light green background
+                                            color = QColor(200, 255, 200)
                                         else:
                                             display_value = "🔴 Unoccupied"
-                                            color = QColor(255, 200, 200)  # Light red background
+                                            color = QColor(255, 200, 200)
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
                                 elif col_name == 'closed':
-                                    # Convert closed status to user-friendly display with colors
+                                    # Convert closed status to display with colors
                                     if isinstance(cell_value, bool):
                                         if cell_value:  # True = closed
                                             display_value = "🔴 Closed"
-                                            color = QColor(255, 200, 200)  # Red background
+                                            color = QColor(255, 200, 200)
                                         else:  # False = open
                                             display_value = "🟢 Open"
-                                            color = QColor(230, 255, 230)  # Very light green background
+                                            color = QColor(230, 255, 230)
                                     else:
                                         # Handle string representations
                                         str_value = str(cell_value).lower()
                                         if str_value in ['true', '1', 'closed']:
                                             display_value = "🔴 Closed"
-                                            color = QColor(255, 200, 200)  # Red background
+                                            color = QColor(255, 200, 200)
                                         else:
                                             display_value = "🟢 Open"
-                                            color = QColor(230, 255, 230)  # Very light green background
+                                            color = QColor(230, 255, 230)
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
@@ -458,26 +495,37 @@ class NetworkStatusUI(QWidget):
                                 
                                 table_widget.setItem(row, col_idx, item)
                             else:
-                                table_widget.setItem(row, col_idx, QTableWidgetItem(""))
+                                table_widget.setItem(
+                                    row, col_idx, QTableWidgetItem("")
+                                )
                     else:
                         # For other tables, add ID column
                         table_widget.setItem(row, 0, QTableWidgetItem(str(key)))
                         for col_idx, col_name in enumerate(columns[1:], 1):
                             if col_name in value:
-                                table_widget.setItem(row, col_idx, QTableWidgetItem(str(value[col_name])))
+                                table_widget.setItem(
+                                    row, col_idx, 
+                                    QTableWidgetItem(str(value[col_name]))
+                                )
                             else:
-                                table_widget.setItem(row, col_idx, QTableWidgetItem(""))
+                                table_widget.setItem(
+                                    row, col_idx, QTableWidgetItem("")
+                                )
                     row += 1
                 else:
                     # Simple key-value pair
-                    table_widget.setRowCount(max(table_widget.rowCount(), row + 1))
+                    table_widget.setRowCount(
+                        max(table_widget.rowCount(), row + 1)
+                    )
                     table_widget.setItem(row, 0, QTableWidgetItem(str(key)))
                     table_widget.setItem(row, 1, QTableWidgetItem(str(value)))
                     row += 1
         else:
             # Simple key-value structure
             table_widget.setColumnCount(2)
-            table_widget.setHorizontalHeaderLabels([id_column_name, details_column_name])
+            table_widget.setHorizontalHeaderLabels(
+                [id_column_name, details_column_name]
+            )
             table_widget.setRowCount(len(data_dict))
             
             row = 0
@@ -494,7 +542,9 @@ class NetworkStatusUI(QWidget):
             return
             
         if isinstance(segments_data, dict):
-            self.populate_dict_as_table(self.segment_table, segments_data, "Segment ID", "Properties")
+            self.populate_dict_as_table(
+                self.segment_table, segments_data, "Segment ID", "Properties"
+            )
             # Hide row numbers for segment table
             self.segment_table.verticalHeader().setVisible(False)
         else:
@@ -502,7 +552,9 @@ class NetworkStatusUI(QWidget):
             self.segment_table.setRowCount(1)
             self.segment_table.setColumnCount(1)
             self.segment_table.setHorizontalHeaderLabels(["Segments"])
-            self.segment_table.setItem(0, 0, QTableWidgetItem(str(segments_data)))
+            self.segment_table.setItem(
+                0, 0, QTableWidgetItem(str(segments_data))
+            )
             # Hide row numbers for segment table
             self.segment_table.verticalHeader().setVisible(False)
     
@@ -525,7 +577,9 @@ class NetworkStatusUI(QWidget):
         for key, value in track_info.items():
             # Create property cell (read-only)
             property_item = QTableWidgetItem(str(key))
-            property_item.setFlags(property_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            property_item.setFlags(
+                property_item.flags() & ~Qt.ItemFlag.ItemIsEditable
+            )
             self.track_info_table.setItem(row, 0, property_item)
             
             # Create value cell
@@ -811,8 +865,22 @@ class NetworkStatusUI(QWidget):
                 for row, (cmd_id, cmd_obj) in enumerate(commands_data.items()):
                     self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_id)))
                     self.command_table.setItem(row, 1, QTableWidgetItem(str(cmd_obj.train_id)))
-                    self.command_table.setItem(row, 2, QTableWidgetItem(str(cmd_obj.commanded_speed)))
-                    self.command_table.setItem(row, 3, QTableWidgetItem(str(cmd_obj.authority)))
+                    
+                    # Convert commanded speed from m/s to mph
+                    if isinstance(cmd_obj.commanded_speed, (int, float)):
+                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
+                        speed_display = f"{mph_value:.1f} mph"
+                    else:
+                        speed_display = str(cmd_obj.commanded_speed)
+                    self.command_table.setItem(row, 2, QTableWidgetItem(speed_display))
+                    
+                    # Convert authority from m to yds
+                    if isinstance(cmd_obj.authority, (int, float)):
+                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
+                        authority_display = f"{yards_value:.2f} yds"
+                    else:
+                        authority_display = str(cmd_obj.authority)
+                    self.command_table.setItem(row, 3, QTableWidgetItem(authority_display))
             else:
                 # Handle nested dictionaries or simple key-value pairs
                 has_nested_dicts = any(isinstance(v, dict) for v in commands_data.values())
@@ -838,8 +906,22 @@ class NetworkStatusUI(QWidget):
                 
                 for row, cmd_obj in enumerate(commands_data):
                     self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_obj.train_id)))
-                    self.command_table.setItem(row, 1, QTableWidgetItem(str(cmd_obj.commanded_speed)))
-                    self.command_table.setItem(row, 2, QTableWidgetItem(str(cmd_obj.authority)))
+                    
+                    # Convert commanded speed from m/s to mph
+                    if isinstance(cmd_obj.commanded_speed, (int, float)):
+                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
+                        speed_display = f"{mph_value:.1f} mph"
+                    else:
+                        speed_display = str(cmd_obj.commanded_speed)
+                    self.command_table.setItem(row, 1, QTableWidgetItem(speed_display))
+                    
+                    # Convert authority from m to yds
+                    if isinstance(cmd_obj.authority, (int, float)):
+                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
+                        authority_display = f"{yards_value:.2f} yds"
+                    else:
+                        authority_display = str(cmd_obj.authority)
+                    self.command_table.setItem(row, 2, QTableWidgetItem(authority_display))
             elif commands_data and isinstance(commands_data[0], dict):
                 # Convert list to dict format for better table display
                 dict_data = {f"Command_{i}": cmd for i, cmd in enumerate(commands_data)}

@@ -23,7 +23,12 @@ from track_model_backend import (
 )
 from typing import List, Dict, Optional
 import sys
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QTextEdit, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QLineEdit, QHBoxLayout, QComboBox, QCheckBox
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QTextEdit, 
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem, 
+    QHeaderView, QTabWidget, QLineEdit, QHBoxLayout, 
+    QComboBox, QCheckBox
+)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
@@ -71,7 +76,8 @@ class NetworkStatusUI(QWidget):
         self.station_table = QTableWidget()
         self.station_table.setFont(QFont("Arial", 10))
         
-        # Create Station Info widget with station controls (after station_table is created)
+        # Create Station Info widget with station controls (after 
+        # station_table is created)
         self.station_info_widget = self.create_station_info_widget()
         
         # Add tables to tabs
@@ -104,7 +110,8 @@ class NetworkStatusUI(QWidget):
         
         self.command_input = QLineEdit()
         self.command_input.setFont(QFont("Courier", 9))
-        self.command_input.setPlaceholderText("Enter backend command (e.g., set_global_temperature(25.0))")
+        self.command_input.setPlaceholderText(
+            "Enter backend command (e.g., set_global_temperature(25.0))")
         self.command_input.returnPressed.connect(self.execute_command)
         input_layout.addWidget(self.command_input)
         
@@ -209,7 +216,8 @@ class NetworkStatusUI(QWidget):
         return widget
     
     def create_command_info_widget(self):
-        """Create the Command Info tab with table and broadcast command controls"""
+        """Create the Command Info tab with table and broadcast command 
+        controls."""
         widget = QWidget()
         layout = QHBoxLayout()
         
@@ -267,7 +275,8 @@ class NetworkStatusUI(QWidget):
         return widget
     
     def create_segment_info_widget(self):
-        """Create the Segment Info tab with table and segment editing controls"""
+        """Create the Segment Info tab with table and segment editing 
+        controls."""
         widget = QWidget()
         layout = QHBoxLayout()
         
@@ -291,7 +300,8 @@ class NetworkStatusUI(QWidget):
         
         self.edit_segment_dropdown = QComboBox()
         self.edit_segment_dropdown.setMinimumWidth(150)
-        self.edit_segment_dropdown.currentTextChanged.connect(self.on_edit_segment_selected)
+        self.edit_segment_dropdown.currentTextChanged.connect(
+            self.on_edit_segment_selected)
         controls_layout.addWidget(self.edit_segment_dropdown)
         
         # Occupancy dropdown
@@ -299,7 +309,8 @@ class NetworkStatusUI(QWidget):
         controls_layout.addWidget(occupancy_label)
         
         self.occupancy_dropdown = QComboBox()
-        self.occupancy_dropdown.addItems(["True (Occupied)", "False (Unoccupied)"])
+        self.occupancy_dropdown.addItems(
+            ["True (Occupied)", "False (Unoccupied)"])
         controls_layout.addWidget(self.occupancy_dropdown)
         
         # Closed status dropdown
@@ -315,7 +326,8 @@ class NetworkStatusUI(QWidget):
         controls_layout.addWidget(signal_label)
         
         self.signal_state_dropdown = QComboBox()
-        self.signal_state_dropdown.addItems(["RED", "YELLOW", "GREEN", "SUPERGREEN"])
+        self.signal_state_dropdown.addItems(
+            ["RED", "YELLOW", "GREEN", "SUPERGREEN"])
         controls_layout.addWidget(self.signal_state_dropdown)
         
         # Apply button
@@ -344,7 +356,8 @@ class NetworkStatusUI(QWidget):
         controls_layout.addWidget(position_label)
         
         self.switch_position_dropdown = QComboBox()
-        self.switch_position_dropdown.addItems(["0 (Straight)", "1 (Diverging)"])
+        self.switch_position_dropdown.addItems(
+            ["0 (Straight)", "1 (Diverging)"])
         controls_layout.addWidget(self.switch_position_dropdown)
         
         # Apply switch button
@@ -361,7 +374,8 @@ class NetworkStatusUI(QWidget):
         return widget
     
     def create_station_info_widget(self):
-        """Create the Station Info tab with table and station operation controls"""
+        """Create the Station Info tab with table and station operation 
+        controls."""
         widget = QWidget()
         layout = QHBoxLayout()
         
@@ -473,44 +487,64 @@ class NetworkStatusUI(QWidget):
             try:
                 train_id = int(train_id_str)
             except ValueError:
-                self.status_display.append(f"Error: Train ID must be an integer, got '{train_id_str}'")
+                self.status_display.append(
+                    f"Error: Train ID must be an integer, got '{train_id_str}'"
+                )
                 return
                 
             try:
                 commanded_speed_mph = int(speed_str)
             except ValueError:
-                self.status_display.append(f"Error: Commanded Speed must be an integer, got '{speed_str}'")
+                self.status_display.append(
+                    f"Error: Commanded Speed must be an integer, got '{speed_str}'"
+                )
                 return
             
             # Convert speed from mph to m/s for internal system
-            commanded_speed_mps = ConversionFunctions.mph_to_mps(commanded_speed_mph)
+            commanded_speed_mps = ConversionFunctions.mph_to_mps(
+                commanded_speed_mph
+            )
                 
             try:
                 authority_yards = int(authority_str)
             except ValueError:
-                self.status_display.append(f"Error: Authority must be an integer, got '{authority_str}'")
+                self.status_display.append(
+                    f"Error: Authority must be an integer, got '{authority_str}'"
+                )
                 return
             
             # Convert authority from yards to meters for internal system
-            authority_meters = ConversionFunctions.yards_to_meters(authority_yards)
+            authority_meters = ConversionFunctions.yards_to_meters(
+                authority_yards
+            )
             
             # Call the backend method with speed in m/s and authority in meters
-            self.track_network.broadcast_train_command(train_id, commanded_speed_mps, authority_meters)
+            self.track_network.broadcast_train_command(
+                train_id, commanded_speed_mps, authority_meters
+            )
 
-            self.status_display.append(f"Broadcast train command: Train ID={train_id}, Speed={commanded_speed_mph} mph ({commanded_speed_mps:.2f} m/s), Authority={authority_yards} yards ({authority_meters:.2f} m)")
+            self.status_display.append(
+                f"Broadcast train command: Train ID={train_id}, "
+                f"Speed={commanded_speed_mph} mph ({commanded_speed_mps:.2f} m/s), "
+                f"Authority={authority_yards} yards ({authority_meters:.2f} m)"
+            )
 
             # Auto-refresh after broadcasting command
             self.refresh_status()
                 
         except Exception as e:
-            self.status_display.append(f"Error broadcasting train command: {str(e)}")
+            self.status_display.append(
+                f"Error broadcasting train command: {str(e)}"
+            )
         
     def load_track_layout(self):
         """Load the track layout from CSV file (called once on startup)"""
         try:
             # Load track layout with proper path
             csv_path = os.path.join(os.path.dirname(__file__), "blue_line.csv")
-            self.status_display.append(f"Loading track layout from {csv_path}...")
+            self.status_display.append(
+                f"Loading track layout from {csv_path}..."
+            )
             self.track_network.load_track_layout(csv_path)
             self.status_display.append("Track layout loaded successfully!\n")
             
@@ -561,13 +595,19 @@ class NetworkStatusUI(QWidget):
             if 'global_temperature' in network_status:
                 # Convert temperature from Celsius to Fahrenheit
                 temp_celsius = network_status['global_temperature']
-                temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(temp_celsius)
+                temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
+                    temp_celsius
+                )
                 track_info['Global Temperature (°F)'] = f"{temp_fahrenheit:.1f}"
             if 'heater_threshold' in network_status:
                 # Convert threshold temperature from Celsius to Fahrenheit
                 threshold_celsius = network_status['heater_threshold']
-                threshold_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(threshold_celsius)
-                track_info['Heater Threshold (°F)'] = f"{threshold_fahrenheit:.1f}"
+                threshold_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
+                    threshold_celsius
+                )
+                track_info['Heater Threshold (°F)'] = (
+                    f"{threshold_fahrenheit:.1f}"
+                )
             if 'heaters_active' in network_status:
                 track_info['Heaters Active'] = network_status['heaters_active']
             self.populate_track_info_table(track_info)
@@ -592,7 +632,9 @@ class NetworkStatusUI(QWidget):
             self.segment_table.setRowCount(1)
             self.segment_table.setColumnCount(1)
             self.segment_table.setHorizontalHeaderLabels(["Network Status"])
-            self.segment_table.setItem(0, 0, QTableWidgetItem(str(network_status)))
+            self.segment_table.setItem(
+                0, 0, QTableWidgetItem(str(network_status))
+            )
     
     def clear_all_tables(self):
         """Clear all tables"""
@@ -603,26 +645,37 @@ class NetworkStatusUI(QWidget):
         self.failure_table.clear()
         self.station_table.clear()
     
-    def populate_dict_as_table(self, table_widget, data_dict, id_column_name="ID", details_column_name="Details"):
-        """Helper function to populate a table with dictionary data, handling nested structures"""
+    def populate_dict_as_table(
+        self, table_widget, data_dict, 
+        id_column_name="ID", details_column_name="Details"
+    ):
+        """Helper function to populate a table with dictionary data.
+        
+        Handles nested structures.
+        """
         if not data_dict:
             return
         
         # Define attributes to exclude from Segment Info
         excluded_segment_attributes = {
             'diverging_segment', 'failures', 'gate_status', 
-            'passengers_boarded_total', 'passengers_exited_total', 'passengers_waiting', 
-            'station_side', 'straight_segment', 'tickets_sold_total', 'station_name'
+            'passengers_boarded_total', 'passengers_exited_total', 
+            'passengers_waiting', 'station_side', 'straight_segment', 
+            'tickets_sold_total', 'station_name'
         }
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'closed', 'signal_state', 'speed_limit', 
-            'length', 'grade', 'underground', 'previous_segment', 'next_segment', 'current_position', 'beacon_data',
+            'block_id', 'type', 'occupied', 'closed', 'signal_state', 
+            'speed_limit', 'length', 'grade', 'underground', 
+            'previous_segment', 'next_segment', 'current_position', 
+            'beacon_data',
         ]
         
-        # Check if this is being called for segments (based on table widget or column name)
-        is_segment_table = (table_widget == self.segment_table) or ("Segment" in id_column_name)
+        # Check if this is being called for segments (based on table widget 
+        # or column name)
+        is_segment_table = ((table_widget == self.segment_table) or 
+                           ("Segment" in id_column_name))
         
         # Count total rows needed (including nested dict items)
         total_rows = 0
@@ -641,7 +694,8 @@ class NetworkStatusUI(QWidget):
             if isinstance(value, dict):
                 for sub_key in value.keys():
                     # Filter out excluded attributes for segment tables
-                    if not (is_segment_table and sub_key in excluded_segment_attributes):
+                    if not (is_segment_table and 
+                           sub_key in excluded_segment_attributes):
                         all_keys.add(sub_key)
         
         if all_keys:
@@ -668,19 +722,25 @@ class NetworkStatusUI(QWidget):
             row = 0
             for key, value in data_dict.items():
                 if isinstance(value, dict):
-                    table_widget.setRowCount(max(table_widget.rowCount(), row + 1))
+                    table_widget.setRowCount(
+                        max(table_widget.rowCount(), row + 1)
+                    )
                     
                     if is_segment_table:
                         # For segments, don't add ID column
                         for col_idx, col_name in enumerate(columns):
                             if col_name in value:
-                                # Apply unit conversions and formatting for segment display
+                                # Apply unit conversions and formatting for 
+                                # segment display
                                 cell_value = value[col_name]
                                 item = None
                                 
-                                if col_name == 'length' and isinstance(cell_value, (int, float)):
+                                if (col_name == 'length' and 
+                                   isinstance(cell_value, (int, float))):
                                     # Convert length from meters to yards
-                                    yards_value = ConversionFunctions.meters_to_yards(cell_value)
+                                    yards_value = ConversionFunctions.meters_to_yards(
+                                        cell_value
+                                    )
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
                                 elif col_name == 'speed_limit' and isinstance(cell_value, (int, float)):
@@ -1395,8 +1455,22 @@ class NetworkStatusUI(QWidget):
                 for row, (cmd_id, cmd_obj) in enumerate(commands_data.items()):
                     self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_id)))
                     self.command_table.setItem(row, 1, QTableWidgetItem(str(cmd_obj.train_id)))
-                    self.command_table.setItem(row, 2, QTableWidgetItem(str(cmd_obj.commanded_speed)))
-                    self.command_table.setItem(row, 3, QTableWidgetItem(str(cmd_obj.authority)))
+                    
+                    # Convert commanded speed from m/s to mph
+                    if isinstance(cmd_obj.commanded_speed, (int, float)):
+                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
+                        speed_display = f"{mph_value:.1f} mph"
+                    else:
+                        speed_display = str(cmd_obj.commanded_speed)
+                    self.command_table.setItem(row, 2, QTableWidgetItem(speed_display))
+                    
+                    # Convert authority from m to yds
+                    if isinstance(cmd_obj.authority, (int, float)):
+                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
+                        authority_display = f"{yards_value:.2f} yds"
+                    else:
+                        authority_display = str(cmd_obj.authority)
+                    self.command_table.setItem(row, 3, QTableWidgetItem(authority_display))
             else:
                 # Handle nested dictionaries or simple key-value pairs
                 has_nested_dicts = any(isinstance(v, dict) for v in commands_data.values())
@@ -1422,8 +1496,22 @@ class NetworkStatusUI(QWidget):
                 
                 for row, cmd_obj in enumerate(commands_data):
                     self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_obj.train_id)))
-                    self.command_table.setItem(row, 1, QTableWidgetItem(str(cmd_obj.commanded_speed)))
-                    self.command_table.setItem(row, 2, QTableWidgetItem(str(cmd_obj.authority)))
+                    
+                    # Convert commanded speed from m/s to mph
+                    if isinstance(cmd_obj.commanded_speed, (int, float)):
+                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
+                        speed_display = f"{mph_value:.1f} mph"
+                    else:
+                        speed_display = str(cmd_obj.commanded_speed)
+                    self.command_table.setItem(row, 1, QTableWidgetItem(speed_display))
+                    
+                    # Convert authority from m to yds
+                    if isinstance(cmd_obj.authority, (int, float)):
+                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
+                        authority_display = f"{yards_value:.2f} yds"
+                    else:
+                        authority_display = str(cmd_obj.authority)
+                    self.command_table.setItem(row, 2, QTableWidgetItem(authority_display))
             elif commands_data and isinstance(commands_data[0], dict):
                 # Convert list to dict format for better table display
                 dict_data = {f"Command_{i}": cmd for i, cmd in enumerate(commands_data)}

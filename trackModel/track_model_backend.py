@@ -1,15 +1,15 @@
 """
 Track Model Backend
 """
-from enum import Enum
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from random import Random
 import csv
 import re
-
 import sys
 import os
+from datetime import datetime
+from enum import Enum
+from random import Random
+from typing import Any, Dict, List, Optional
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from universal.universal import (
@@ -62,34 +62,43 @@ class Train:
             if self.segment_displacement + distance < 0:
                 prev_segment = self.get_previous_segment()
                 if prev_segment is None:
-                    raise ValueError("Cannot move backwards, no previous segment.")
-                if prev_segment.signal_state == SignalState.RED or prev_segment.closed:
+                    raise ValueError(
+                        "Cannot move backwards, no previous segment.")
+                if (prev_segment.signal_state == SignalState.RED or 
+                        prev_segment.closed):
                     self.segment_displacement = 0
                     return False
                 else:
                     self.current_segment.set_occupancy(False)
                     self.current_segment = prev_segment
                     self.current_segment.set_occupancy(True)
-                    self.segment_displacement = max(0, self.segment_displacement + distance + self.current_segment.length)
+                    self.segment_displacement = max(
+                        0, (self.segment_displacement + distance + 
+                            self.current_segment.length))
                     return True
             else:
                 self.segment_displacement += distance
                 return True
             
         if distance > 0:
-            if self.segment_displacement + distance > self.current_segment.length:
+            if (self.segment_displacement + distance > 
+                    self.current_segment.length):
                 #need to move to next segment
                 next_segment = self.get_next_segment()
                 if next_segment is None:
                     raise ValueError("Cannot move forwards, no next segment.")
-                if next_segment.signal_state == SignalState.RED or next_segment.closed:
+                if (next_segment.signal_state == SignalState.RED or 
+                        next_segment.closed):
                     self.segment_displacement = self.current_segment.length
                     return False
                 else:
                     self.current_segment.set_occupancy(False)
                     self.current_segment = next_segment
                     self.current_segment.set_occupancy(True)
-                    self.segment_displacement = min(self.current_segment.length, self.segment_displacement + distance - self.current_segment.length)
+                    self.segment_displacement = min(
+                        self.current_segment.length, 
+                        (self.segment_displacement + distance - 
+                         self.current_segment.length))
                     return True
             else:
                 self.segment_displacement += distance
@@ -415,8 +424,8 @@ class Station(TrackSegment):
         
         # Ticket sales tracking
         self.tickets_sold_total = 0
-    
-    def sell_tickets(self, count: int=None) -> None:
+
+    def sell_tickets(self, count: Optional[int]=None) -> None:
         """Record ticket sales at the station.
         
         Args:
@@ -433,13 +442,14 @@ class Station(TrackSegment):
         self.tickets_sold_total += count
         self.passengers_waiting += count
         pass
-    
-    def passengers_boarding(self, trainID: int=-1, count: int=None) -> None:
+
+    def passengers_boarding(self, train_id: int = -1, 
+                          count: Optional[int] = None) -> None:
         """Record passengers boarding. Adds to total number, and passes
         to the Train Model.
         
         Args:
-            trainID: ID of the train that is boarding passengers.
+            train_id: ID of the train that is boarding passengers.
             count: Number of passengers to board.
             (If no count argument, randomly generates a number
             between set range.)
@@ -496,7 +506,8 @@ class TrackNetwork:
     def __init__(self) -> None:
         """Initialize an empty track network."""
         self.segments: Dict[TrackSegment] = {}
-        self.trains: Dict[Train] = {}  # EVENTUAL: import train class from train model
+        # EVENTUAL: import train class from train model
+        self.trains: Dict[Train] = {}
         # System-wide properties
         self.global_temperature = 20       # Celsius
         self.heater_threshold = 0          # Celsius
@@ -576,7 +587,9 @@ class TrackNetwork:
             else:
                 segment2.previous_segment = None
 
-    def _set_connections(self, block_id: int, previous_id: int, next_id: int=None, straight_id: int = None, diverging_id: int = None) -> None:
+    def _set_connections(self, block_id: int, previous_id: int, 
+                         next_id: int = None, straight_id: int = None, 
+                         diverging_id: int = None) -> None:
         """Set connections between track segments.
 
         Args:
@@ -588,12 +601,20 @@ class TrackNetwork:
         """
         manipulated_segment = self.segments.get(block_id)
         if manipulated_segment is None:
-            raise ValueError(f"Block ID {block_id} not found when setting connections.")
+            raise ValueError(
+                f"Block ID {block_id} not found when setting connections.")
             
-        previous_segment = self.segments.get(previous_id) if previous_id is not None else None
-        next_segment = self.segments.get(next_id) if next_id is not None else None
-        straight_segment = self.segments.get(straight_id) if straight_id is not None else None
-        diverging_segment = self.segments.get(diverging_id) if diverging_id is not None else None
+        previous_segment = (
+            self.segments.get(previous_id) if previous_id is not None 
+            else None)
+        next_segment = (
+            self.segments.get(next_id) if next_id is not None else None)
+        straight_segment = (
+            self.segments.get(straight_id) if straight_id is not None 
+            else None)
+        diverging_segment = (
+            self.segments.get(diverging_id) if diverging_id is not None 
+            else None)
 
         manipulated_segment.previous_segment = previous_segment
         if isinstance(manipulated_segment, TrackSwitch):
@@ -617,32 +638,39 @@ class TrackNetwork:
             for lines in csvFile:
                 if lines["block_id"] in self.segments:
                     raise ValueError(
-                        f"Block ID {lines['block_id']} already exists in network."
-                    )
-                if "Type" not in lines or not re.match("^[a-zA-Z]+$", lines["Type"]):
+                        f"Block ID {lines['block_id']} already exists in "
+                        "network.")
+                if ("Type" not in lines or 
+                        not re.match("^[a-zA-Z]+$", lines["Type"])):
                     raise ValueError(
-                        f"Invalid 'Type' field in layout file at row {current_line}. "
-                    )
-                if "block_id" not in lines or not re.match("^[0-9]+$", lines["block_id"]):
-                  raise ValueError(
-                        f"Invalid 'block_id' field in layout file at row {current_line}. "
-                        )
-                if "length" not in lines or not re.match("^[0-9]+$", lines["length"]):
+                        f"Invalid 'Type' field in layout file at row "
+                        f"{current_line}.")
+                if ("block_id" not in lines or 
+                        not re.match("^[0-9]+$", lines["block_id"])):
                     raise ValueError(
-                        f"Invalid 'length' field in layout file at row {current_line}. "
-                    )
-                if "speed_limit" not in lines or not re.match("^[0-9]+$", lines["speed_limit"]):
+                        f"Invalid 'block_id' field in layout file at row "
+                        f"{current_line}.")
+                if ("length" not in lines or 
+                        not re.match("^[0-9]+$", lines["length"])):
                     raise ValueError(
-                        f"Invalid 'speed_limit' field in layout file at row {current_line}. "
-                    )
-                if "grade" not in lines or not re.match("^[0-9.-]+$", lines["grade"]):
+                        f"Invalid 'length' field in layout file at row "
+                        f"{current_line}.")
+                if ("speed_limit" not in lines or 
+                        not re.match("^[0-9]+$", lines["speed_limit"])):
                     raise ValueError(
-                        f"Invalid 'grade' field in layout file at row {current_line}. "
-                    )
-                if "underground" not in lines or not re.match("^(TRUE|FALSE|true|false)$", lines["underground"]):
+                        f"Invalid 'speed_limit' field in layout file at row "
+                        f"{current_line}.")
+                if ("grade" not in lines or 
+                        not re.match("^[0-9.-]+$", lines["grade"])):
                     raise ValueError(
-                        f"Invalid 'underground' field in layout file at row {current_line}. "
-                    )
+                        f"Invalid 'grade' field in layout file at row "
+                        f"{current_line}.")
+                if ("underground" not in lines or 
+                        not re.match("^(TRUE|FALSE|true|false)$", 
+                                   lines["underground"])):
+                    raise ValueError(
+                        f"Invalid 'underground' field in layout file at row "
+                        f"{current_line}.")
 
                 match lines["Type"]:
                     case "TrackSegment":
@@ -673,25 +701,32 @@ class TrackNetwork:
                         )
                         self.add_segment(crossing)
                     case "Station":
-                        if "station_name" not in lines or not re.match("^[a-zA-Z0-9 _-]+$", lines["station_name"]):
+                        if ("station_name" not in lines or 
+                                not re.match("^[a-zA-Z0-9 _-]+$", 
+                                           lines["station_name"])):
                             raise ValueError(
-                                f"Invalid 'station_name' field in layout file at row {current_line}. "
-                            )
-                        if "station_side" not in lines or not re.match("^(left|right|both)$", lines["station_side"], re.IGNORECASE):
+                                f"Invalid 'station_name' field in layout "
+                                f"file at row {current_line}.")
+                        if ("station_side" not in lines or 
+                                not re.match("^(left|right|both)$", 
+                                           lines["station_side"], 
+                                           re.IGNORECASE)):
                             raise ValueError(
-                                f"Invalid 'station_side' field in layout file at row {current_line}. "
-                            )
+                                f"Invalid 'station_side' field in layout "
+                                f"file at row {current_line}.")
                         station = Station(
                             block_id=int(lines["block_id"]),
                             length=int(lines["length"]),
                             speed_limit=int(lines["speed_limit"]),
                             grade=float(lines["grade"]),
                             station_name=lines["station_name"],
-                            station_side=StationSide(lines["station_side"].lower())
-                        )
+                            station_side=StationSide(
+                                lines["station_side"].lower()))
                         self.add_segment(station)
                     case _:
-                        raise ValueError(f"Unknown segment type {lines['Type']} at row {current_line}.")
+                        raise ValueError(
+                            f"Unknown segment type {lines['Type']} at row "
+                            f"{current_line}.")
                 current_line += 1
 
         # Second pass to set connections
@@ -699,41 +734,53 @@ class TrackNetwork:
         with open(layout_file, mode='r') as file:
             csvFile = csv.DictReader(file)
             for lines in csvFile:
-                if lines["previous_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["previous_segment"]):
+                if (lines["previous_segment"] is not None and 
+                        not re.match("(^[0-9]+$|^$)", 
+                                   lines["previous_segment"])):
                     raise ValueError(
-                        f"Invalid 'previous_segment' field in layout file at row {current_line}. "
-                    )
-                if lines["next_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["next_segment"]):
+                        f"Invalid 'previous_segment' field in layout file "
+                        f"at row {current_line}.")
+                if (lines["next_segment"] is not None and 
+                        not re.match("(^[0-9]+$|^$)", lines["next_segment"])):
                     raise ValueError(
-                        f"Invalid 'next_segment' field in layout file at row {current_line}. "
-                    )
-                if lines["straight_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["straight_segment"]):
+                        f"Invalid 'next_segment' field in layout file at "
+                        f"row {current_line}.")
+                if (lines["straight_segment"] is not None and 
+                        not re.match("(^[0-9]+$|^$)", 
+                                   lines["straight_segment"])):
                     raise ValueError(
-                        f"Invalid 'straight_segment' field in layout file at row {current_line}. "
-                    )
-                if lines["diverging_segment"] is not None and not re.match("(^[0-9]+$|^$)", lines["diverging_segment"]):
+                        f"Invalid 'straight_segment' field in layout file "
+                        f"at row {current_line}.")
+                if (lines["diverging_segment"] is not None and 
+                        not re.match("(^[0-9]+$|^$)", 
+                                   lines["diverging_segment"])):
                     raise ValueError(
-                        f"Invalid 'diverging_segment' field in layout file at row {current_line}. "
-                    )
+                        f"Invalid 'diverging_segment' field in layout file "
+                        f"at row {current_line}.")
                 match lines["Type"]:
                     case "TrackSegment" | "LevelCrossing" | "Station":
                         self._set_connections(
                             int(lines["block_id"]), 
-                            int(lines["previous_segment"]) if lines["previous_segment"] else None, 
-                            int(lines["next_segment"]) if lines["next_segment"] else None, 
+                            (int(lines["previous_segment"]) 
+                             if lines["previous_segment"] else None), 
+                            (int(lines["next_segment"]) 
+                             if lines["next_segment"] else None), 
                             None, 
-                            None
-                        )
+                            None)
                     case "TrackSwitch":
                         self._set_connections(
                             int(lines["block_id"]), 
-                            int(lines["previous_segment"]) if lines["previous_segment"] else None, 
+                            (int(lines["previous_segment"]) 
+                             if lines["previous_segment"] else None), 
                             None, 
-                            int(lines["straight_segment"]) if lines["straight_segment"] else None, 
-                            int(lines["diverging_segment"]) if lines["diverging_segment"] else None
-                        )
+                            (int(lines["straight_segment"]) 
+                             if lines["straight_segment"] else None), 
+                            (int(lines["diverging_segment"]) 
+                             if lines["diverging_segment"] else None))
                     case _:
-                        raise ValueError(f"Unknown segment type {lines['Type']} at row {current_line}.")
+                        raise ValueError(
+                            f"Unknown segment type {lines['Type']} at row "
+                            f"{current_line}.")
                 current_line += 1
         pass
 
@@ -986,7 +1033,7 @@ class TrackNetwork:
         segment.open()
         pass
 
-    def sell_tickets(self, block_id : int, count: int=None) -> None:
+    def sell_tickets(self, block_id: int, count: int=None) -> None:
         """Sell tickets at a specific station.
         
         Args:
@@ -1003,12 +1050,13 @@ class TrackNetwork:
         segment.sell_tickets(count)
         pass
 
-    def passengers_boarding(self, block_id: int, trainID: int=-1, count: int=None) -> None:
+    def passengers_boarding(self, block_id: int, train_id: int = -1, 
+                          count: int = None) -> None:
         """Record passengers boarding at a specific station.
         
         Args:
             block_id: ID of the station block where passengers are boarding.
-            trainID: ID of the train that is boarding passengers.
+            train_id: ID of the train that is boarding passengers.
             count: Number of passengers to board.
             (If no count argument, randomly generates a number
             between set range.)
@@ -1018,7 +1066,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
-        segment.passengers_boarding(trainID, count)
+        segment.passengers_boarding(train_id, count)
         # TODO: remove -1 count when train model is integrated
         pass
 
@@ -1167,12 +1215,14 @@ class TrackNetwork:
             train: The Train object to add to the network.
         """
         if train.train_id in self.trains:
-            raise ValueError(f"Train ID {train.train_id} already exists in network.")
+            raise ValueError(
+                f"Train ID {train.train_id} already exists in network.")
         self.trains[train.train_id] = train
         train.network = self
         pass
 
-    def connect_train(self, train_id: int, block_id: int, displacement: float) -> None:
+    def connect_train(self, train_id: int, block_id: int, 
+                      displacement: float) -> None:
         """Add a train to the network for tracking purposes.
         
         Args:

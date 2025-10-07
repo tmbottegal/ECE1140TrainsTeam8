@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 Snapshot = Dict[str, object]
 
 # ---- demo speed policy constants (used by stub to show realistic speeds) ----
-LINE_SPEED_LIMIT_MPS = 13.9   # ≈31 mph demo limit
+LINE_SPEED_LIMIT_MPS = 50.00   # ≈31 mph demo limit
 YELLOW_FACTOR = 0.60          # slow on yellow
 
 class TrackControllerStub:
@@ -19,6 +19,8 @@ class TrackControllerStub:
         self._switch_of_block: Dict[str, str] = {}
         self._has_crossing: Dict[str, bool] = {}
         self._beacon: Dict[str, str] = {}
+        self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
+
 
         for t in line_tuples:
             sec, bid, status, station, track_status, sw, light, crossing, maintenance = t
@@ -142,6 +144,7 @@ class TrackControllerStub:
                     self._switch_pos["SW1"] = "STRAIGHT" if branch == "B" else "DIVERGE"
 
         # Move trains (stop at EOL — no wrap)
+                # Move trains (stop at EOL — no wrap)
         for tid in sorted(self._trains.keys()):
             cur = self._trains[tid]["block"]
             if cur in self._eol:
@@ -151,8 +154,16 @@ class TrackControllerStub:
             auth = int(self._trains[tid]["authority_blocks"] or 0)
             if auth <= 0:
                 continue
+                        # 🧠 NEW: use override values if enabled
+            ov = self._overrides.get(tid, {})
+            if ov.get("enabled", False):
+                if "speed_mps" in ov:
+                    self._trains[tid]["speed_mps"] = float(ov["speed_mps"])
+                if "authority_blocks" in ov:
+                    auth = int(ov["authority_blocks"])
 
             nxt = self._next_for_train(tid, cur)  # may be None at EOL
+
             if nxt and self._is_enterable(nxt) and not self._is_occupied(nxt):
                 self._trains[tid]["block"] = nxt
                 self._trains[tid]["authority_blocks"] = auth - 1
@@ -180,6 +191,11 @@ class TrackControllerStub:
             b = tinfo["block"]
             if self._occupancy.get(b) != "closed":
                 self._occupancy[b] = "occupied"
+    
+    def set_train_overrides(self, overrides: Dict[str, Dict[str, object]]) -> None:
+        """Receives manual override settings from the CTC backend."""
+        self._overrides = overrides or {}
+
 
     def _recompute_signals(self) -> None:
         occ = {b for b, s in self._occupancy.items() if s == "occupied"}

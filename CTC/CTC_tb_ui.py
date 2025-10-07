@@ -416,7 +416,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "Override",
             f"{'Enabled' if enabled else 'Disabled'} override for {tid}.\n"
             f"Speed={mph:.1f} mph, Authority={int(meters)} m.")
-
+        self._reload_line(self.state.line_name)
     # ---------- Train Information ----------
     def _train_info(self):
         page = QtWidgets.QWidget()

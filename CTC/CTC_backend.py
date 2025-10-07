@@ -142,8 +142,15 @@ class TrackState:
 
     def stub_tick(self):
         if self._stub:
-            self._stub.tick()
+            # 🧠 NEW: Forward current manual overrides to the Track Controller Stub
+            self._stub.set_train_overrides(self._overrides)
+
+            # 🧠 Apply policy (calculates suggested speed & authority)
             self._policy_tick()
+
+            # 🚄 Then simulate the physical movement in the stub
+            self._stub.tick()
+
 
     # ----- policy -----
     def _policy_tick(self):

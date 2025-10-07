@@ -451,6 +451,7 @@ class TrackControllerStub:
                 "block":     info.get("block", ""),
                 "suggested_speed_mps": float(info.get("speed_mps", 0.0)),
                 "authority_blocks": int(info.get("authority_blocks", 0)),
+                "desired_branch": info.get("desired_branch", ""), 
             })
 
 

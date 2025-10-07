@@ -428,7 +428,7 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         self.trainInfoTable = QtWidgets.QTableWidget(0, 6)
         self.trainInfoTable.setHorizontalHeaderLabels(
-            ["Train ID", "Current Block", "Speed (mph)", "Authority (m)", "Desired Branch", "Raw Blocks"]
+            ["Train ID", "Current Block", "Speed (mph)", "Authority (m)", "Destination", "Raw Blocks"]
         )
         self.trainInfoTable.verticalHeader().setVisible(False)
         self.trainInfoTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)

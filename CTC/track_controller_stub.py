@@ -5,8 +5,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 Snapshot = Dict[str, object]
 
 # ---- demo speed policy constants (used by stub to show realistic speeds) ----
-LINE_SPEED_LIMIT_MPS = 50.00   # ≈31 mph demo limit
-YELLOW_FACTOR = 0.60          # slow on yellow
+LINE_SPEED_LIMIT_KMPH = 50
+LINE_SPEED_LIMIT_MPS = LINE_SPEED_LIMIT_KMPH * 1000 / 3600
+BLOCK_LEN_M = 50.0 # each block = 50 meters
+YELLOW_FACTOR = 0.60        # slow on yellow
 
 class TrackControllerStub:
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
@@ -58,6 +60,21 @@ class TrackControllerStub:
 
         self._status_cb: Optional[Callable[[Snapshot], None]] = None
         self._tick = 0
+    
+    def _suggest_speed_for_train(self, cur: str) -> float:
+        nxt = self._next(cur)
+        if nxt is None:
+            return 0.0
+        if self._occupancy.get(nxt) in ("closed", "occupied"):
+            return 0.0
+        if self._broken_rail.get(nxt, False):
+            return 0.0
+        aspect = (self._signals.get(nxt) or "").upper()
+        if aspect == "RED":
+            return 0.0
+        if aspect == "YELLOW":
+            return LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
+        return LINE_SPEED_LIMIT_MPS
 
     # ---------- registration ----------
     def on_status(self, callback: Callable[[Snapshot], None]) -> None:
@@ -177,7 +194,12 @@ class TrackControllerStub:
         # ---- set per-train suggested speed for UI visibility (policy inside stub) ----
         for tid, info in self._trains.items():
             cur = str(info["block"])
-            info["speed_mps"] = self._suggest_speed_for_train(cur)
+            suggested = self._suggest_speed_for_train(cur)
+            # If no movement possible, override display speed to 0
+            if suggested == 0.0 or int(info.get("authority_blocks", 0)) == 0:
+                info["speed_mps"] = 0.0
+            else:
+                info["speed_mps"] = suggested
 
         if self._status_cb:
             self._status_cb(self._make_snapshot())

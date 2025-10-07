@@ -1,38 +1,73 @@
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QScrollArea,
-    QTableWidget, QHeaderView, QPushButton, QLineEdit, QSizePolicy, QTableWidgetItem,
-    QDialog, QFormLayout, QDialogButtonBox, QSpinBox, QMessageBox, QApplication
-)
-from PyQt6.QtGui import QFont
+"""Track Controller user interface.
+
+Provides the PyQt-based front-end for monitoring and controlling
+the Track Controller system. Supports:
+- Viewing block, switch, crossing, and signal states
+- Uploading PLC files
+- Manual override testing interface
+
+Refactored per Google Python Style Guide:
+- Docstrings and type hints
+- Logging instead of print statements
+- Consistent formatting
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+    QHeaderView,
+)
+
+if TYPE_CHECKING:
+    from TrackControllerBackend import TrackNetwork, TrackControllerBackend
+
+# Configure module-level logger.
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 class ManualOverrideDialog(QDialog):
-    applied = pyqtSignal()  # emitted whenever Apply is pressed or live-change applied
+    """Modeless dialog for manual backend control during testing."""
 
-    def __init__(self, parent_ui):
+    applied = pyqtSignal()
+
+    def __init__(self, parent_ui: TrackControllerUI) -> None:
+        """Initialize the manual override dialog."""
         super().__init__(parent=parent_ui)
         self.ui = parent_ui
         self.setWindowTitle("Test UI")
-        # keep dialog modeless so user can see live updates in main UI
         self.setModal(False)
         self.resize(420, 240)
-        self._build()
 
-        # Auto-connect applied to parent's refresh_tables if available.
-        try:
-            if hasattr(self.ui, "refresh_tables"):
-                self.applied.connect(self.ui.refresh_tables)
-        except Exception as e:
-            print(f"[DEBUG] ManualOverrideDialog: failed to auto-connect applied -> refresh_tables: {e}")
+        self._build_ui()
+        self._connect_signals()
 
-        # Connect interactive controls for *live* updates
-        self._connect_live_handlers()
-
-    def _build(self):
+    def _build_ui(self) -> None:
+        """Construct dialog layout."""
         form = QFormLayout(self)
 
-        # Block occupancy controls
+        # Block controls
         self.block_spin = QSpinBox()
         self.block_spin.setMinimum(1)
         self.block_spin.setMaximum(self.ui.backend.num_blocks)
@@ -72,170 +107,87 @@ class ManualOverrideDialog(QDialog):
         self.crossing_status_combo.addItems(["Inactive", "Active"])
         form.addRow("Crossing Status", self.crossing_status_combo)
 
-        # Signal control
+        # Signal controls
         self.signal_combo = QComboBox()
         self.signal_combo.addItems(["Red", "Yellow", "Green", "Super Green"])
         form.addRow("Signal Color", self.signal_combo)
 
         # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Close)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Apply
+            | QDialogButtonBox.StandardButton.Close
+        )
         buttons.button(QDialogButtonBox.StandardButton.Apply).setText("Apply")
-        buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self._apply)
+        buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
-    def _connect_live_handlers(self):
-        # Refresh fields when block number changes
+    def _connect_signals(self) -> None:
+        """Connect dialog widgets to backend updates."""
         try:
-            self.block_spin.valueChanged.connect(self._on_block_changed)
-        except Exception:
-            pass
-
-        # Apply occupancy immediately when changed
-        try:
+            self.block_spin.valueChanged.connect(self.refresh_from_backend)
             self.occ_combo.currentTextChanged.connect(self._on_occupancy_changed)
-        except Exception:
-            pass
-
-        # Keep switch selection and position in sync; apply position changes immediately
-        try:
-            self.switch_combo.currentTextChanged.connect(self._on_switch_selection_changed)
-            self.switch_pos_combo.currentTextChanged.connect(self._on_switch_position_changed)
-        except Exception:
-            pass
-
-        # Crossings
-        try:
-            self.crossing_combo.currentTextChanged.connect(self._on_crossing_selection_changed)
-            self.crossing_status_combo.currentTextChanged.connect(self._on_crossing_status_changed)
-        except Exception:
-            pass
-
-        # Signal
-        try:
+            self.switch_combo.currentTextChanged.connect(
+                self._on_switch_selection_changed
+            )
+            self.switch_pos_combo.currentTextChanged.connect(
+                self._on_switch_position_changed
+            )
+            self.crossing_combo.currentTextChanged.connect(
+                self._on_crossing_selection_changed
+            )
+            self.crossing_status_combo.currentTextChanged.connect(
+                self._on_crossing_status_changed
+            )
             self.signal_combo.currentTextChanged.connect(self._on_signal_changed)
         except Exception:
-            pass
+            logger.exception("Failed to connect manual override handlers.")
 
-    def refresh_from_backend(self):
-        # update block max
-        try:
-            self.block_spin.setMaximum(self.ui.backend.num_blocks)
-        except Exception:
-            pass
-
-        # occupancy default for selected block
-        b = self.block_spin.value()
-        occ = self.ui.backend.blocks.get(b, {}).get("occupied", False)
-        self.occ_combo.setCurrentText("Yes" if occ else "No")
-
-        # switches
-        self.switch_combo.blockSignals(True)
-        self.switch_pos_combo.blockSignals(True)
-        try:
-            self.switch_combo.clear()
-            switch_ids = sorted(self.ui.backend.switches.keys())
-            if switch_ids:
-                self.switch_combo.setEnabled(True)
-                for sid in switch_ids:
-                    self.switch_combo.addItem(str(sid))
-                # set the position for the first item
-                try:
-                    cur_sid_text = self.switch_combo.currentText()
-                    cur_sid = int(cur_sid_text)
-                    cur_pos = self.ui.backend.switches.get(cur_sid, "Normal")
-                    self.switch_pos_combo.setCurrentText(cur_pos)
-                except Exception:
-                    self.switch_pos_combo.setCurrentText("Normal")
-            else:
-                self.switch_combo.addItem("None")
-                self.switch_combo.setEnabled(False)
-                self.switch_pos_combo.setCurrentText("Normal")
-        finally:
-            self.switch_combo.blockSignals(False)
-            self.switch_pos_combo.blockSignals(False)
-
-        # crossings
-        self.crossing_combo.blockSignals(True)
-        self.crossing_status_combo.blockSignals(True)
-        try:
-            self.crossing_combo.clear()
-            crossing_ids = sorted(self.ui.backend.crossings.keys())
-            if crossing_ids:
-                self.crossing_combo.setEnabled(True)
-                for cid in crossing_ids:
-                    self.crossing_combo.addItem(str(cid))
-                try:
-                    cur_cid_text = self.crossing_combo.currentText()
-                    cur_cid = int(cur_cid_text)
-                    cur_status = self.ui.backend.crossings.get(cur_cid, "Inactive")
-                    self.crossing_status_combo.setCurrentText(cur_status)
-                except Exception:
-                    self.crossing_status_combo.setCurrentText("Inactive")
-            else:
-                self.crossing_combo.addItem("None")
-                self.crossing_combo.setEnabled(False)
-                self.crossing_status_combo.setCurrentText("Inactive")
-        finally:
-            self.crossing_combo.blockSignals(False)
-            self.crossing_status_combo.blockSignals(False)
-
-        # signal color
+    def refresh_from_backend(self) -> None:
+        """Update dialog fields from backend state."""
         try:
             b = self.block_spin.value()
-            sig = self.ui.backend.blocks.get(b, {}).get("signal", "Green")
-            self.signal_combo.setCurrentText(sig)
+            self.occ_combo.setCurrentText(
+                "Yes" if self.ui.backend.blocks[b]["occupied"] else "No"
+            )
+            self.signal_combo.setCurrentText(
+                self.ui.backend.blocks[b].get("signal", "Green")
+            )
         except Exception:
-            self.signal_combo.setCurrentText("Green")
+            logger.debug("Failed to refresh block or signal state.")
 
-    # --- Live handlers ---
-    def _on_block_changed(self, value):
-        # when user changes block number, update dependent controls from backend
+    # --- Handlers for live changes ---
+    def _on_occupancy_changed(self, text: str) -> None:
         try:
-            self.refresh_from_backend()
-        except Exception:
-            pass
-
-    def _on_occupancy_changed(self, txt):
-        try:
-            block = int(self.block_spin.value())
-            occ = True if txt == "Yes" else False
+            block = self.block_spin.value()
+            occ = text == "Yes"
             self.ui.backend.set_block_occupancy(block, occ)
             self.applied.emit()
-        except Exception as e:
-            QMessageBox.warning(self, "Manual Override: Occupancy Failed", str(e))
+        except Exception as exc:
+            QMessageBox.warning(self, "Occupancy Failed", str(exc))
 
-    def _on_switch_selection_changed(self, sid_text):
-        # update switch position combobox to reflect backend
+    def _on_switch_selection_changed(self, sid_text: str) -> None:
         try:
             sid = int(sid_text)
             pos = self.ui.backend.switches.get(sid, "Normal")
-            # block signals while updating programmatically
             self.switch_pos_combo.blockSignals(True)
             self.switch_pos_combo.setCurrentText(pos)
             self.switch_pos_combo.blockSignals(False)
         except Exception:
-            pass
+            logger.debug("Switch selection change ignored.")
 
-    def _on_switch_position_changed(self, pos_text):
-        # apply switch change immediately using backend.safe_set_switch
+    def _on_switch_position_changed(self, pos_text: str) -> None:
+        if not self.switch_combo.isEnabled():
+            return
         try:
-            if not self.switch_combo.isEnabled():
-                return
             sid = int(self.switch_combo.currentText())
-            # use the safe API present in backend
-            try:
-                self.ui.backend.safe_set_switch(sid, pos_text)
-                self.applied.emit()
-            except Exception as e:
-                # show safety or value errors
-                QMessageBox.warning(self, "Manual Override: Switch Failed", str(e))
-                # refresh display to reflect actual backend state
-                self.refresh_from_backend()
-        except Exception as e:
-            print(f"[DEBUG] switch apply error: {e}")
+            self.ui.backend.safe_set_switch(sid, pos_text)
+            self.applied.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Switch Failed", str(exc))
+            self.refresh_from_backend()
 
-    def _on_crossing_selection_changed(self, cid_text):
+    def _on_crossing_selection_changed(self, cid_text: str) -> None:
         try:
             cid = int(cid_text)
             status = self.ui.backend.crossings.get(cid, "Inactive")
@@ -243,128 +195,106 @@ class ManualOverrideDialog(QDialog):
             self.crossing_status_combo.setCurrentText(status)
             self.crossing_status_combo.blockSignals(False)
         except Exception:
-            pass
+            logger.debug("Crossing selection change ignored.")
 
-    def _on_crossing_status_changed(self, status_text):
+    def _on_crossing_status_changed(self, status_text: str) -> None:
+        if not self.crossing_combo.isEnabled():
+            return
         try:
-            if not self.crossing_combo.isEnabled():
-                return
             cid = int(self.crossing_combo.currentText())
-            try:
-                self.ui.backend.safe_set_crossing(cid, status_text)
-                self.applied.emit()
-            except Exception as e:
-                QMessageBox.warning(self, "Manual Override: Crossing Failed", str(e))
-                self.refresh_from_backend()
-        except Exception as e:
-            print(f"[DEBUG] crossing apply error: {e}")
+            self.ui.backend.safe_set_crossing(cid, status_text)
+            self.applied.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Crossing Failed", str(exc))
+            self.refresh_from_backend()
 
-    def _on_signal_changed(self, color_text):
+    def _on_signal_changed(self, color_text: str) -> None:
         try:
-            block = int(self.block_spin.value())
-            try:
-                self.ui.backend.set_signal(block, color_text)
-                self.applied.emit()
-            except Exception as e:
-                QMessageBox.warning(self, "Manual Override: Signal Failed", str(e))
-                self.refresh_from_backend()
-        except Exception as e:
-            print(f"[DEBUG] signal apply error: {e}")
+            block = self.block_spin.value()
+            self.ui.backend.set_signal(block, color_text)
+            self.applied.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Signal Failed", str(exc))
+            self.refresh_from_backend()
 
-    def _apply(self):
-        # Keep a compatible Apply that performs the same changes (useful if user expects a final confirmation)
-        errors = []
+    def _apply(self) -> None:
+        """Apply all dialog changes to backend."""
+        errors: list[str] = []
 
-        # Occupancy
         try:
-            block = int(self.block_spin.value())
-            occ = True if self.occ_combo.currentText() == "Yes" else False
+            block = self.block_spin.value()
+            occ = self.occ_combo.currentText() == "Yes"
             self.ui.backend.set_block_occupancy(block, occ)
-        except Exception as e:
-            errors.append(f"Block occupancy: {e}")
+        except Exception as exc:
+            errors.append(f"Block occupancy: {exc}")
 
-        # Switch
-        try:
-            if self.switch_combo.isEnabled():
-                try:
-                    sid = int(self.switch_combo.currentText())
-                    pos = self.switch_pos_combo.currentText()
-                    try:
-                        self.ui.backend.safe_set_switch(sid, pos)
-                    except Exception as e:
-                        errors.append(f"Switch: {e}")
-                except ValueError:
-                    pass
-        except Exception as e:
-            errors.append(f"Switch: {e}")
-
-        # Crossing
-        try:
-            if self.crossing_combo.isEnabled():
-                try:
-                    cid = int(self.crossing_combo.currentText())
-                    status = self.crossing_status_combo.currentText()
-                    try:
-                        self.ui.backend.safe_set_crossing(cid, status)
-                    except Exception as e:
-                        errors.append(f"Crossing: {e}")
-                except ValueError:
-                    pass
-        except Exception as e:
-            errors.append(f"Crossing: {e}")
-
-        # Signal
-        try:
-            block = int(self.block_spin.value())
-            color = self.signal_combo.currentText()
+        if self.switch_combo.isEnabled():
             try:
-                self.ui.backend.set_signal(block, color)
-            except Exception as e:
-                errors.append(f"Signal: {e}")
-        except Exception as e:
-            errors.append(f"Signal: {e}")
+                sid = int(self.switch_combo.currentText())
+                pos = self.switch_pos_combo.currentText()
+                self.ui.backend.safe_set_switch(sid, pos)
+            except Exception as exc:
+                errors.append(f"Switch: {exc}")
 
-        # ensure main UI updates
+        if self.crossing_combo.isEnabled():
+            try:
+                cid = int(self.crossing_combo.currentText())
+                status = self.crossing_status_combo.currentText()
+                self.ui.backend.safe_set_crossing(cid, status)
+            except Exception as exc:
+                errors.append(f"Crossing: {exc}")
+
+        try:
+            block = self.block_spin.value()
+            color = self.signal_combo.currentText()
+            self.ui.backend.set_signal(block, color)
+        except Exception as exc:
+            errors.append(f"Signal: {exc}")
+
         try:
             self.ui.refresh_tables()
         except Exception:
-            pass
+            logger.debug("Failed to refresh tables after apply.")
 
         QApplication.processEvents()
-
-        # Emit applied so other listeners can react
         self.applied.emit()
 
         if errors:
-            QMessageBox.warning(self, "Manual Override: Partial Failure", "\n".join(errors))
+            QMessageBox.warning(self, "Manual Override: Partial Failure",
+                                "\n".join(errors))
         else:
-            QMessageBox.information(self, "Manual Override", "Changes applied.")
-            # keep dialog open for further live edits; do not auto-close
+            QMessageBox.information(self, "Manual Override",
+                                    "Changes applied successfully.")
 
 
 class TrackControllerUI(QWidget):
-    def __init__(self, network, parent=None):
+    """Main application window for the Track Controller module."""
+
+    def __init__(self, network: TrackNetwork, parent: QWidget | None = None) -> None:
+        """Initialize the Track Controller UI."""
         super().__init__(parent)
         self.network = network
         self.backend = network.get_line("Blue Line")
+
         try:
             self.backend.add_listener(self.refresh_tables)
         except Exception:
-            pass
+            logger.exception("Failed to attach refresh listener to backend.")
 
-        self.init_ui()
+        self._build_ui()
 
-    def init_ui(self):
+    def _build_ui(self) -> None:
+        """Construct the main layout and widgets."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # Track dropdown
+        # Track selector row
         top_row = QHBoxLayout()
         self.dropdown_text = QLabel("Track: Blue Line")
-        font_droptext = self.dropdown_text.font()
-        font_droptext.setPointSize(16)
-        font_droptext.setBold(True)
-        self.dropdown_text.setFont(font_droptext)
+        font_title = QFont()
+        font_title.setPointSize(16)
+        font_title.setBold(True)
+        self.dropdown_text.setFont(font_title)
         top_row.addWidget(self.dropdown_text)
         top_row.addStretch()
 
@@ -386,34 +316,17 @@ class TrackControllerUI(QWidget):
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
 
-        # Main block table
-        self.tablemain = QTableWidget()
-        self.container_layout.addWidget(self.tablemain)
-
-        # Switches
-        self.container_layout.addWidget(QLabel("Switches"))
-        self.tableswitch = QTableWidget()
-        self.container_layout.addWidget(self.tableswitch)
-
-        # Crossings
-        self.container_layout.addWidget(QLabel("Railway Crossings"))
-        self.tablecrossing = QTableWidget()
-        self.container_layout.addWidget(self.tablecrossing)
-
-        # Broken Rails
-        self.container_layout.addWidget(QLabel("Broken Rails"))
-        self.tablebroken = QTableWidget()
-        self.container_layout.addWidget(self.tablebroken)
-
-        # Signal States
-        self.container_layout.addWidget(QLabel("Signal States"))
-        self.tablesignal = QTableWidget()
-        self.container_layout.addWidget(self.tablesignal)
+        # Add data tables
+        self._add_table("Blocks", "tablemain")
+        self._add_table("Switches", "tableswitch")
+        self._add_table("Crossings", "tablecrossing")
+        self._add_table("Broken Rails", "tablebroken")
+        self._add_table("Signals", "tablesignal")
 
         self.table_hud.setWidget(self.container)
         layout.addWidget(self.table_hud)
 
-        # Bottom row
+        # Bottom control row
         bottom_row = QHBoxLayout()
         self.plc_button = QPushButton("PLC File Upload")
         bigboi = self.plc_button.sizeHint()
@@ -423,76 +336,81 @@ class TrackControllerUI(QWidget):
         self.filename_box = QLineEdit("File: None")
         self.filename_box.setReadOnly(True)
         self.filename_box.setFixedWidth(800)
-        font_text: QFont = self.filename_box.font()
+        font_text = QFont()
         font_text.setPointSize(14)
         self.filename_box.setFont(font_text)
         self.filename_box.setFixedHeight(bigboi.height() * 2)
         bottom_row.addWidget(self.filename_box)
         bottom_row.addStretch()
+
         self.manual_button = QPushButton("Test UI")
         self.manual_button.clicked.connect(self.open_manual_override)
-        self.plc_button.setFixedSize(bigboi.width() * 2, bigboi.height() * 2)
         bottom_row.addWidget(self.manual_button)
         layout.addLayout(bottom_row)
 
-    def switch_line(self, line_name: str):
-        self.dropdown_text.setText(f"Track: {line_name}")
-        # remove previous listener (if any)
-        try:
-            old_backend = self.backend
-            old_backend.remove_listener(self.refresh_tables)
-        except Exception:
-            pass
+    def _add_table(self, label_text: str, attr_name: str) -> None:
+        """Add a labeled QTableWidget to the container layout."""
+        self.container_layout.addWidget(QLabel(label_text))
+        table = QTableWidget()
+        setattr(self, attr_name, table)
+        self.container_layout.addWidget(table)
 
-        # set new backend and register listener
+    def switch_line(self, line_name: str) -> None:
+        """Switch the UI to a different track line."""
+        self.dropdown_text.setText(f"Track: {line_name}")
+        try:
+            self.backend.remove_listener(self.refresh_tables)
+        except Exception:
+            logger.debug("No previous listener to remove.")
+
         self.backend = self.network.get_line(line_name)
         try:
             self.backend.add_listener(self.refresh_tables)
         except Exception:
-            pass
-
+            logger.exception("Failed to add listener for new line.")
         self.refresh_tables()
 
-    def open_manual_override(self):
+    def open_manual_override(self) -> None:
+        """Open the manual override dialog."""
         dlg = ManualOverrideDialog(self)
-        # Ensure dialog reflects current backend (important if user switched lines)
         dlg.refresh_from_backend()
-        try:
-            dlg.applied.connect(self.refresh_tables)
-        except Exception:
-            pass
-        # show modeless so user can keep it open and see live updates
+        dlg.applied.connect(self.refresh_tables)
         dlg.show()
 
-    def refresh_tables(self):
-        # Reset tables
+    def refresh_tables(self) -> None:
+        """Refresh all table data from backend."""
         try:
+            # Blocks table
             self.tablemain.setRowCount(self.backend.num_blocks)
             self.tablemain.setColumnCount(6)
             self.tablemain.setHorizontalHeaderLabels([
-                "Block",
-                "Suggested Speed",
-                "Commanded Speed",
-                "Occupancy",
-                "Suggested Authority",
-                "Commanded Authority"
+                "Block", "Suggested Speed", "Commanded Speed", "Occupancy",
+                "Suggested Authority", "Commanded Authority"
             ])
-            self.tablemain.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.tablemain.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch)
             self.tablemain.verticalHeader().setVisible(False)
 
             for i, (block, data) in enumerate(self.backend.blocks.items()):
                 self.tablemain.setItem(i, 0, QTableWidgetItem(str(block)))
-                self.tablemain.setItem(i, 1, QTableWidgetItem(str(data["suggested_speed"])))
-                self.tablemain.setItem(i, 2, QTableWidgetItem(str(data["commanded_speed"])))
-                self.tablemain.setItem(i, 3, QTableWidgetItem("Yes" if data["occupied"] else "No"))
-                self.tablemain.setItem(i, 4, QTableWidgetItem(str(data["suggested_auth"])))
-                self.tablemain.setItem(i, 5, QTableWidgetItem(str(data["commanded_auth"])))
+                self.tablemain.setItem(i, 1, QTableWidgetItem(
+                    str(data["suggested_speed"])))
+                self.tablemain.setItem(i, 2, QTableWidgetItem(
+                    str(data["commanded_speed"])))
+                self.tablemain.setItem(i, 3, QTableWidgetItem(
+                    "Yes" if data["occupied"] else "No"))
+                self.tablemain.setItem(i, 4, QTableWidgetItem(
+                    str(data["suggested_auth"])))
+                self.tablemain.setItem(i, 5, QTableWidgetItem(
+                    str(data["commanded_auth"])))
 
             # Switches
             self.tableswitch.setRowCount(len(self.backend.switches))
             self.tableswitch.setColumnCount(3)
-            self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Blocks", "Position"])
-            self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.tableswitch.setHorizontalHeaderLabels(
+                ["Switch ID", "Blocks", "Position"])
+            self.tableswitch.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch)
             for i, (sid, pos) in enumerate(self.backend.switches.items()):
                 self.tableswitch.setItem(i, 0, QTableWidgetItem(str(sid)))
                 blocks = self.backend.switch_map.get(sid, ())
@@ -502,33 +420,39 @@ class TrackControllerUI(QWidget):
             # Crossings
             self.tablecrossing.setRowCount(len(self.backend.crossings))
             self.tablecrossing.setColumnCount(3)
-            self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
-            self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.tablecrossing.setHorizontalHeaderLabels(
+                ["Crossing ID", "Block", "Status"])
+            self.tablecrossing.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch)
             for i, (cid, status) in enumerate(self.backend.crossings.items()):
                 block = self.backend.crossing_blocks.get(cid, "-")
                 self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
                 self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block)))
                 self.tablecrossing.setItem(i, 2, QTableWidgetItem(status))
 
-            # Broken Rails
-            broken_blocks = [b for b, d in self.backend.blocks.items() if d["broken"]]
+            # Broken rails
+            broken_blocks = [
+                b for b, d in self.backend.blocks.items() if d["broken"]
+            ]
             self.tablebroken.setRowCount(len(broken_blocks))
             self.tablebroken.setColumnCount(2)
             self.tablebroken.setHorizontalHeaderLabels(["Block", "Status"])
-            self.tablebroken.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.tablebroken.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch)
+            for i, b in enumerate(broken_blocks):
+                self.tablebroken.setItem(i, 0, QTableWidgetItem(str(b)))
+                self.tablebroken.setItem(i, 1, QTableWidgetItem("Broken"))
 
-            for row, b in enumerate(broken_blocks):
-                self.tablebroken.setItem(row, 0, QTableWidgetItem(str(b)))
-                self.tablebroken.setItem(row, 1, QTableWidgetItem("Broken"))
-
-            # Signal States
+            # Signals
             self.tablesignal.setRowCount(self.backend.num_blocks)
             self.tablesignal.setColumnCount(2)
             self.tablesignal.setHorizontalHeaderLabels(["Block", "Signal"])
-            self.tablesignal.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.tablesignal.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch)
             for i, (block, data) in enumerate(self.backend.blocks.items()):
                 self.tablesignal.setItem(i, 0, QTableWidgetItem(str(block)))
-                self.tablesignal.setItem(i, 1, QTableWidgetItem(data.get("signal", "Green")))
-
-        except Exception as e:
-            print(f"[DEBUG] refresh_tables error: {e}")
+                self.tablesignal.setItem(
+                    i, 1, QTableWidgetItem(data.get("signal", "Green"))
+                )
+        except Exception:
+            logger.exception("Failed to refresh tables.")

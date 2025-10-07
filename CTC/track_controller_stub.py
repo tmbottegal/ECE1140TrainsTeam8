@@ -5,10 +5,15 @@ from typing import Callable, Dict, List, Optional, Tuple
 Snapshot = Dict[str, object]
 
 # ---- demo speed policy constants (used by stub to show realistic speeds) ----
-LINE_SPEED_LIMIT_KMPH = 50
-LINE_SPEED_LIMIT_MPS = LINE_SPEED_LIMIT_KMPH * 1000 / 3600
+
 BLOCK_LEN_M = 50.0 # each block = 50 meters
-YELLOW_FACTOR = 0.60        # slow on yellow
+LINE_SPEED_LIMIT_KMPH = 50
+LINE_SPEED_LIMIT_MPS  = LINE_SPEED_LIMIT_KMPH * 1000.0 / 3600.0  # ≈13.8889 m/s
+YELLOW_FACTOR = 0.60
+
+# Only these blocks have signals on Blue:
+CONTROL_SIGNALS = {"B6", "C11"}
+
 
 class TrackControllerStub:
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
@@ -42,7 +47,9 @@ class TrackControllerStub:
 
         # Dynamic state
         self._occupancy: Dict[str, str] = {k: "free" for k in self._order}
-        self._signals: Dict[str, str] = {k: "GREEN" for k in self._order}
+        # Only create signal state for the actual controlled signal blocks
+        self._signals: Dict[str, str] = {b: "GREEN" for b in CONTROL_SIGNALS}
+
         self._crossing_active: Dict[str, bool] = {k: False for k in self._order if self._has_crossing.get(k, False)}
 
         self._switch_pos: Dict[str, str] = {}            # "SW1" -> "STRAIGHT"/"DIVERGE"
@@ -69,7 +76,9 @@ class TrackControllerStub:
             return 0.0
         if self._broken_rail.get(nxt, False):
             return 0.0
-        aspect = (self._signals.get(nxt) or "").upper()
+        
+        aspect = (self._signals.get(cur) or "").upper()
+
         if aspect == "RED":
             return 0.0
         if aspect == "YELLOW":
@@ -117,6 +126,47 @@ class TrackControllerStub:
     # NEW: enable/disable automatic lining of SW1
     def set_auto_line(self, enabled: bool) -> None:
         self._auto_line = bool(enabled)
+    
+    def _is_blocked(self, blk: Optional[str]) -> bool:
+        """Unsafe if missing/EOL, occupied/closed, or broken."""
+        if blk is None:
+            return True
+        if self._occupancy.get(blk) in ("closed", "occupied"):
+            return True
+        if self._broken_rail.get(blk, False):
+            return True
+        return False
+
+    def _aspect_at_signal(self, sig_blk: str) -> str:
+        """
+        3-aspect at the *signal block* only:
+        - RED    if the block beyond the signal (following current switch) is unsafe
+        - YELLOW if that block is safe but the following block is unsafe
+        - GREEN  otherwise
+        """
+        nxt  = self._next(sig_blk)   # respects current switch alignment
+        if self._is_blocked(nxt):
+            return "RED"
+        nxt2 = self._next(nxt)
+        if self._is_blocked(nxt2):
+            return "YELLOW"
+        return "GREEN"
+
+    def _distance_to_next_control_signal(self, cur: str, max_look: int = 6) -> tuple[int | None, str | None]:
+        """
+        Walk forward following _next() until you hit B6 or C11.
+        Returns (distance_in_blocks, signal_block) or (None, None) if no signal ahead within max_look.
+        """
+        seen = set()
+        blk = cur
+        for d in range(0, max_look + 1):
+            if blk in CONTROL_SIGNALS:
+                return d, blk
+            seen.add(blk)
+            blk = self._next(blk)
+            if blk is None or blk in seen:
+                break
+        return None, None
 
     # ===== Resets for Test Bench =====
     def reset_trains(self) -> None:
@@ -151,7 +201,8 @@ class TrackControllerStub:
         """Send a snapshot without advancing simulation."""
         if self._status_cb:
             self._status_cb(self._make_snapshot())
-
+    
+    
     # ---------- simulation ----------
     def tick(self) -> None:
         self._tick += 1
@@ -242,17 +293,45 @@ class TrackControllerStub:
 
 
     def _recompute_signals(self) -> None:
-        occ = {b for b, s in self._occupancy.items() if s == "occupied"}
-        self._signals = {}
-        for b in self._order:
-            if self._occupancy[b] == "closed":
-                self._signals[b] = ""
-            elif b in occ:
-                self._signals[b] = "RED"
-            elif any((nx := self._next(x)) and nx == b for x in occ):  # next() may be None at EOL
-                self._signals[b] = "YELLOW"
+        """ABS-style two-block look-ahead at B6 (5→6→7) and C11 (5→11→12)."""
+
+        def is_clear(b: str) -> bool:
+            if b not in self._order:
+                return False
+            if self._occupancy.get(b) in ("occupied", "closed"):
+                return False
+            if self._broken_rail.get(b, False):
+                return False
+            return True
+
+        sw1 = (self._switch_pos.get("SW1", "STRAIGHT") or "STRAIGHT").upper()
+
+        # ----- Signal at B6: governs 5→6→7 (requires SW1 = STRAIGHT) -----
+        if "B6" in CONTROL_SIGNALS:
+            if sw1 != "STRAIGHT":
+                self._signals["B6"] = "RED"
             else:
-                self._signals[b] = "GREEN"
+                first, second = "B6", "B7"
+                if not is_clear(first):
+                    self._signals["B6"] = "RED"
+                elif not is_clear(second):
+                    self._signals["B6"] = "YELLOW"
+                else:
+                    self._signals["B6"] = "GREEN"
+
+        # ----- Signal at C11: governs 5→11→12 (requires SW1 = DIVERGE) -----
+        if "C11" in CONTROL_SIGNALS:
+            if sw1 != "DIVERGE":
+                self._signals["C11"] = "RED"
+            else:
+                first, second = "C11", "C12"
+                if not is_clear(first):
+                    self._signals["C11"] = "RED"
+                elif not is_clear(second):
+                    self._signals["C11"] = "YELLOW"
+                else:
+                    self._signals["C11"] = "GREEN"
+
 
     def _recompute_crossings(self) -> None:
         active = {}
@@ -320,42 +399,69 @@ class TrackControllerStub:
 
     # ---- suggested speed helper (stub-side policy for the demo) ----
     def _suggest_speed_for_train(self, cur: str) -> float:
-        """
-        - 0 m/s if next block doesn't exist (EOL), is closed/occupied, broken rail, or signal is RED
-        - 0.6 * limit on YELLOW
-        - limit on GREEN
-        """
-        nxt = self._next(cur)
+        nxt = self._next_for_train(self._find_tid_at_block(cur), cur) if hasattr(self, "_find_tid_at_block") else self._next(cur)
         if nxt is None:
             return 0.0
-        if self._occupancy.get(nxt) in ("closed", "occupied"):
+        if self._occupancy.get(nxt) in ("occupied", "closed"):
             return 0.0
         if self._broken_rail.get(nxt, False):
             return 0.0
-        aspect = (self._signals.get(nxt) or "").upper()
-        if aspect == "RED":
-            return 0.0
-        if aspect == "YELLOW":
-            return LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
+
+        # Only slow if the NEXT block is itself a controlled-signal block and it's YELLOW
+        if nxt in CONTROL_SIGNALS and self._signals.get(nxt) == "YELLOW":
+            return YELLOW_FACTOR * LINE_SPEED_LIMIT_MPS
+
         return LINE_SPEED_LIMIT_MPS
+
+
 
     # ---------- snapshot ----------
     def _make_snapshot(self) -> Snapshot:
-        blocks_payload = []
+        blocks_payload: List[Dict[str, object]] = []
+
         for b in self._order:
             sec, num = b[0], int(b[1:])
+
             blocks_payload.append({
                 "key": b,
                 "section": sec,
                 "block_id": num,
-                "occupancy": self._occupancy[b],
-                "station": self._station.get(b, ""),
-                "signal": self._signals.get(b, ""),
-                "switch": self._switch_of_block.get(b, ""),
-                "crossing": bool(self._crossing_active.get(b, False)),
-                "beacon": self._beacon.get(b, ""),
-                "broken_rail": bool(self._broken_rail.get(b, False)),
+
+                # Use .get() with defaults to avoid KeyError during early init
+                "occupancy": self._occupancy.get(b, "free"),
+                "station":   self._station.get(b, ""),
+
+                # Only B6/C11 exist in self._signals; others will resolve to ""
+                "signal":    self._signals.get(b, ""),
+
+                # Metadata from static maps
+                "switch":    self._switch_of_block.get(b, ""),
+
+                # Crossings and faults
+                "crossing":      bool(self._crossing_active.get(b, False)),
+                "beacon":        self._beacon.get(b, ""),
+                "broken_rail":   bool(self._broken_rail.get(b, False)),
             })
+
+        # (Optional) include trains snapshot if your UI expects it
+        trains_payload = []
+        for tid, info in self._trains.items():
+            trains_payload.append({
+                "train_id": str(tid),                            # <-- was "id"
+                "block":     info.get("block", ""),
+                "suggested_speed_mps": float(info.get("speed_mps", 0.0)),
+                "authority_blocks": int(info.get("authority_blocks", 0)),
+            })
+
+
+        return {
+            "line": self.line_name,
+            "tick": self._tick,
+            "blocks": blocks_payload,
+            "trains": trains_payload,
+            "switch_pos": dict(self._switch_pos),   # e.g., {"SW1":"STRAIGHT"}
+        }
+
 
         trains_payload = []
         for tid in self._trains:

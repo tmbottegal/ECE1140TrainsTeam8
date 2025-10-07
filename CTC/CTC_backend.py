@@ -9,6 +9,7 @@ BLOCK_LEN_M: float = 50.0
 LINE_SPEED_LIMIT_MPS: float = 13.9
 YELLOW_FACTOR: float = 0.60
 SAFETY_BLOCKS: int = 0
+CONTROL_SIGNALS = {"B6", "C11"}
 
 A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
 B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]

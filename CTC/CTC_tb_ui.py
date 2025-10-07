@@ -1,5 +1,10 @@
+# CTC_tb_ui.py
 from PyQt6 import QtWidgets, QtCore, QtGui
-from .CTC_backend import TrackState   # make sure ctc_backend.py is in same folder
+from .CTC_backend import TrackState
+
+# Keep UI-side constants in sync with backend policy for display/convert
+BLOCK_LEN_M = 50.0          # meters per block (demo line)
+MPS_TO_MPH  = 2.23693629
 
 LINE_DATA = {
     "Blue Line": [
@@ -33,8 +38,10 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         # === Backend state ===
         self.state = TrackState("Blue Line", LINE_DATA["Blue Line"])
+        self._trainInfoPage = None
+        self._manualPage = None
 
-        # === Tabs ===
+        # === Tabs container ===
         self.tabs = QtWidgets.QTabWidget()
 
         # === Occupancy tab ===
@@ -69,7 +76,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line("Blue Line")
         occLayout.addWidget(self.mapTable)
 
-        # Buttons
+        # Buttons under the table
         self.manualBtn = QtWidgets.QPushButton("Manual Override")
         self.infoBtn   = QtWidgets.QPushButton("Train Information")
         self.uploadBtn = QtWidgets.QPushButton("Upload Schedule")
@@ -90,21 +97,119 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.uploadBtn.clicked.connect(self._upload_schedule)
         self.maintBtn.clicked.connect(self._maintenance_inputs)
 
-        # Action area
+        # Action area (below buttons)
         self.actionArea = QtWidgets.QStackedWidget()
         occLayout.addWidget(self.actionArea)
         self.blankPage = QtWidgets.QWidget()
         self.actionArea.addWidget(self.blankPage)
         self.actionArea.setCurrentWidget(self.blankPage)
 
-        # === Extra Tabs ===
+        # === Test Bench (Stub) tab — separate test UI ===
+        self.testTab = QtWidgets.QWidget()
+        testLayout = QtWidgets.QVBoxLayout(self.testTab)
+
+        hint = QtWidgets.QLabel(
+            "Test-only controls.\n"
+            "• CTC → TC: Send Suggested Speed/Authority (Train tools)\n"
+            "• TC → CTC: Switch position & Broken rail simulated here by the stub."
+        )
+        hint.setStyleSheet("color: #bbb;")
+        testLayout.addWidget(hint)
+
+        # ---- Block tools ----
+        blockGroup = QtWidgets.QGroupBox("Block tools (TC → CTC telemetry, set here via stub)")
+        bl = QtWidgets.QGridLayout(blockGroup)
+        self.blockCombo = QtWidgets.QComboBox()
+        self._refresh_block_combo()
+        self.blockStatus = QtWidgets.QComboBox()
+        self.blockStatus.addItems(["Open (free)", "Closed"])  # removed "occupied" — telemetry driven
+        self.brokenCheck = QtWidgets.QCheckBox("Broken rail")
+        applyBlockBtn = QtWidgets.QPushButton("Apply to Block")
+
+        bl.addWidget(QtWidgets.QLabel("Block:"), 0, 0); bl.addWidget(self.blockCombo, 0, 1)
+        bl.addWidget(QtWidgets.QLabel("Status:"), 1, 0); bl.addWidget(self.blockStatus, 1, 1)
+        bl.addWidget(self.brokenCheck, 2, 1)
+        bl.addWidget(applyBlockBtn, 3, 0, 1, 2)
+
+        applyBlockBtn.clicked.connect(self._apply_block_tools)
+        testLayout.addWidget(blockGroup)
+
+        # ---- Switch tools ----
+        switchGroup = QtWidgets.QGroupBox("Switch tools (TC → CTC position, set here via stub)")
+        sl = QtWidgets.QGridLayout(switchGroup)
+        self.switchCombo = QtWidgets.QComboBox()
+        self._refresh_switch_combo()
+        self.switchPos = QtWidgets.QComboBox(); self.switchPos.addItems(["STRAIGHT", "DIVERGE"])
+        applySwitchBtn = QtWidgets.QPushButton("Set Switch Position")
+
+        self.autoLineCheck = QtWidgets.QCheckBox("Auto-line SW1 when trains approach")
+        self.autoLineCheck.setChecked(True)
+        self.autoLineCheck.toggled.connect(lambda v: self.state.set_auto_line(v))
+
+        sl.addWidget(QtWidgets.QLabel("Switch ID:"), 0, 0); sl.addWidget(self.switchCombo, 0, 1)
+        sl.addWidget(QtWidgets.QLabel("Position:"), 1, 0); sl.addWidget(self.switchPos, 1, 1)
+        sl.addWidget(applySwitchBtn, 2, 0, 1, 2)
+
+        sl.addWidget(self.autoLineCheck, 3, 0, 1, 2)
+
+        applySwitchBtn.clicked.connect(self._apply_switch_tools)
+        testLayout.addWidget(switchGroup)
+
+        # ---- Train tools (direct CTC→TC send) ----
+        trainGroup = QtWidgets.QGroupBox("Train tools (CTC → TC: send suggested speed/authority)")
+        tl = QtWidgets.QGridLayout(trainGroup)
+        self.trainCombo = QtWidgets.QComboBox(); self.trainCombo.addItems(["T1", "T2"])
+        self.speedSpinTB = QtWidgets.QSpinBox(); self.speedSpinTB.setRange(0, 120); self.speedSpinTB.setSuffix(" mph")
+        self.authSpinTB  = QtWidgets.QSpinBox(); self.authSpinTB.setRange(0, 1000); self.authSpinTB.setSuffix(" m")
+        applyTrainBtn = QtWidgets.QPushButton("Apply to Train")
+
+        tl.addWidget(QtWidgets.QLabel("Train:"), 0, 0); tl.addWidget(self.trainCombo, 0, 1)
+        tl.addWidget(QtWidgets.QLabel("Suggested Speed:"), 1, 0); tl.addWidget(self.speedSpinTB, 1, 1)
+        tl.addWidget(QtWidgets.QLabel("Suggested Authority:"), 2, 0); tl.addWidget(self.authSpinTB, 2, 1)
+        tl.addWidget(applyTrainBtn, 3, 0, 1, 2)
+
+        applyTrainBtn.clicked.connect(self._apply_train_tools)
+        testLayout.addWidget(trainGroup)
+
+        testLayout.addStretch(1)
+        # ---- Reset / Control tools ----
+        ctrlGroup = QtWidgets.QGroupBox("Reset / Control")
+        cl = QtWidgets.QGridLayout(ctrlGroup)
+
+        self.pauseBtn = QtWidgets.QPushButton("Pause")
+        self.stepBtn  = QtWidgets.QPushButton("Step 1 tick")
+        self.stepBtn.setEnabled(False)
+
+        resetTrainsBtn = QtWidgets.QPushButton("Reset Trains")
+        resetInfraBtn  = QtWidgets.QPushButton("Reset Infrastructure")
+        resetAllBtn    = QtWidgets.QPushButton("Reset ALL")
+
+        cl.addWidget(self.pauseBtn,     0, 0)
+        cl.addWidget(self.stepBtn,      0, 1)
+        cl.addWidget(resetTrainsBtn,    1, 0)
+        cl.addWidget(resetInfraBtn,     1, 1)
+        cl.addWidget(resetAllBtn,       2, 0, 1, 2)
+
+        testLayout.addWidget(ctrlGroup)
+
+        # Wire up controls
+        self.pauseBtn.clicked.connect(self._toggle_pause)
+        self.stepBtn.clicked.connect(self._step_once)
+        resetTrainsBtn.clicked.connect(lambda: (self.state.reset_trains(), self._reload_line(self.state.line_name)))
+        resetInfraBtn.clicked.connect(lambda: (self.state.reset_infrastructure(), self._reload_line(self.state.line_name)))
+        resetAllBtn.clicked.connect(lambda: (self.state.reset_all(), self._reload_line(self.state.line_name)))
+
+
+        # === Extra Tabs (placeholders) ===
         tempTab = QtWidgets.QWidget()
         tempLayout = QtWidgets.QVBoxLayout(tempTab)
         tempLayout.addWidget(QtWidgets.QLabel("Will implement later"))
         issuesTab = QtWidgets.QWidget()
         issuesLayout = QtWidgets.QVBoxLayout(issuesTab)
         issuesLayout.addWidget(QtWidgets.QLabel("Will implement later"))
+
         self.tabs.addTab(self.occupancyTab, "Occupancy")
+        self.tabs.addTab(self.testTab, "Test Bench (Stub)")
         self.tabs.addTab(tempTab, "Temperature")
         self.tabs.addTab(issuesTab, "Issues")
 
@@ -117,10 +222,50 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.timer.timeout.connect(self._tick)
         self.timer.start(1000)   # 1s per tick
 
+        # Hold references to dynamic pages for live refresh
+        self._trainInfoPage = None
+        self._manualPage = None
+
     # ---------- helpers ----------
+    def _refresh_block_combo(self, preserve: bool = False):
+        if not hasattr(self, "blockCombo"):
+            return
+        prev = self.blockCombo.currentText() if preserve else None
+
+        self.blockCombo.blockSignals(True)
+        self.blockCombo.clear()
+        for b in self.state.get_blocks():
+            self.blockCombo.addItem(f"{b.line}{b.block_id}")
+        self.blockCombo.blockSignals(False)
+
+        if preserve and prev:
+            idx = self.blockCombo.findText(prev)
+            if idx >= 0:
+                self.blockCombo.setCurrentIndex(idx)
+
+    def _refresh_switch_combo(self, preserve: bool = False):
+        if not hasattr(self, "switchCombo"):
+            return
+        prev = self.switchCombo.currentText() if preserve else None
+
+        switches = sorted({b.switch for b in self.state.get_blocks() if b.switch})
+        self.switchCombo.blockSignals(True)
+        self.switchCombo.clear()
+        if switches:
+            self.switchCombo.addItems(switches)
+        self.switchCombo.blockSignals(False)
+
+        if preserve and prev:
+            idx = self.switchCombo.findText(prev)
+            if idx >= 0:
+                self.switchCombo.setCurrentIndex(idx)
+
     def _reload_line(self, line_name: str):
-        if line_name != self.state.line_name:
+        # Only rebuild models/combos when the line actually changes
+        line_changed = (line_name != self.state.line_name)
+        if line_changed:
             self.state.set_line(line_name, LINE_DATA[line_name])
+
         blocks = self.state.get_blocks()
         self.mapTable.setRowCount(len(blocks))
         for r, b in enumerate(blocks):
@@ -132,14 +277,40 @@ class CTCWindow(QtWidgets.QMainWindow):
             for c, value in enumerate(rowdata):
                 item = QtWidgets.QTableWidgetItem(str(value))
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                if c == 2:  # Occupancy col
+
+                # Occupancy coloring
+                if c == 2:
                     if b.status == "occupied":
                         item.setBackground(QtGui.QColor("red"))
                         item.setForeground(QtGui.QColor("white"))
                     elif b.status == "closed":
                         item.setBackground(QtGui.QColor("gray"))
                         item.setForeground(QtGui.QColor("white"))
+
+                # Traffic light coloring
+                if c == 6:
+                    light = str(value).upper()
+                    if light == "RED":
+                        item.setBackground(QtGui.QColor("#b00020"))
+                        item.setForeground(QtGui.QColor("white"))
+                    elif light == "YELLOW":
+                        item.setBackground(QtGui.QColor("#d7b600"))
+                        item.setForeground(QtGui.QColor("black"))
+                    elif light == "GREEN":
+                        item.setBackground(QtGui.QColor("#1b5e20"))
+                        item.setForeground(QtGui.QColor("white"))
+
                 self.mapTable.setItem(r, c, item)
+
+        if line_changed:
+            self._refresh_block_combo(preserve=True)
+            self._refresh_switch_combo(preserve=True)
+
+        # If Train Info / Manual pages are open, refresh them too
+        if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
+            self._populate_train_info_table()
+        if self._manualPage and self.actionArea.currentWidget() is self._manualPage:
+            self._populate_manual_table()
 
     def _get_selected_block(self):
         row = self.mapTable.currentRow()
@@ -150,109 +321,220 @@ class CTCWindow(QtWidgets.QMainWindow):
         blk = self.mapTable.item(row, 1).text()
         return row, f"{sec}{blk}"
 
-    # ---------- actions ----------
+    # ---------- actions (Occupancy tab) ----------
     def _maintenance_inputs(self):
         row, block_id = self._get_selected_block()
         if row is None:
             return
         choice, ok = QtWidgets.QInputDialog.getItem(
             self, "Inputs", f"Toggle status for Block {block_id}:",
-            ["free", "occupied", "closed"], 0, False
+            ["Open (free)", "Closed"], 0, False
         )
         if ok:
-            self.state.set_status(block_id, choice)
+            status = "closed" if "Closed" in choice else "free"
+            self.state.set_status(block_id, status)
             self._reload_line(self.state.line_name)
 
+    # ---------- Manual Override ----------
     def _manual_override(self):
         page = QtWidgets.QWidget()
+        page.setObjectName("ManualPage")
+        self._manualPage = page
+
         layout = QtWidgets.QVBoxLayout(page)
-        layout.addWidget(QtWidgets.QLabel("Manual Override - Dispatch Trains"))
+        layout.addWidget(QtWidgets.QLabel("Manual Override — per-train override of CTC policy"))
 
-        self.trainTable = QtWidgets.QTableWidget(0, 6)
-        self.trainTable.setHorizontalHeaderLabels(
-            ["Train ID", "Current Block", "Origin", "Destination", "Speed", "Authority"]
+        # Table shows live trains
+        self.manualTable = QtWidgets.QTableWidget(0, 6)
+        self.manualTable.setHorizontalHeaderLabels(
+            ["Train ID", "Current Block", "Override?", "Speed (mph)", "Authority (m)", "Destination"]
         )
-        self.trainTable.verticalHeader().setVisible(False)
+        self.manualTable.verticalHeader().setVisible(False)
+        self.manualTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.manualTable)
 
-        trains = [
-            ("T1", "A2", "YARD", "C", 0, 0),
-            ("T2", "A5", "YARD", "C", 0, 0),
-        ]
-        self.trainTable.setRowCount(len(trains))
-        for r, row in enumerate(trains):
-            for c, value in enumerate(row):
-                item = QtWidgets.QTableWidgetItem(str(value))
-                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                self.trainTable.setItem(r, c, item)
-        layout.addWidget(self.trainTable)
-
+        # Controls
         form = QtWidgets.QFormLayout()
-        speedSpin = QtWidgets.QSpinBox(); speedSpin.setRange(0, 120); speedSpin.setSuffix(" mph")
-        authSpin  = QtWidgets.QSpinBox(); authSpin.setRange(0, 20);  authSpin.setSuffix(" blocks")
-        destCombo = QtWidgets.QComboBox(); destCombo.addItems(["YARD", "B", "C"])
-        form.addRow("Suggested Speed:", speedSpin)
-        form.addRow("Suggested Authority:", authSpin)
+        self.overrideCheck = QtWidgets.QCheckBox("Enable override for selected train")
+        self.speedSpinMO = QtWidgets.QDoubleSpinBox(); self.speedSpinMO.setRange(0, 120); self.speedSpinMO.setDecimals(1); self.speedSpinMO.setSuffix(" mph")
+        self.authSpinMO  = QtWidgets.QDoubleSpinBox(); self.authSpinMO.setRange(0, 2000); self.authSpinMO.setDecimals(0); self.authSpinMO.setSuffix(" m")
+        destCombo = QtWidgets.QComboBox(); destCombo.addItems(["YARD", "B", "C"])  # display only (not wired in stub)
+
+        form.addRow(self.overrideCheck)
+        form.addRow("Suggested Speed:", self.speedSpinMO)
+        form.addRow("Suggested Authority:", self.authSpinMO)
         form.addRow("Destination:", destCombo)
         layout.addLayout(form)
 
-        dispatchBtn = QtWidgets.QPushButton("Dispatch")
-        layout.addWidget(dispatchBtn)
+        applyBtn = QtWidgets.QPushButton("Apply")
+        layout.addWidget(applyBtn)
 
-        def on_dispatch():
-            row = self.trainTable.currentRow()
-            if row < 0:
-                QtWidgets.QMessageBox.warning(self, "No Train Selected", "Please select a train first.")
-                return
-            self.trainTable.setItem(row, 4, QtWidgets.QTableWidgetItem(str(speedSpin.value())))
-            self.trainTable.setItem(row, 5, QtWidgets.QTableWidgetItem(str(authSpin.value())))
-            self.trainTable.setItem(row, 3, QtWidgets.QTableWidgetItem(destCombo.currentText()))
-            QtWidgets.QMessageBox.information(
-                self, "Train Dispatched",
-                f"Train dispatched to {destCombo.currentText()} at {speedSpin.value()} mph, "
-                f"authority {authSpin.value()} blocks."
-            )
+        applyBtn.clicked.connect(self._apply_manual_override)
 
-        dispatchBtn.clicked.connect(on_dispatch)
         self.actionArea.addWidget(page)
         self.actionArea.setCurrentWidget(page)
+        self._populate_manual_table()
 
+    def _populate_manual_table(self):
+        trains = self.state.get_trains()
+        self.manualTable.setRowCount(len(trains))
+        for r, t in enumerate(trains):
+            tid   = str(t.get("train_id", ""))
+            block = str(t.get("block", ""))
+
+            # Pull any remembered override values for display hints
+            # (No direct read API; we'll just leave cells empty until user sets)
+            chk = QtWidgets.QTableWidgetItem("No")
+            chk.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.manualTable.setItem(r, 0, QtWidgets.QTableWidgetItem(tid))
+            self.manualTable.setItem(r, 1, QtWidgets.QTableWidgetItem(block))
+            self.manualTable.setItem(r, 2, chk)
+            self.manualTable.setItem(r, 3, QtWidgets.QTableWidgetItem(""))  # speed mph (user-entered)
+            self.manualTable.setItem(r, 4, QtWidgets.QTableWidgetItem(""))  # authority m (user-entered)
+            self.manualTable.setItem(r, 5, QtWidgets.QTableWidgetItem(""))
+
+    def _apply_manual_override(self):
+        row = self.manualTable.currentRow()
+        if row < 0:
+            QtWidgets.QMessageBox.warning(self, "No Train Selected", "Please select a train first.")
+            return
+
+        tid = self.manualTable.item(row, 0).text()
+        enabled = self.overrideCheck.isChecked()
+        mph = float(self.speedSpinMO.value())
+        meters = float(self.authSpinMO.value())
+        mps = mph / MPS_TO_MPH  # mph → m/s
+
+        # Send to backend; backend converts meters→blocks for the stub
+        self.state.set_train_override(tid, enabled, speed_mps=mps, authority_m=meters)
+
+        # Update table indicator
+        self.manualTable.setItem(row, 2, QtWidgets.QTableWidgetItem("Yes" if enabled else "No"))
+        self.manualTable.setItem(row, 3, QtWidgets.QTableWidgetItem(f"{mph:.1f}"))
+        self.manualTable.setItem(row, 4, QtWidgets.QTableWidgetItem(f"{int(meters)}"))
+
+        QtWidgets.QMessageBox.information(self, "Override",
+            f"{'Enabled' if enabled else 'Disabled'} override for {tid}.\n"
+            f"Speed={mph:.1f} mph, Authority={int(meters)} m.")
+
+    # ---------- Train Information ----------
     def _train_info(self):
         page = QtWidgets.QWidget()
+        page.setObjectName("TrainInfoPage")
+        self._trainInfoPage = page
+
         layout = QtWidgets.QVBoxLayout(page)
-        layout.addWidget(QtWidgets.QLabel("Train Information"))
+        layout.addWidget(QtWidgets.QLabel("Train Information (live telemetry)"))
 
-        trainTable = QtWidgets.QTableWidget(0, 6)
-        trainTable.setHorizontalHeaderLabels(
-            ["Train ID", "Current Block", "Origin", "Destination", "Speed", "Authority"]
+        self.trainInfoTable = QtWidgets.QTableWidget(0, 6)
+        self.trainInfoTable.setHorizontalHeaderLabels(
+            ["Train ID", "Current Block", "Speed (mph)", "Authority (m)", "Desired Branch", "Raw Blocks"]
         )
-        trainTable.verticalHeader().setVisible(False)
-
-        trains = [
-            ("T1", "A2", "YARD", "C", 30, 5),
-            ("T2", "A5", "YARD", "B", 40, 8),
-        ]
-        trainTable.setRowCount(len(trains))
-        for r, row in enumerate(trains):
-            for c, value in enumerate(row):
-                item = QtWidgets.QTableWidgetItem(str(value))
-                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                trainTable.setItem(r, c, item)
-        trainTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(trainTable)
+        self.trainInfoTable.verticalHeader().setVisible(False)
+        self.trainInfoTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.trainInfoTable)
 
         self.actionArea.addWidget(page)
         self.actionArea.setCurrentWidget(page)
+        self._populate_train_info_table()
 
+    def _populate_train_info_table(self):
+        trains = self.state.get_trains()
+        self.trainInfoTable.setRowCount(len(trains))
+        for r, t in enumerate(trains):
+            tid   = str(t.get("train_id", ""))
+            block = str(t.get("block", ""))
+            spd_mps = float(t.get("suggested_speed_mps", 0.0))
+            mph = spd_mps * MPS_TO_MPH
+            auth_blocks = int(t.get("authority_blocks", 0))
+            auth_m = int(auth_blocks * BLOCK_LEN_M)
+            branch = str(t.get("desired_branch", ""))
+
+            self.trainInfoTable.setItem(r, 0, QtWidgets.QTableWidgetItem(tid))
+            self.trainInfoTable.setItem(r, 1, QtWidgets.QTableWidgetItem(block))
+            self.trainInfoTable.setItem(r, 2, QtWidgets.QTableWidgetItem(f"{mph:.1f}"))
+            self.trainInfoTable.setItem(r, 3, QtWidgets.QTableWidgetItem(str(auth_m)))
+            self.trainInfoTable.setItem(r, 4, QtWidgets.QTableWidgetItem(branch))
+            self.trainInfoTable.setItem(r, 5, QtWidgets.QTableWidgetItem(str(auth_blocks)))
+
+    # ---------- Upload schedule (minimal CSV: train_id,start_block[,authority_m]) ----------
     def _upload_schedule(self):
         fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Upload Schedule", "", "CSV/Excel Files (*.csv *.xlsx)"
+            self, "Upload Schedule", "", "CSV Files (*.csv)"
         )
-        if fname:
-            QtWidgets.QMessageBox.information(self, "Schedule Uploaded", f"Loaded file: {fname}")
+        if not fname:
+            return
+
+        imported = 0
+        try:
+            with open(fname, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = [p.strip() for p in line.split(",") if p.strip() != ""]
+                    if len(parts) < 2:
+                        continue
+                    tid, start = parts[0], parts[1]
+                    self.state.add_train(tid, start)
+                    if len(parts) >= 3:
+                        try:
+                            meters = float(parts[2])
+                            self.state.set_suggested_authority(tid, meters)
+                        except Exception:
+                            pass
+                    imported += 1
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to load: {e}")
+            return
+
+        QtWidgets.QMessageBox.information(self, "Schedule Uploaded", f"Loaded {imported} train(s).")
+
+    # ---------- Test Bench actions ----------
+    def _apply_block_tools(self):
+        bid = self.blockCombo.currentText()
+        is_closed = (self.blockStatus.currentIndex() == 1)
+        self.state.set_status(bid, "closed" if is_closed else "free")
+        self.state.set_broken_rail(bid, self.brokenCheck.isChecked())
+        self._reload_line(self.state.line_name)
+
+    def _apply_switch_tools(self):
+        sw = self.switchCombo.currentText()
+        if not sw:
+            QtWidgets.QMessageBox.information(self, "Switch tools", "No switches on this line.")
+            return
+        pos = self.switchPos.currentText()
+        self.state.set_switch(sw, pos)
+        self._reload_line(self.state.line_name)
+
+    def _apply_train_tools(self):
+        tid = self.trainCombo.currentText()
+        mph = float(self.speedSpinTB.value())
+        mps = mph / MPS_TO_MPH
+        meters = float(self.authSpinTB.value())
+        self.state.set_suggested_speed(tid, mps)
+        self.state.set_suggested_authority(tid, meters)
+        QtWidgets.QMessageBox.information(
+            self, "Train tools",
+            f"Applied to {tid}: {mph:.1f} mph, {int(meters)} m."
+        )
+
+    # ---------- test bench: pause/step ----------
+    def _toggle_pause(self):
+        if self.timer.isActive():
+            self.timer.stop()
+            self.pauseBtn.setText("Resume")
+            self.stepBtn.setEnabled(True)
+        else:
+            self.timer.start(1000)
+            self.pauseBtn.setText("Pause")
+            self.stepBtn.setEnabled(False)
+
+    def _step_once(self):
+        if not self.timer.isActive():
+            self.state.stub_tick()
+            self._reload_line(self.state.line_name)
 
     # ---------- simulation tick ----------
     def _tick(self):
-        self.state._advance_one_step()
+        self.state.stub_tick()
         self._reload_line(self.state.line_name)
 
 

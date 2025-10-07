@@ -2,148 +2,219 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
-import itertools
+import math
+
+from .track_controller_stub import TrackControllerStub
+
+BLOCK_LEN_M: float = 50.0
+LINE_SPEED_LIMIT_MPS: float = 13.9
+YELLOW_FACTOR: float = 0.60
+SAFETY_BLOCKS: int = 1
+
+A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
+B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]
+C_CHAIN = ["C11", "C12", "C13", "C14", "C15"]
+EOL = {"B10", "C15"}
 
 @dataclass
 class Block:
     line: str
     block_id: int
-    status: str          # "free" | "occupied" | "closed"  (your UI calls this "Occupancy")
+    status: str
     station: str
-    signal: str          # "Open" | "Closed" (track status column in your table)
-    switch: str          # e.g., "SW1" or ""
-    light: str           # "RED" | "YELLOW" | "GREEN" | ""
-    crossing: str        # "True" or ""
-    maintenance: str     # "Beacon" or ""
+    signal: str
+    switch: str
+    light: str
+    crossing: str
+    maintenance: str
 
 class TrackState:
-    """
-    Minimal backend stub to drive your UI. Treats the Blue Line list as a loop.
-    Provides:
-      - set_line(name, tuples)
-      - get_blocks() -> List[Block]
-      - set_status("A5", "closed"/"free"/"occupied")
-      - _advance_one_step() : simulate TC telemetry each tick
-    """
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
         self._lines: Dict[str, List[Block]] = {}
-        self._train_positions: Dict[str, str] = {}  # train_id -> "A2" (bid)
-        self._tick_count = 0
+        self._by_key: Dict[str, Block] = {}
+        self._stub: Optional[TrackControllerStub] = None
+
+        self._last_snapshot: Dict[str, object] = {}
+        self._overrides: Dict[str, Dict[str, object]] = {}
+
         self.set_line(line_name, line_tuples)
 
-        # Seed a couple of fake trains for the demo
-        # They’ll advance one block per tick if the next block isn’t closed/occupied
-        self._train_positions = {"T1": "A2", "T2": "A5"}
-
-    # ---------- public API used by your UI ----------
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
-        # convert tuples -> Block list
-        self._lines[name] = [
-            Block(*t) for t in tuples
-        ]
+        blocks = [Block(*t) for t in tuples]
+        self._lines[name] = blocks
+        self._rebuild_index()
+        self._stub = TrackControllerStub(name, tuples)
+        self._stub.on_status(self.apply_snapshot)
 
     def get_blocks(self) -> List[Block]:
         return self._lines.get(self.line_name, [])
 
+    def _rebuild_index(self):
+        self._by_key.clear()
+        for b in self.get_blocks():
+            key = f"{b.line}{b.block_id}"
+            self._by_key[key] = b
+
+    # ----- UI -> backend (forward to stub) -----
     def set_status(self, bid: str, new_status: str):
-        # bid like "A5" -> (section='A', id=5)
-        sec, num = bid[0], int(bid[1:])
-        for b in self.get_blocks():
-            if b.line == sec and b.block_id == num:
-                # If user closes a block, clear any train in it
-                if new_status == "closed":
-                    for tid, pos in list(self._train_positions.items()):
-                        if pos == bid:
-                            # eject train backwards one block for safety
-                            self._train_positions[tid] = self._prev_block_id(pos)
-                b.status = new_status
-                return
+        if self._stub:
+            self._stub.set_block_maintenance(bid, new_status == "closed")
 
-    # ---------- simulation ----------
-    def _advance_one_step(self):
-        """
-        Simulates Track Controller inputs to CTC:
-          - Moves trains forward if the next block is free and not closed
-          - Updates occupancy on blocks
-          - Sets light aspects and one crossing
-        Called every second by your QTimer.
-        """
-        self._tick_count += 1
-        blocks = self.get_blocks()
-        if not blocks:
+    def set_suggested_speed(self, tid: str, mps: float):
+        if self._stub:
+            self._stub.set_suggested_speed(tid, mps)
+
+    def set_suggested_authority(self, tid: str, meters: float):
+        if not self._stub:
             return
+        blocks = max(0, math.ceil(float(meters) / BLOCK_LEN_M))
+        self._stub.set_suggested_authority(tid, blocks)
 
-        # 1) Clear all occupancies to "free" unless "closed"
-        for b in blocks:
-            if b.status != "closed":
-                b.status = "free"
+    def set_switch(self, switch_id: str, position: str):
+        if self._stub:
+            self._stub.set_switch(switch_id, position)
 
-        # 2) Move trains along a simple path (sorted by (section, id))
-        order = [f"{b.line}{b.block_id}" for b in sorted(blocks, key=lambda x: (x.line, x.block_id))]
+    def set_broken_rail(self, block_key: str, broken: bool):
+        if self._stub:
+            self._stub.set_broken_rail(block_key, broken)
 
-        # helper: next/prev block in order (wrap around)
-        def next_block_id(bid: str) -> str:
-            i = order.index(bid)
-            return order[(i + 1) % len(order)]
+    def add_train(self, train_id: str, start_block: str):
+        if self._stub:
+            self._stub.add_train(train_id, start_block)
 
-        # move each train if the next block is available
-        for tid in sorted(self._train_positions.keys()):
-            cur = self._train_positions[tid]
-            nxt = next_block_id(cur)
-            # find next block object
-            nb = self._find_block(nxt)
-            if nb and nb.status == "free" and nb.signal != "Closed":
-                # occupy it
-                self._train_positions[tid] = nxt
+    # NEW: auto-line control pass-through
+    def set_auto_line(self, enabled: bool):
+        if self._stub:
+            self._stub.set_auto_line(bool(enabled))
 
-        # 3) Mark occupancy on the blocks
-        occupied_bids = set(self._train_positions.values())
-        for b in blocks:
-            bid = f"{b.line}{b.block_id}"
-            if bid in occupied_bids:
-                if b.status != "closed":
-                    b.status = "occupied"
+    # ----- test-bench resets -----
+    def reset_trains(self):
+        if self._stub:
+            self._stub.reset_trains()
 
-        # 4) Simple signal logic: RED behind a train, GREEN ahead, YELLOW near crossing
-        for b in blocks:
-            bid = f"{b.line}{b.block_id}"
-            if b.status == "closed":
-                b.light = ""    # lights off if closed track
+    def reset_infrastructure(self):
+        if self._stub:
+            self._stub.reset_infrastructure()
+
+    def reset_all(self):
+        if self._stub:
+            self._stub.reset_all()
+
+    # ----- Dispatcher overrides -----
+    def set_train_override(self, tid: str, enabled: bool, *, speed_mps: Optional[float] = None,
+                           authority_m: Optional[float] = None):
+        self._overrides.setdefault(tid, {})
+        self._overrides[tid]["enabled"] = bool(enabled)
+        if speed_mps is not None:
+            self._overrides[tid]["speed_mps"] = max(0.0, float(speed_mps))
+        if authority_m is not None:
+            self._overrides[tid]["authority_m"] = max(0.0, float(authority_m))
+
+    # ----- telemetry from stub -----
+    def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
+        if snapshot.get("line") != self.line_name:
+            return
+        self._last_snapshot = snapshot
+        if not self._by_key:
+            self._rebuild_index()
+        for pb in snapshot.get("blocks", []):
+            key = str(pb["key"])
+            blk = self._by_key.get(key)
+            if not blk:
                 continue
-            if bid in occupied_bids:
-                b.light = "RED"
+            occ = str(pb.get("occupancy", "free"))
+            blk.status = "closed" if occ == "closed" else ("occupied" if occ == "occupied" else "free")
+            blk.light = str(pb.get("signal", "") or "")
+            sw = str(pb.get("switch", "") or "")
+            if sw:
+                blk.switch = sw
+            blk.station = str(pb.get("station", "") or "")
+            blk.maintenance = "Broken" if pb.get("broken_rail", False) else str(pb.get("beacon", "") or "")
+            blk.crossing = "True" if bool(pb.get("crossing", False)) else ""
+
+    def get_trains(self) -> List[Dict[str, object]]:
+        return list(self._last_snapshot.get("trains", []))
+
+    def _advance_one_step(self):
+        pass
+
+    def stub_tick(self):
+        if self._stub:
+            self._stub.tick()
+            self._policy_tick()
+
+    # ----- policy -----
+    def _policy_tick(self):
+        if not self._last_snapshot:
+            return
+        switches = dict(self._last_snapshot.get("switches", {}))
+        blocks_payload: List[Dict[str, object]] = self._last_snapshot.get("blocks", [])
+        occ_map = {b["key"]: b.get("occupancy", "free") for b in blocks_payload}
+        broken_map = {b["key"]: bool(b.get("broken_rail", False)) for b in blocks_payload}
+        light_map = {b["key"]: str(b.get("signal", "")) for b in blocks_payload}
+
+        for t in self._last_snapshot.get("trains", []):
+            tid = str(t["train_id"]); cur = str(t["block"])
+            nxt = self._next_block(cur, switches)
+            # speed
+            if nxt is None or cur in EOL:
+                speed_mps = 0.0
             else:
-                # make the next block after any occupied block show YELLOW; others GREEN
-                if any(self._is_next_of(bid, occ, order) for occ in occupied_bids):
-                    b.light = "YELLOW"
+                nxt_occ = occ_map.get(nxt, "free")
+                nxt_broken = broken_map.get(nxt, False)
+                nxt_light = light_map.get(nxt, "")
+                if nxt_occ in ("closed", "occupied") or nxt_broken or nxt_light == "RED":
+                    speed_mps = 0.0
+                elif nxt_light == "YELLOW":
+                    speed_mps = LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
                 else:
-                    b.light = "GREEN"
+                    speed_mps = LINE_SPEED_LIMIT_MPS
+            # authority
+            authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
 
-        # 5) Crossing behavior near A3: toggle true when adjacent block occupied
-        for b in blocks:
-            if b.line == "A" and b.block_id == 3:
-                b.crossing = "True" if any(
-                    f"A{n}" in occupied_bids for n in (2, 3, 4)
-                ) else ""
+            ov = self._overrides.get(tid, {})
+            if ov.get("enabled", False):
+                speed_mps = float(ov.get("speed_mps", speed_mps))
+                authority_m = float(ov.get("authority_m", authority_m))
 
-    # ---------- helpers ----------
-    def _find_block(self, bid: str) -> Optional[Block]:
-        sec, num = bid[0], int(bid[1:])
-        for b in self.get_blocks():
-            if b.line == sec and b.block_id == num:
-                return b
+            self.set_suggested_speed(tid, speed_mps)
+            self.set_suggested_authority(tid, authority_m)
+
+    def _next_block(self, cur: str, switches: Dict[str, str]) -> Optional[str]:
+        if cur in A_CHAIN:
+            if cur != "A5":
+                return self._succ_in_chain(cur, A_CHAIN)
+            pos = (switches.get("SW1") or "STRAIGHT").upper()
+            return "B6" if pos == "STRAIGHT" else "C11"
+        if cur in B_CHAIN:
+            return self._succ_in_chain(cur, B_CHAIN, wrap_to=None)
+        if cur in C_CHAIN:
+            return self._succ_in_chain(cur, C_CHAIN, wrap_to=None)
         return None
 
-    def _prev_block_id(self, bid: str) -> str:
-        blocks = self.get_blocks()
-        order = [f"{b.line}{b.block_id}" for b in sorted(blocks, key=lambda x: (x.line, x.block_id))]
-        i = order.index(bid)
-        return order[(i - 1) % len(order)]
+    def _lookahead_authority_m(self, cur: str, switches: Dict[str, str],
+                               occ_map: Dict[str, str], broken_map: Dict[str, bool]) -> float:
+        path: List[str] = []
+        nxt = self._next_block(cur, switches)
+        while nxt is not None:
+            path.append(nxt)
+            if nxt in EOL:
+                break
+            nxt = self._next_block(nxt, switches)
+        if SAFETY_BLOCKS > 0 and len(path) > 0:
+            path = path[:-SAFETY_BLOCKS] if len(path) > SAFETY_BLOCKS else []
+        total_m = 0.0
+        for b in path:
+            if occ_map.get(b, "free") in ("closed", "occupied"): break
+            if broken_map.get(b, False): break
+            total_m += BLOCK_LEN_M
+        return total_m
 
     @staticmethod
-    def _is_next_of(candidate_bid: str, occupied_bid: str, order: List[str]) -> bool:
-        i = order.index(occupied_bid)
-        nxt = order[(i + 1) % len(order)]
-        return candidate_bid == nxt
+    def _succ_in_chain(b: str, chain: List[str], wrap_to: Optional[str] = None) -> Optional[str]:
+        i = chain.index(b)
+        if i + 1 < len(chain):
+            return chain[i + 1]
+        return wrap_to

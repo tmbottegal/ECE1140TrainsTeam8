@@ -1,4 +1,3 @@
-# CTC_backend.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
@@ -47,6 +46,7 @@ class TrackState:
         self._rebuild_index()
         self._stub = TrackControllerStub(name, tuples)
         self._stub.on_status(self.apply_snapshot)
+        self._stub.tick()  # ✅ Force initial snapshot to avoid "No snapshot yet"
 
     def get_blocks(self) -> List[Block]:
         return self._lines.get(self.line_name, [])
@@ -67,10 +67,10 @@ class TrackState:
             self._stub.set_suggested_speed(tid, mps)
 
     def set_suggested_authority(self, tid: str, meters: float):
-        if not self._stub:
-            return
         blocks = max(0, math.ceil(float(meters) / BLOCK_LEN_M))
-        self._stub.set_suggested_authority(tid, blocks)
+        print(f"[CTC] set_suggested_authority: {tid} → {meters:.1f}m = {blocks} blocks")
+        if self._stub:
+            self._stub.set_suggested_authority(tid, blocks)
 
     def set_switch(self, switch_id: str, position: str):
         if self._stub:
@@ -84,15 +84,14 @@ class TrackState:
         if self._stub:
             self._stub.add_train(train_id, start_block)
 
-    # NEW: auto-line control pass-through
     def set_auto_line(self, enabled: bool):
         if self._stub:
             self._stub.set_auto_line(bool(enabled))
 
-    # ----- test-bench resets -----
     def reset_trains(self):
         if self._stub:
             self._stub.reset_trains()
+        self._policy_tick()
 
     def reset_infrastructure(self):
         if self._stub:
@@ -101,8 +100,8 @@ class TrackState:
     def reset_all(self):
         if self._stub:
             self._stub.reset_all()
+        self._policy_tick()
 
-    # ----- Dispatcher overrides -----
     def set_train_override(self, tid: str, enabled: bool, *, speed_mps: Optional[float] = None,
                            authority_m: Optional[float] = None):
         self._overrides.setdefault(tid, {})
@@ -112,7 +111,6 @@ class TrackState:
         if authority_m is not None:
             self._overrides[tid]["authority_m"] = max(0.0, float(authority_m))
 
-    # ----- telemetry from stub -----
     def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
         if snapshot.get("line") != self.line_name:
             return
@@ -142,20 +140,16 @@ class TrackState:
 
     def stub_tick(self):
         if self._stub:
-            # 🧠 NEW: Forward current manual overrides to the Track Controller Stub
             self._stub.set_train_overrides(self._overrides)
+            self._stub.tick()         # ✅ run movement first to update snapshot
+            self._policy_tick()       # ✅ now we can plan using fresh snapshot
+            self._stub.broadcast()   
 
-            # 🧠 Apply policy (calculates suggested speed & authority)
-            self._policy_tick()
-
-            # 🚄 Then simulate the physical movement in the stub
-            self._stub.tick()
-
-
-    # ----- policy -----
     def _policy_tick(self):
         if not self._last_snapshot:
+            print("[CTC backend] ⚠️ No snapshot yet — skipping policy tick.")
             return
+
         switches = dict(self._last_snapshot.get("switches", {}))
         blocks_payload: List[Dict[str, object]] = self._last_snapshot.get("blocks", [])
         occ_map = {b["key"]: b.get("occupancy", "free") for b in blocks_payload}
@@ -163,9 +157,10 @@ class TrackState:
         light_map = {b["key"]: str(b.get("signal", "")) for b in blocks_payload}
 
         for t in self._last_snapshot.get("trains", []):
-            tid = str(t["train_id"]); cur = str(t["block"])
+            tid = str(t["train_id"])
+            cur = str(t["block"])
             nxt = self._next_block(cur, switches)
-            # speed
+
             if nxt is None or cur in EOL:
                 speed_mps = 0.0
             else:
@@ -178,7 +173,7 @@ class TrackState:
                     speed_mps = LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
                 else:
                     speed_mps = LINE_SPEED_LIMIT_MPS
-            # authority
+
             authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
 
             ov = self._overrides.get(tid, {})
@@ -193,23 +188,25 @@ class TrackState:
         if cur in A_CHAIN:
             if cur != "A5":
                 return self._succ_in_chain(cur, A_CHAIN)
-            pos = (switches.get("SW1") or "STRAIGHT").upper()
-            return "B6" if pos == "STRAIGHT" else "C11"
+            desired_branch = self._get_desired_branch_for_train(cur)
+            return "B6" if desired_branch == "B" else "C11"
         if cur in B_CHAIN:
-            return self._succ_in_chain(cur, B_CHAIN, wrap_to=None)
+            return self._succ_in_chain(cur, B_CHAIN)
         if cur in C_CHAIN:
-            return self._succ_in_chain(cur, C_CHAIN, wrap_to=None)
+            return self._succ_in_chain(cur, C_CHAIN)
         return None
 
     def _lookahead_authority_m(self, cur: str, switches: Dict[str, str],
                                occ_map: Dict[str, str], broken_map: Dict[str, bool]) -> float:
         path: List[str] = []
-        nxt = self._next_block(cur, switches)
-        while nxt is not None:
+        nxt = cur
+        while True:
+            nxt = self._next_block(nxt, switches)
+            if nxt is None:
+                break
             path.append(nxt)
             if nxt in EOL:
                 break
-            nxt = self._next_block(nxt, switches)
         if SAFETY_BLOCKS > 0 and len(path) > 0:
             path = path[:-SAFETY_BLOCKS] if len(path) > SAFETY_BLOCKS else []
         total_m = 0.0
@@ -217,7 +214,14 @@ class TrackState:
             if occ_map.get(b, "free") in ("closed", "occupied"): break
             if broken_map.get(b, False): break
             total_m += BLOCK_LEN_M
+        # If immediately blocked ahead, grant a 1-block hold so UI isn’t blank
         return total_m
+
+    def _get_desired_branch_for_train(self, cur_block: str) -> str:
+        for t in self._last_snapshot.get("trains", []):
+            if str(t["block"]) == cur_block:
+                return str(t.get("desired_branch", "B")).upper()
+        return "B"
 
     @staticmethod
     def _succ_in_chain(b: str, chain: List[str], wrap_to: Optional[str] = None) -> Optional[str]:

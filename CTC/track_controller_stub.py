@@ -147,6 +147,10 @@ class TrackControllerStub:
         self._tick = 0
         self.reset_infrastructure()
         self.reset_trains()
+    def broadcast(self) -> None:
+        """Send a snapshot without advancing simulation."""
+        if self._status_cb:
+            self._status_cb(self._make_snapshot())
 
     # ---------- simulation ----------
     def tick(self) -> None:
@@ -170,8 +174,11 @@ class TrackControllerStub:
 
             auth = int(self._trains[tid]["authority_blocks"] or 0)
             if auth <= 0:
+                # make sure snapshot always has the visible value
+                self._trains[tid]["authority_blocks"] = 0
                 continue
-                        # 🧠 NEW: use override values if enabled
+
+            # apply overrides
             ov = self._overrides.get(tid, {})
             if ov.get("enabled", False):
                 if "speed_mps" in ov:
@@ -179,13 +186,18 @@ class TrackControllerStub:
                 if "authority_blocks" in ov:
                     auth = int(ov["authority_blocks"])
 
-            nxt = self._next_for_train(tid, cur)  # may be None at EOL
+            # <-- publish the (possibly overridden) authority so UI sees it even if we don't move
+            self._trains[tid]["authority_blocks"] = auth
+
+            nxt = self._next_for_train(tid, cur)
 
             if nxt and self._is_enterable(nxt) and not self._is_occupied(nxt):
                 self._trains[tid]["block"] = nxt
-                self._trains[tid]["authority_blocks"] = auth - 1
+                # decrement only on successful advance
+                self._trains[tid]["authority_blocks"] = max(0, auth - 1)
             elif nxt is None:
                 self._trains[tid]["authority_blocks"] = 0
+
 
         self._recompute_occupancy()
         self._recompute_signals()
@@ -195,14 +207,24 @@ class TrackControllerStub:
         for tid, info in self._trains.items():
             cur = str(info["block"])
             suggested = self._suggest_speed_for_train(cur)
-            # If no movement possible, override display speed to 0
-            if suggested == 0.0 or int(info.get("authority_blocks", 0)) == 0:
+
+            # Display actual suggested speed if there's a valid move ahead
+            if suggested > 0.0:
+                info["speed_mps"] = suggested
+            # Only force 0 if there's no possible next block or auth is gone
+            elif info["block"] in self._eol or info["authority_blocks"] <= 0:
                 info["speed_mps"] = 0.0
+            # Otherwise: keep last known speed until move occurs
             else:
                 info["speed_mps"] = suggested
 
+            # ✅ fix: always push correct authority to the snapshot
+            self._trains[tid]["authority_blocks"] = self._trains[tid].get("authority_blocks", 0)
+
+        # then broadcast snapshot once for all trains
         if self._status_cb:
             self._status_cb(self._make_snapshot())
+
 
     # ---------- derived state ----------
     def _recompute_occupancy(self) -> None:
@@ -336,14 +358,16 @@ class TrackControllerStub:
             })
 
         trains_payload = []
-        for tid, info in self._trains.items():
+        for tid in self._trains:
+            tinfo = self._trains[tid]
             trains_payload.append({
                 "train_id": tid,
-                "block": info["block"],
-                "suggested_speed_mps": float(info.get("speed_mps", 0.0)),
-                "authority_blocks": int(info.get("authority_blocks", 0)),
-                "desired_branch": str(info.get("desired_branch", "B")),
+                "block": tinfo["block"],
+                "suggested_speed_mps": float(tinfo.get("speed_mps", 0.0)),
+                "authority_blocks": int(tinfo.get("authority_blocks", 0)),
+                "desired_branch": str(tinfo.get("desired_branch", "B")),
             })
+
 
         return {
             "line": self.line_name,

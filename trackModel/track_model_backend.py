@@ -22,6 +22,7 @@ class Train:
     def __init__(self, train_id: int) -> None:
 
         self.train_id = train_id
+        self.network = None
         self.current_segment: Optional['TrackSegment'] = None
         self.segment_displacement: float = 0.0
         if self.current_segment is not None:
@@ -48,7 +49,7 @@ class Train:
             return self.current_segment.get_previous_segment()
         return None
     
-    def move(self, distance: float) -> None:
+    def move(self, distance: float) -> bool:
         """Move the train along the track by a specified distance.
         
         Args:
@@ -57,7 +58,42 @@ class Train:
         if self.current_segment is None:
             raise ValueError("Train is not currently on any track segment.")
         
-        print("Balls!") #TODO: implement temp train displacement logic
+        if distance < 0:
+            if self.segment_displacement + distance < 0:
+                prev_segment = self.get_previous_segment()
+                if prev_segment is None:
+                    raise ValueError("Cannot move backwards, no previous segment.")
+                if prev_segment.signal_state == SignalState.RED or prev_segment.closed:
+                    self.segment_displacement = 0
+                    return False
+                else:
+                    self.current_segment.set_occupancy(False)
+                    self.current_segment = prev_segment
+                    self.current_segment.set_occupancy(True)
+                    self.segment_displacement = max(0, self.segment_displacement + distance + self.current_segment.length)
+                    return True
+            else:
+                self.segment_displacement += distance
+                return True
+            
+        if distance > 0:
+            if self.segment_displacement + distance > self.current_segment.length:
+                #need to move to next segment
+                next_segment = self.get_next_segment()
+                if next_segment is None:
+                    raise ValueError("Cannot move forwards, no next segment.")
+                if next_segment.signal_state == SignalState.RED or next_segment.closed:
+                    self.segment_displacement = self.current_segment.length
+                    return False
+                else:
+                    self.current_segment.set_occupancy(False)
+                    self.current_segment = next_segment
+                    self.current_segment.set_occupancy(True)
+                    self.segment_displacement = min(self.current_segment.length, self.segment_displacement + distance - self.current_segment.length)
+                    return True
+            else:
+                self.segment_displacement += distance
+                return True
 
 class TrackFailureType(Enum):
     """Enumeration of possible track failure types."""
@@ -1123,3 +1159,34 @@ class TrackNetwork:
             "failure_log": self.get_failure_log()
         }
         return network_status
+    
+    def add_train(self, train: Train) -> None:
+        """Add a train to the network for tracking purposes.
+        
+        Args:
+            train: The Train object to add to the network.
+        """
+        if train.train_id in self.trains:
+            raise ValueError(f"Train ID {train.train_id} already exists in network.")
+        self.trains[train.train_id] = train
+        train.network = self
+        pass
+
+    def connect_train(self, train_id: int, block_id: int, displacement: float) -> None:
+        """Add a train to the network for tracking purposes.
+        
+        Args:
+            train_id: ID of the train to add.
+            block_id: ID of the block the train is currently on.
+            displacement: The displacement of the train within the block.
+        """
+        if block_id not in self.segments:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        
+        train = self.trains.get(train_id)
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        train.current_segment = self.segments[block_id]
+        train.segment_displacement = displacement
+        train.network = self
+        pass

@@ -103,14 +103,15 @@ class TrackState:
             self._stub.reset_all()
         self._policy_tick()
 
-    def set_train_override(self, tid: str, enabled: bool, *, speed_mps: Optional[float] = None,
-                           authority_m: Optional[float] = None):
-        self._overrides.setdefault(tid, {})
-        self._overrides[tid]["enabled"] = bool(enabled)
-        if speed_mps is not None:
-            self._overrides[tid]["speed_mps"] = max(0.0, float(speed_mps))
+    def set_train_override(self, tid: str, enabled: bool,
+                       speed_mps: float | None = None,
+                       authority_m: float | None = None) -> None:
+        blocks = None
         if authority_m is not None:
-            self._overrides[tid]["authority_m"] = max(0.0, float(authority_m))
+            # 50 m per block on Blue
+            blocks = int(round(float(authority_m) / 50.0))
+        self._stub.set_train_overrides(tid, enabled, speed_mps=speed_mps, authority_blocks=blocks)
+
 
     def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
         if snapshot.get("line") != self.line_name:
@@ -223,6 +224,26 @@ class TrackState:
             if str(t["block"]) == cur_block:
                 return str(t.get("desired_branch", "B")).upper()
         return "B"
+    def scenario_load(self, name: str) -> str:
+        if not self._stub:
+            return "no-stub"
+        name = (name or "").strip()
+        if name == "Manual Sandbox":
+            self._stub.seed_manual_sandbox()
+            return "Manual Sandbox loaded"
+        if name == "Meet-and-Branch":
+            self._stub.seed_meet_and_branch()
+            return "Meet-and-Branch loaded"
+        if name == "Maintenance Detour":
+            self._stub.seed_maintenance_detour()
+            return "Maintenance Detour loaded"
+        if name == "Broken Rail":
+            self._stub.seed_broken_rail()
+            return "Broken Rail loaded"
+        # fallback
+        self._stub.seed_manual_sandbox()
+        return "Manual Sandbox loaded"
+
 
     @staticmethod
     def _succ_in_chain(b: str, chain: List[str], wrap_to: Optional[str] = None) -> Optional[str]:

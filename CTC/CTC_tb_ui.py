@@ -5,6 +5,7 @@ from .CTC_backend import TrackState
 # Keep UI-side constants in sync with backend policy for display/convert
 BLOCK_LEN_M = 50.0          # meters per block (demo line)
 MPS_TO_MPH  = 2.23693629
+SCENARIOS = ["Manual Sandbox", "Meet-and-Branch", "Maintenance Detour", "Broken Rail"]
 
 LINE_DATA = {
     "Blue Line": [
@@ -108,6 +109,46 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.testTab = QtWidgets.QWidget()
         testLayout = QtWidgets.QVBoxLayout(self.testTab)
 
+        # === Scenario selector row (Blue Line) ===
+        scenRow = QtWidgets.QHBoxLayout()
+        scenRow.addWidget(QtWidgets.QLabel("Scenario:"))
+
+        # 1) the actual dropdown
+        self.scenarioCombo = QtWidgets.QComboBox(self.testTab)
+        self.scenarioCombo.addItems(SCENARIOS)
+        self.scenarioCombo.setCurrentIndex(0)
+        self.scenarioCombo.setMinimumWidth(220)  # prevents collapsing
+        self.scenarioCombo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
+
+        # >>> THIS is the line you were missing <<<
+        scenRow.addWidget(self.scenarioCombo)
+
+        # 2) buttons
+        self.btnLoad  = QtWidgets.QPushButton("Load")
+        self.btnRun   = QtWidgets.QPushButton("Run")
+        self.btnPause = QtWidgets.QPushButton("Pause")
+        self.btnStep  = QtWidgets.QPushButton("Step")
+        self.btnReset = QtWidgets.QPushButton("Reset")
+        for b in (self.btnLoad, self.btnRun, self.btnPause, self.btnStep, self.btnReset):
+            scenRow.addWidget(b)
+
+        scenRow.addStretch(1)
+        testLayout.addLayout(scenRow)
+
+        # short description under the row
+        self.scenarioDesc = QtWidgets.QLabel("Manual Sandbox: no trains spawn; nothing moves until Run/Step.")
+        self.scenarioDesc.setStyleSheet("color:#888;")
+        testLayout.addWidget(self.scenarioDesc)
+
+        # wire the buttons
+        self.btnLoad.clicked.connect(self._scenario_load)
+        self.btnRun.clicked.connect(self._scenario_run)
+        self.btnPause.clicked.connect(self._scenario_pause)
+        self.btnStep.clicked.connect(self._scenario_step)
+        self.btnReset.clicked.connect(self._scenario_reset)
+
+
+       
         hint = QtWidgets.QLabel(
             "Test-only controls.\n"
             "• CTC → TC: Send Suggested Speed/Authority (Train tools)\n"
@@ -227,6 +268,48 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._manualPage = None
 
     # ---------- helpers ----------
+    def _scenario_load(self):
+        name = self.scenarioCombo.currentText()
+        msg = self.state.scenario_load(name)  # backend wrapper calls stub.seed_*
+        # refresh table; pause timer so nothing moves yet
+        if self.timer.isActive():
+            self.timer.stop()
+        self.stepBtn.setEnabled(True)
+        self.pauseBtn.setText("Resume Timer")
+        self._reload_line(self.state.line_name)
+        # description
+        desc = {
+            "Manual Sandbox": "No trains. Add trains or use tools. Nothing moves until Run/Step.",
+            "Meet-and-Branch": "T1→B, T2→C. SW1 AUTO lines by approach.",
+            "Maintenance Detour": "B7 closed initially; reopen to proceed.",
+            "Broken Rail": "When near C11, inject broken rail on C12; train must stop before fault."
+        }.get(name, "")
+        if desc:
+            self.scenarioDesc.setText(desc)
+
+    def _scenario_run(self):
+        if not self.timer.isActive():
+            self.timer.start(1000)
+        self.stepBtn.setEnabled(False)
+        self.pauseBtn.setText("Pause Timer")
+
+    def _scenario_pause(self):
+        if self.timer.isActive():
+            self.timer.stop()
+            self.stepBtn.setEnabled(True)
+            self.pauseBtn.setText("Resume Timer")
+
+    def _scenario_step(self):
+        if not self.timer.isActive():
+            self.state.stub_tick()
+            self._reload_line(self.state.line_name)
+
+    def _scenario_reset(self):
+        self.state.reset_all()
+        self._reload_line(self.state.line_name)
+        self.scenarioCombo.setCurrentText("Manual Sandbox")
+        self.scenarioDesc.setText("Manual Sandbox: no trains spawn; nothing moves until Run/Step.")
+
     def _refresh_block_combo(self, preserve: bool = False):
         if not hasattr(self, "blockCombo"):
             return

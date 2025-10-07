@@ -26,7 +26,11 @@ class TrackControllerStub:
         self._switch_of_block: Dict[str, str] = {}
         self._has_crossing: Dict[str, bool] = {}
         self._beacon: Dict[str, str] = {}
-        self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
+        self._override: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
+        # routing & signals (must exist before any tick/auto-line)
+        #self._switch: dict[str, str] = {"B6": "AUTO"}           # "AUTO" | "STRAIGHT" | "DIVERGE"
+        #self._signals: dict[str, str] = {"B6": "GREEN", "C11": "GREEN"}
+
 
 
         for t in line_tuples:
@@ -59,15 +63,48 @@ class TrackControllerStub:
         self._closed_by_maintenance: Dict[str, bool] = {k: False for k in self._order}
 
         # Trains start at Yard side; each has a desired branch (used only by auto-line)
-        self._trains: Dict[str, Dict[str, object]] = {
-            "T1": {"block": "A1", "speed_mps": 10.0, "authority_blocks": 20, "desired_branch": "B"},
-            "T2": {"block": "A2", "speed_mps": 10.0, "authority_blocks": 20, "desired_branch": "C"},
-        }
+        self._trains: Dict[str, Dict[str, object]] = {}
         self._recompute_occupancy()
 
         self._status_cb: Optional[Callable[[Snapshot], None]] = None
         self._tick = 0
-    
+
+    def _emit(self, etype: str, **kw):
+        # Optional tracer hook; harmless no-op if none is attached.
+        tracer = getattr(self, "tracer", None)
+        if tracer and hasattr(tracer, "log_in"):
+            tracer.log_in(etype, **kw)
+
+    def seed_manual_sandbox(self) -> None:
+        self.reset_all()
+        self.unlock_switches()     # allow auto-line to work
+        self._auto_line = True
+        self.broadcast()
+
+    def seed_meet_and_branch(self) -> None:
+        self.reset_all()
+        self.unlock_switches()
+        self._auto_line = True
+        self.add_train("T1", "A1", "B")   # <-- start T1 at A1 (you asked for this)
+        self.add_train("T2", "A2", "C")
+        self.broadcast()
+
+    def seed_maintenance_detour(self) -> None:
+        self.reset_all()
+        self.unlock_switches()
+        self._auto_line = True
+        self.add_train("T1", "A1", "B")
+        self.set_block_maintenance("B7", True)
+        self.broadcast()
+
+    def seed_broken_rail(self) -> None:
+        self.reset_all()
+        self.unlock_switches()
+        self._auto_line = True
+        self.add_train("T1", "A3", "C")
+        self.broadcast()
+
+
     def _suggest_speed_for_train(self, cur: str) -> float:
         nxt = self._next(cur)
         if nxt is None:
@@ -115,17 +152,25 @@ class TrackControllerStub:
         if block_key in self._broken_rail:
             self._broken_rail[block_key] = bool(broken)
 
-    def add_train(self, train_id: str, start_block: str, desired_branch: str = "B") -> None:
-        if start_block in self._order:
-            self._trains[train_id] = {
-                "block": start_block, "speed_mps": 0.0, "authority_blocks": 0,
-                "desired_branch": "B" if desired_branch.upper().startswith("B") else "C"
-            }
-            self._recompute_occupancy()
+        # change your add_train to accept a branch and store it
+    def add_train(self, tid: str, start_block: str, desired_branch: str = "B"):
+        if tid in self._trains or start_block not in self._occupancy or self._occupancy[start_block] != "free":
+            return
+        self._trains[tid] = {
+            "block": start_block,
+            "speed_mps": 0.0,
+            "authority_blocks": 0,
+            "desired_branch": desired_branch,   # <-- store it
+        }
+        self._occupancy[start_block] = "occupied"
+        self._emit("train_pos", train_id=tid, value={"block": start_block})
+        self._recompute_signals()
+
 
     # NEW: enable/disable automatic lining of SW1
     def set_auto_line(self, enabled: bool) -> None:
-        self._auto_line = bool(enabled)
+        self._stub._auto_line = bool(enabled)  # or expose a stub method if you prefer
+
     
     def _is_blocked(self, blk: Optional[str]) -> bool:
         """Unsafe if missing/EOL, occupied/closed, or broken."""
@@ -170,14 +215,12 @@ class TrackControllerStub:
 
     # ===== Resets for Test Bench =====
     def reset_trains(self) -> None:
-        """Put trains back at Yard with fresh authority; B/C split demo ready."""
-        self._trains = {
-            "T1": {"block": "A1", "speed_mps": 10.0, "authority_blocks": 20, "desired_branch": "B"},
-            "T2": {"block": "A2", "speed_mps": 10.0, "authority_blocks": 20, "desired_branch": "C"},
-        }
+        """Clear all trains (scenarios will add what they need)."""
+        self._trains = {}
         self._recompute_occupancy()
         self._recompute_signals()
         self._recompute_crossings()
+
 
     def reset_infrastructure(self) -> None:
         """Reopen blocks, clear broken rails, and line SW1 STRAIGHT; unlock manual lock."""
@@ -204,7 +247,26 @@ class TrackControllerStub:
     
     
     # ---------- simulation ----------
+    def _auto_line_sw1_if_needed(self):
+        # Only when SW1 is AUTO
+        if self._switch.get("B6", "AUTO") != "AUTO":
+            return
+
+        # Find a train that is about to enter B6 from A-chain
+        for tid, t in self._trains.items():
+            cur = t["block"]
+            nxt = self._next(cur)              # your existing next-block helper
+            if nxt == "B6":
+                desired = t.get("desired_branch", "B")
+                new_pos = "STRAIGHT" if desired == "B" else "DIVERGE"
+                if self._switch["B6"] != new_pos:
+                    self._switch["B6"] = new_pos
+                    self._emit("switch", block="B6", value=new_pos)
+                    self._recompute_signals()
+                break
+
     def tick(self) -> None:
+        #self._auto_line_sw1_if_needed()  
         self._tick += 1
 
         # Auto-line SW1 for approaching trains (optional) unless user locked it
@@ -287,8 +349,23 @@ class TrackControllerStub:
             if self._occupancy.get(b) != "closed":
                 self._occupancy[b] = "occupied"
     
+    def set_train_override(self, tid: str, enabled: bool,
+                       speed_mps: float | None = None,
+                       authority_blocks: int | None = None) -> None:
+        """Set/clear a single train's override used by tick()."""
+        if not enabled:
+            self._overrides.pop(tid, None)
+            return
+        ov = self._overrides.get(tid, {})
+        ov["enabled"] = True
+        if speed_mps is not None:
+            ov["speed_mps"] = float(speed_mps)
+        if authority_blocks is not None:
+            ov["authority_blocks"] = int(authority_blocks)
+        self._overrides[tid] = ov
+
     def set_train_overrides(self, overrides: Dict[str, Dict[str, object]]) -> None:
-        """Receives manual override settings from the CTC backend."""
+        """Replace all overrides at once (compat with backend)."""
         self._overrides = overrides or {}
 
 
@@ -377,18 +454,23 @@ class TrackControllerStub:
 
         return None
 
+    
     def _next(self, cur: str) -> Optional[str]:
-        """Generic next() for signals; uses current switch position; None at EOL."""
+        """Generic next() for signals; follow the same topology as movement."""
         if cur in self._a_chain:
             if cur != "A5":
                 return self._succ_in_chain(cur, self._a_chain)
             pos = self._switch_pos.get("SW1", "STRAIGHT").upper()
             return "B6" if pos == "STRAIGHT" else "C11"
+
         if cur in self._b_chain:
             return self._succ_in_chain(cur, self._b_chain, wrap_to=None)
+
         if cur in self._c_chain:
             return self._succ_in_chain(cur, self._c_chain, wrap_to=None)
+
         return None
+
 
     @staticmethod
     def _succ_in_chain(b: str, chain: List[str], wrap_to: Optional[str] = None) -> Optional[str]:
@@ -444,41 +526,21 @@ class TrackControllerStub:
             })
 
         # (Optional) include trains snapshot if your UI expects it
+       # (Optional) include trains snapshot...
         trains_payload = []
         for tid, info in self._trains.items():
             trains_payload.append({
-                "train_id": str(tid),                            # <-- was "id"
+                "train_id": str(tid),
                 "block":     info.get("block", ""),
                 "suggested_speed_mps": float(info.get("speed_mps", 0.0)),
                 "authority_blocks": int(info.get("authority_blocks", 0)),
-                "desired_branch": info.get("desired_branch", ""), 
+                "desired_branch": info.get("desired_branch", ""),
             })
-
 
         return {
             "line": self.line_name,
             "tick": self._tick,
             "blocks": blocks_payload,
             "trains": trains_payload,
-            "switch_pos": dict(self._switch_pos),   # e.g., {"SW1":"STRAIGHT"}
-        }
-
-
-        trains_payload = []
-        for tid in self._trains:
-            tinfo = self._trains[tid]
-            trains_payload.append({
-                "train_id": tid,
-                "block": tinfo["block"],
-                "suggested_speed_mps": float(tinfo.get("speed_mps", 0.0)),
-                "authority_blocks": int(tinfo.get("authority_blocks", 0)),
-                "desired_branch": str(tinfo.get("desired_branch", "B")),
-            })
-
-
-        return {
-            "line": self.line_name,
-            "blocks": blocks_payload,
-            "switches": {k: v for k, v in self._switch_pos.items()},  # {"SW1":"STRAIGHT"/"DIVERGE"}
-            "trains": trains_payload,
+            "switch_pos": dict(self._switch_pos),
         }

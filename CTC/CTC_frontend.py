@@ -5,7 +5,7 @@ from PyQt6 import QtWidgets   # or: from PySide6 import QtWidgets
 from .CTC_tb_ui import CTCWindow
 
 def main():
-    print("=== CTC Frontend: launching UI ===")
+    print("=== CTC Fronxtend: launching UI ===")
     app = QtWidgets.QApplication(sys.argv)
     win = CTCWindow()
     win.show()

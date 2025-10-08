@@ -106,15 +106,30 @@ class TrackState:
             self._stub.reset_all()
         self._policy_tick()
 
-    def set_train_override(self, tid: str, enabled: bool,
-                       speed_mps: float | None = None,
-                       authority_m: float | None = None) -> None:
-        blocks = None
+    def set_train_override(
+    self,
+    tid: str,
+    enabled: bool,
+    speed_mps: Optional[float] = None,
+    authority_m: Optional[float] = None,
+) -> None:
+        # Convert meters → blocks (using your global/block constant)
+        blocks: Optional[int] = None
         if authority_m is not None:
-            # 50 m per block on Blue
-            blocks = int(round(float(authority_m) / 50.0))
-        self._stub.set_train_overrides(tid, enabled, speed_mps=speed_mps, authority_blocks=blocks)
+            try:
+                meters = float(authority_m)
+            except (TypeError, ValueError):
+                meters = 0.0
+            # Use your project constant instead of a magic 50.0
+            blocks = max(0, int(round(meters / BLOCK_LEN_M)))
 
+        # Call the per-train API (singular). This was the crash before.
+        self._stub.set_train_override(
+            str(tid),
+            bool(enabled),
+            speed_mps=speed_mps,
+            authority_blocks=blocks,
+        )
 
     def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
         if snapshot.get("line") != self.line_name:

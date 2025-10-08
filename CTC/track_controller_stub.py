@@ -26,7 +26,7 @@ class TrackControllerStub:
         self._switch_of_block: Dict[str, str] = {}
         self._has_crossing: Dict[str, bool] = {}
         self._beacon: Dict[str, str] = {}
-        self._override: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
+        self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
         # routing & signals (must exist before any tick/auto-line)
         #self._switch: dict[str, str] = {"B6": "AUTO"}           # "AUTO" | "STRAIGHT" | "DIVERGE"
         #self._signals: dict[str, str] = {"B6": "GREEN", "C11": "GREEN"}
@@ -180,7 +180,8 @@ class TrackControllerStub:
 
     # NEW: enable/disable automatic lining of SW1
     def set_auto_line(self, enabled: bool) -> None:
-        self._stub._auto_line = bool(enabled)  # or expose a stub method if you prefer
+        self._auto_line = bool(enabled)
+
 
     
     def _is_blocked(self, blk: Optional[str]) -> bool:

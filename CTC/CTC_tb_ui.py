@@ -74,6 +74,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mapTable.setMinimumHeight(220)
         self.mapTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
 
+        # seed initial table rows from LINE_DATA + latest snapshot merge
         self._reload_line("Blue Line")
         occLayout.addWidget(self.mapTable)
 
@@ -120,7 +121,6 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.scenarioCombo.setMinimumWidth(220)  # prevents collapsing
         self.scenarioCombo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
 
-        # >>> THIS is the line you were missing <<<
         scenRow.addWidget(self.scenarioCombo)
 
         # 2) buttons
@@ -418,7 +418,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.state.set_status(block_id, status)
             self._reload_line(self.state.line_name)
 
-    # ---------- Manual Override ----------
+    # ---------- Manual Override ---------- MUST REV 
     def _manual_override(self):
         page = QtWidgets.QWidget()
         page.setObjectName("ManualPage")
@@ -476,6 +476,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.manualTable.setItem(r, 4, QtWidgets.QTableWidgetItem(""))  # authority m (user-entered)
             self.manualTable.setItem(r, 5, QtWidgets.QTableWidgetItem(""))
 
+     # Fill the manual override table from live trains
     def _apply_manual_override(self):
         row = self.manualTable.currentRow()
         if row < 0:

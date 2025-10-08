@@ -14,8 +14,14 @@ YELLOW_FACTOR = 0.60
 # Only these blocks have signals on Blue:
 CONTROL_SIGNALS = {"B6", "C11"}
 
-
+    
+    #A self-contained simulator that stands in for the real Track Controller.
+    #- Holds track topology, trains, signals, crossings, faults, and switch positions
+    # Advances trains one block per tick if authority allows and the next block is safe
+    # Computes 3-aspect signals using a simple two-block look-ahead
+    
 class TrackControllerStub:
+
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
 
@@ -27,10 +33,7 @@ class TrackControllerStub:
         self._has_crossing: Dict[str, bool] = {}
         self._beacon: Dict[str, str] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
-        # routing & signals (must exist before any tick/auto-line)
-        #self._switch: dict[str, str] = {"B6": "AUTO"}           # "AUTO" | "STRAIGHT" | "DIVERGE"
-        #self._signals: dict[str, str] = {"B6": "GREEN", "C11": "GREEN"}
-
+        
 
 
         for t in line_tuples:
@@ -96,31 +99,13 @@ class TrackControllerStub:
         self.add_train("T1", "A1", "B")
         self.set_block_maintenance("B7", True)
         self.broadcast()
-
+#*************
     def seed_broken_rail(self) -> None:
         self.reset_all()
         self.unlock_switches()
         self._auto_line = True
         self.add_train("T1", "A3", "C")
-        self.broadcast()
-
-
-    def _suggest_speed_for_train(self, cur: str) -> float:
-        nxt = self._next(cur)
-        if nxt is None:
-            return 0.0
-        if self._occupancy.get(nxt) in ("closed", "occupied"):
-            return 0.0
-        if self._broken_rail.get(nxt, False):
-            return 0.0
-        
-        aspect = (self._signals.get(cur) or "").upper()
-
-        if aspect == "RED":
-            return 0.0
-        if aspect == "YELLOW":
-            return LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
-        return LINE_SPEED_LIMIT_MPS
+        self.broadcast()   
 
     # ---------- registration ----------
     def on_status(self, callback: Callable[[Snapshot], None]) -> None:
@@ -128,8 +113,10 @@ class TrackControllerStub:
 
     # ---------- CTC commands ----------
     def set_suggested_speed(self, train_id: str, mps: float) -> None:
+        """Receive suggested speed from backend; store for snapshot visibility."""
         if train_id in self._trains:
             self._trains[train_id]["speed_mps"] = float(max(0.0, mps))
+
 
     def set_suggested_authority(self, train_id: str, blocks: int) -> None:
         if train_id in self._trains:
@@ -328,24 +315,7 @@ class TrackControllerStub:
         self._recompute_signals()
         self._recompute_crossings()
 
-        # ---- set per-train suggested speed for UI visibility (policy inside stub) ----
-        for tid, info in self._trains.items():
-            cur = str(info["block"])
-            suggested = self._suggest_speed_for_train(cur)
-
-            # Display actual suggested speed if there's a valid move ahead
-            if suggested > 0.0:
-                info["speed_mps"] = suggested
-            # Only force 0 if there's no possible next block or auth is gone
-            elif info["block"] in self._eol or info["authority_blocks"] <= 0:
-                info["speed_mps"] = 0.0
-            # Otherwise: keep last known speed until move occurs
-            else:
-                info["speed_mps"] = suggested
-
-            # ✅ fix: always push correct authority to the snapshot
-            self._trains[tid]["authority_blocks"] = self._trains[tid].get("authority_blocks", 0)
-
+       
         # then broadcast snapshot once for all trains
         if self._status_cb:
             self._status_cb(self._make_snapshot())
@@ -490,23 +460,6 @@ class TrackControllerStub:
         if i + 1 < len(chain):
             return chain[i + 1]
         return wrap_to
-
-    # ---- suggested speed helper (stub-side policy for the demo) ----
-    def _suggest_speed_for_train(self, cur: str) -> float:
-        nxt = self._next_for_train(self._find_tid_at_block(cur), cur) if hasattr(self, "_find_tid_at_block") else self._next(cur)
-        if nxt is None:
-            return 0.0
-        if self._occupancy.get(nxt) in ("occupied", "closed"):
-            return 0.0
-        if self._broken_rail.get(nxt, False):
-            return 0.0
-
-        # Only slow if the NEXT block is itself a controlled-signal block and it's YELLOW
-        if nxt in CONTROL_SIGNALS and self._signals.get(nxt) == "YELLOW":
-            return YELLOW_FACTOR * LINE_SPEED_LIMIT_MPS
-
-        return LINE_SPEED_LIMIT_MPS
-
 
 
     # ---------- snapshot ----------

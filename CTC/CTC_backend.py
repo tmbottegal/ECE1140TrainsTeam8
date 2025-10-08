@@ -5,17 +5,20 @@ import math
 
 from .track_controller_stub import TrackControllerStub
 
+#Global Policies 
 BLOCK_LEN_M: float = 50.0
 LINE_SPEED_LIMIT_MPS: float = 13.9
 YELLOW_FACTOR: float = 0.60
 SAFETY_BLOCKS: int = 0
 CONTROL_SIGNALS = {"B6", "C11"}
 
+#Line topology 
 A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
 B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]
 C_CHAIN = ["C11", "C12", "C13", "C14", "C15"]
 EOL = {"B10", "C15"}
 
+#data model for block row in UI table 
 @dataclass
 class Block:
     line: str
@@ -28,18 +31,26 @@ class Block:
     crossing: str
     maintenance: str
 
+# -------------------------
+# TrackState: CTC backend facade
+# - Owns the current line's block list
+# - Maintains a fast index by block key 
+# - Hosts the TrackControllerStub and applies its snapshots to UI data
+# - Computes policy each tick (speeds/authority) and forwards to stub
+# -------------------------
 class TrackState:
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
-        self._lines: Dict[str, List[Block]] = {}
-        self._by_key: Dict[str, Block] = {}
-        self._stub: Optional[TrackControllerStub] = None
+        self._lines: Dict[str, List[Block]] = {}            #list of block object 
+        self._by_key: Dict[str, Block] = {}                 #each block 
+        self._stub: Optional[TrackControllerStub] = None    #sim peer 
 
         self._last_snapshot: Dict[str, object] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}
 
         self.set_line(line_name, line_tuples)
 
+    # Replace the active line and rebuild indexes; (re)attach stub and subscribe to its updates
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
         blocks = [Block(*t) for t in tuples]
@@ -47,11 +58,13 @@ class TrackState:
         self._rebuild_index()
         self._stub = TrackControllerStub(name, tuples)
         self._stub.on_status(self.apply_snapshot)
-        self._stub.tick()  # ✅ Force initial snapshot to avoid "No snapshot yet"
+        self._stub.tick() 
 
+    #Access the current line's Block objects (for tables/map rendering)
     def get_blocks(self) -> List[Block]:
         return self._lines.get(self.line_name, [])
 
+    #Block lookup 
     def _rebuild_index(self):
         self._by_key.clear()
         for b in self.get_blocks():
@@ -59,23 +72,26 @@ class TrackState:
             self._by_key[key] = b
 
     # ----- UI -> backend (forward to stub) -----
-    # inside TrackState
+    #Mark/unmark a block under maintainace closed or setting it back 
     def set_status(self, block_id: str, status: str) -> None:
         # Only toggle the maintenance closure; do NOT touch the static track_status
         is_closed = (str(status).lower() == "closed")
         self._stub.set_block_maintenance(block_id, is_closed)
 
-
+    #Set the speed of the train 
+    #CTC's op to train controller via stub 
     def set_suggested_speed(self, tid: str, mps: float):
         if self._stub:
             self._stub.set_suggested_speed(tid, mps)
 
+    #Suggests authorty (meters -> blocks)
     def set_suggested_authority(self, tid: str, meters: float):
         blocks = max(0, math.ceil(float(meters) / BLOCK_LEN_M))
         print(f"[CTC] set_suggested_authority: {tid} → {meters:.1f}m = {blocks} blocks")
         if self._stub:
             self._stub.set_suggested_authority(tid, blocks)
-
+    
+    #Move a switch if indicated by stub 
     def set_switch(self, switch_id: str, position: str):
         if self._stub:
             self._stub.set_switch(switch_id, position)
@@ -84,14 +100,17 @@ class TrackState:
         if self._stub:
             self._stub.set_broken_rail(block_key, broken)
 
+    #add train at a starting block ****
     def add_train(self, train_id: str, start_block: str):
         if self._stub:
             self._stub.add_train(train_id, start_block)
 
+    #enable/disable stubs automatic line movement ***
     def set_auto_line(self, enabled: bool):
         if self._stub:
             self._stub.set_auto_line(bool(enabled))
 
+    #Reset trains and recompute policy 
     def reset_trains(self):
         if self._stub:
             self._stub.reset_trains()
@@ -106,13 +125,9 @@ class TrackState:
             self._stub.reset_all()
         self._policy_tick()
 
-    def set_train_override(
-    self,
-    tid: str,
-    enabled: bool,
-    speed_mps: Optional[float] = None,
-    authority_m: Optional[float] = None,
-) -> None:
+    # Per-train manual override from UI. Converts meters→blocks and forwards to stub.
+    #*****
+    def set_train_override(self, tid: str, enabled: bool, speed_mps: Optional[float] = None,authority_m: Optional[float] = None,) -> None:
         # Convert meters → blocks (using your global/block constant)
         blocks: Optional[int] = None
         if authority_m is not None:
@@ -123,7 +138,7 @@ class TrackState:
             # Use your project constant instead of a magic 50.0
             blocks = max(0, int(round(meters / BLOCK_LEN_M)))
 
-        # Call the per-train API (singular). This was the crash before.
+        # Singular per-train API (fixes earlier crash when plural signature was used)****
         self._stub.set_train_override(
             str(tid),
             bool(enabled),
@@ -131,6 +146,7 @@ class TrackState:
             authority_blocks=blocks,
         )
 
+    #snapshot appl 
     def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
         if snapshot.get("line") != self.line_name:
             return
@@ -152,22 +168,30 @@ class TrackState:
             blk.maintenance = "Broken" if pb.get("broken_rail", False) else str(pb.get("beacon", "") or "")
             blk.crossing = "True" if bool(pb.get("crossing", False)) else ""
 
+    #return list of trains from the last snapshot 
     def get_trains(self) -> List[Dict[str, object]]:
         return list(self._last_snapshot.get("trains", []))
 
+    #delete 
     def _advance_one_step(self):
         pass
 
+    # One UI tick:
+    # 1) push any overrides to stub
+    # 2) tell stub to advance movement
+    # 3) compute CTC policy using the fresh snapshot
+    # 4) broadcast updated state to UI 
     def stub_tick(self):
         if self._stub:
             self._stub.set_train_overrides(self._overrides)
-            self._stub.tick()         # ✅ run movement first to update snapshot
-            self._policy_tick()       # ✅ now we can plan using fresh snapshot
+            self._stub.tick()         #  run movement first to update snapshot
+            self._policy_tick()       #  now we can plan using fresh snapshot
             self._stub.broadcast()   
 
+    #deciding suggested speed and suggested authority 
     def _policy_tick(self):
         if not self._last_snapshot:
-            print("[CTC backend] ⚠️ No snapshot yet — skipping policy tick.")
+            print("[CTC backend]  No snapshot yet — skipping policy tick.")
             return
 
         switches = dict(self._last_snapshot.get("switches", {}))
@@ -204,6 +228,7 @@ class TrackState:
             self.set_suggested_speed(tid, speed_mps)
             self.set_suggested_authority(tid, authority_m)
 
+     # Compute the next block given current block and active switch positions
     def _next_block(self, cur: str, switches: Dict[str, str]) -> Optional[str]:
         if cur in A_CHAIN:
             if cur != "A5":
@@ -216,6 +241,7 @@ class TrackState:
             return self._succ_in_chain(cur, C_CHAIN)
         return None
 
+    # Look ahead from 'cur' until EOL or first blockage, summing safe distance
     def _lookahead_authority_m(self, cur: str, switches: Dict[str, str],
                                occ_map: Dict[str, str], broken_map: Dict[str, bool]) -> float:
         path: List[str] = []
@@ -242,6 +268,8 @@ class TrackState:
             if str(t["block"]) == cur_block:
                 return str(t.get("desired_branch", "B")).upper()
         return "B"
+    
+    #Call into the stub to set initial positions/states
     def scenario_load(self, name: str) -> str:
         if not self._stub:
             return "no-stub"
@@ -264,6 +292,7 @@ class TrackState:
 
 
     @staticmethod
+    # Utility: successor inside a linear chain;
     def _succ_in_chain(b: str, chain: List[str], wrap_to: Optional[str] = None) -> Optional[str]:
         i = chain.index(b)
         if i + 1 < len(chain):

@@ -29,7 +29,8 @@ class Block:
     switch: str
     light: str
     crossing: str
-    maintenance: str
+    beacon:str 
+    broken_rail: bool = False
 
 # -------------------------
 # TrackState: CTC backend facade
@@ -50,15 +51,32 @@ class TrackState:
 
         self.set_line(line_name, line_tuples)
 
-    # Replace the active line and rebuild indexes; (re)attach stub and subscribe to its updates
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
-        blocks = [Block(*t) for t in tuples]
+
+        # tuples are: (line, block_id, status, station, signal, switch, light, crossing, maintenance/beacon)
+        blocks: List[Block] = []
+        for t in tuples:
+            line, bid, status, station, signal, sw, light, crossing, last = t
+            # 'last' in your LINE_DATA is used to mark beacons ("Beacon" or ""), so map to Block.beacon
+            blocks.append(Block(
+                line=line,
+                block_id=bid,
+                status=status,
+                station=station,
+                signal=signal,
+                switch=sw,
+                light=light,
+                crossing=crossing,
+                beacon=last,            # <- keep the static beacon marker from LINE_DATA
+                broken_rail=False       # <- live value comes from snapshots
+            ))
+
         self._lines[name] = blocks
         self._rebuild_index()
         self._stub = TrackControllerStub(name, tuples)
         self._stub.on_status(self.apply_snapshot)
-        self._stub.tick() 
+        self._stub.tick()
 
     #Access the current line's Block objects (for tables/map rendering)
     def get_blocks(self) -> List[Block]:
@@ -165,7 +183,10 @@ class TrackState:
             if sw:
                 blk.switch = sw
             blk.station = str(pb.get("station", "") or "")
-            blk.maintenance = "Broken" if pb.get("broken_rail", False) else str(pb.get("beacon", "") or "")
+
+            blk.broken_rail = bool(pb.get("broken_rail", False))  # True/False
+            blk.beacon = str(pb.get("beacon", "") or blk.beacon) 
+
             blk.crossing = "True" if bool(pb.get("crossing", False)) else ""
 
     #return list of trains from the last snapshot 

@@ -65,7 +65,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mapTable.setHorizontalHeaderLabels([
             "Section", "Block", "Occupancy", "Station",
             "Status", "Switch", "Traffic Light",
-            "Crossing", "Beacon"
+            "Crossing", "Broken Rail", "Beacon"
         ])
         self.mapTable.verticalHeader().setVisible(False)
         self.mapTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
@@ -355,7 +355,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             rowdata = [
                 b.line, b.block_id, b.status, b.station,
                 b.signal, b.switch, b.light,
-                b.crossing, b.maintenance
+                b.crossing, str(getattr(b, "broken_rail", False)), b.beacon
             ]
             for c, value in enumerate(rowdata):
                 item = QtWidgets.QTableWidgetItem(str(value))

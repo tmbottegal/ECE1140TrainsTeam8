@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 from typing import Optional
+from TrainControllerBackend import TrainControllerBackend
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont

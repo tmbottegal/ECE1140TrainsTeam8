@@ -52,6 +52,7 @@ class TrackState:
 
         self._last_snapshot: Dict[str, object] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}
+        self._oneshot_auth: Dict[str, int] = {}              # <-- NEW: on
 
         self.set_line(line_name, line_tuples)
 
@@ -150,24 +151,41 @@ class TrackState:
 
     # Per-train manual override from UI. Converts meters→blocks and forwards to stub.
     #*****
-    def set_train_override(self, tid: str, enabled: bool, speed_mps: Optional[float] = None,authority_m: Optional[float] = None,) -> None:
-        # Convert meters → blocks (using your global/block constant)
-        blocks: Optional[int] = None
+    # CTC_backend.py  (inside TrackState)
+
+    def set_train_override(
+        self,
+        tid: str,
+        enabled: bool,
+        speed_mps: Optional[float] = None,
+        authority_m: Optional[float] = None,
+    ) -> None:
+        tid = str(tid)
+
+        if not enabled:
+            # Clear both sticky and pending one-shot for this train
+            self._overrides.pop(tid, None)
+            self._oneshot_auth.pop(tid, None)
+            return
+
+        # Ensure sticky container exists
+        ov = self._overrides.get(tid, {})
+        ov["enabled"] = True
+
+        # Sticky speed (keeps applying every tick until disabled)
+        if speed_mps is not None:
+            ov["speed_mps"] = float(speed_mps)
+        self._overrides[tid] = ov
+
+        # One-shot authority (meters -> blocks) — only sent next tick once
         if authority_m is not None:
             try:
                 meters = float(authority_m)
             except (TypeError, ValueError):
                 meters = 0.0
-            # Use your project constant instead of a magic 50.0
             blocks = max(0, int(round(meters / BLOCK_LEN_M)))
+            self._oneshot_auth[tid] = blocks
 
-        # Singular per-train API (fixes earlier crash when plural signature was used)****
-        self._stub.set_train_override(
-            str(tid),
-            bool(enabled),
-            speed_mps=speed_mps,
-            authority_blocks=blocks,
-        )
 
     #snapshot appl 
     def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
@@ -210,11 +228,38 @@ class TrackState:
     # 3) compute CTC policy using the fresh snapshot
     # 4) broadcast updated state to UI 
     def stub_tick(self):
-        if self._stub:
-            self._stub.set_train_overrides(self._overrides)
-            self._stub.tick()         #  run movement first to update snapshot
-            self._policy_tick()       #  now we can plan using fresh snapshot
-            self._stub.broadcast()   
+        if not self._stub:
+            return
+
+        # Build the payload for this tick:
+        # - speed_mps (sticky) from _overrides
+        # - authority_blocks only for tids present in _oneshot_auth (one-shot)
+        send_ov: Dict[str, Dict[str, object]] = {}
+        for tid, ov in (self._overrides or {}).items():
+            if not ov.get("enabled"):
+                continue
+            entry = {"enabled": True}
+            if "speed_mps" in ov:
+                entry["speed_mps"] = float(ov["speed_mps"])
+            if tid in self._oneshot_auth:
+                entry["authority_blocks"] = int(self._oneshot_auth[tid])
+            send_ov[tid] = entry
+
+        # Push overrides for this tick
+        self._stub.set_train_overrides(send_ov)
+
+        # Advance movement first (so positions/authority_blocks update)
+        self._stub.tick()
+
+        # One-shot has been used; clear for next tick
+        self._oneshot_auth.clear()
+
+        # Recompute policy from fresh snapshot
+        self._policy_tick()
+
+        # Broadcast again so Train Info shows newly computed suggestions
+        self._stub.broadcast()
+
 
     #deciding suggested speed and suggested authority 
     def _policy_tick(self):
@@ -224,9 +269,9 @@ class TrackState:
 
         switches = dict(self._last_snapshot.get("switches", {}))
         blocks_payload: List[Dict[str, object]] = self._last_snapshot.get("blocks", [])
-        occ_map = {b["key"]: b.get("occupancy", "free") for b in blocks_payload}
+        occ_map    = {b["key"]: b.get("occupancy", "free") for b in blocks_payload}
         broken_map = {b["key"]: bool(b.get("broken_rail", False)) for b in blocks_payload}
-        light_map = {b["key"]: str(b.get("signal", "")) for b in blocks_payload}
+        light_map  = {b["key"]: str(b.get("signal", "")) for b in blocks_payload}
 
         for t in self._last_snapshot.get("trains", []):
             tid = str(t["train_id"])
@@ -236,25 +281,27 @@ class TrackState:
             if nxt is None or cur in EOL:
                 speed_mps = 0.0
             else:
-                nxt_occ = occ_map.get(nxt, "free")
-                nxt_broken = broken_map.get(nxt, False)
+                nxt_occ   = occ_map.get(nxt, "free")
+                nxt_broke = broken_map.get(nxt, False)
                 nxt_light = light_map.get(nxt, "")
-                if nxt_occ in ("closed", "occupied") or nxt_broken or nxt_light == "RED":
+                if nxt_occ in ("closed", "occupied") or nxt_broke or nxt_light == "RED":
                     speed_mps = 0.0
                 elif nxt_light == "YELLOW":
                     speed_mps = LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
                 else:
                     speed_mps = LINE_SPEED_LIMIT_MPS
 
+            # Policy authority (no sticky override here)
             authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
 
+            # Apply ONLY speed override (sticky)
             ov = self._overrides.get(tid, {})
-            if ov.get("enabled", False):
-                speed_mps = float(ov.get("speed_mps", speed_mps))
-                authority_m = float(ov.get("authority_m", authority_m))
+            if ov.get("enabled", False) and "speed_mps" in ov:
+                speed_mps = float(ov["speed_mps"])
 
             self.set_suggested_speed(tid, speed_mps)
             self.set_suggested_authority(tid, authority_m)
+
 
      # Compute the next block given current block and active switch positions
     def _next_block(self, cur: str, switches: Dict[str, str]) -> Optional[str]:

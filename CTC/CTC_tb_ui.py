@@ -151,7 +151,6 @@ class CTCWindow(QtWidgets.QMainWindow):
        
         hint = QtWidgets.QLabel(
             "Test-only controls.\n"
-            "• CTC → TC: Send Suggested Speed/Authority (Train tools)\n"
             "• TC → CTC: Switch position & Broken rail simulated here by the stub."
         )
         hint.setStyleSheet("color: #bbb;")
@@ -197,20 +196,20 @@ class CTCWindow(QtWidgets.QMainWindow):
         testLayout.addWidget(switchGroup)
 
         # ---- Train tools (direct CTC→TC send) ----
-        trainGroup = QtWidgets.QGroupBox("Train tools (CTC → TC: send suggested speed/authority)")
-        tl = QtWidgets.QGridLayout(trainGroup)
-        self.trainCombo = QtWidgets.QComboBox(); self.trainCombo.addItems(["T1", "T2"])
-        self.speedSpinTB = QtWidgets.QSpinBox(); self.speedSpinTB.setRange(0, 120); self.speedSpinTB.setSuffix(" mph")
-        self.authSpinTB  = QtWidgets.QSpinBox(); self.authSpinTB.setRange(0, 1000); self.authSpinTB.setSuffix(" m")
-        applyTrainBtn = QtWidgets.QPushButton("Apply to Train")
+       # trainGroup = QtWidgets.QGroupBox("Train tools (CTC → TC: send suggested speed/authority)")
+        #tl = QtWidgets.QGridLayout(trainGroup)
+       # self.trainCombo = QtWidgets.QComboBox(); self.trainCombo.addItems(["T1", "T2"])
+        #self.speedSpinTB = QtWidgets.QSpinBox(); self.speedSpinTB.setRange(0, 120); self.speedSpinTB.setSuffix(" mph")
+        #self.authSpinTB  = QtWidgets.QSpinBox(); self.authSpinTB.setRange(0, 1000); self.authSpinTB.setSuffix(" m")
+        #applyTrainBtn = QtWidgets.QPushButton("Apply to Train")
 
-        tl.addWidget(QtWidgets.QLabel("Train:"), 0, 0); tl.addWidget(self.trainCombo, 0, 1)
-        tl.addWidget(QtWidgets.QLabel("Suggested Speed:"), 1, 0); tl.addWidget(self.speedSpinTB, 1, 1)
-        tl.addWidget(QtWidgets.QLabel("Suggested Authority:"), 2, 0); tl.addWidget(self.authSpinTB, 2, 1)
-        tl.addWidget(applyTrainBtn, 3, 0, 1, 2)
+       # tl.addWidget(QtWidgets.QLabel("Train:"), 0, 0); tl.addWidget(self.trainCombo, 0, 1)
+       # tl.addWidget(QtWidgets.QLabel("Suggested Speed:"), 1, 0); tl.addWidget(self.speedSpinTB, 1, 1)
+       # tl.addWidget(QtWidgets.QLabel("Suggested Authority:"), 2, 0); tl.addWidget(self.authSpinTB, 2, 1)
+       # tl.addWidget(applyTrainBtn, 3, 0, 1, 2)
 
-        applyTrainBtn.clicked.connect(self._apply_train_tools)
-        testLayout.addWidget(trainGroup)
+       # applyTrainBtn.clicked.connect(self._apply_train_tools)
+        #testLayout.addWidget(trainGroup)
 
         testLayout.addStretch(1)
         # ---- Reset / Control tools ----
@@ -588,17 +587,17 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.state.set_switch(sw, pos)
         self._reload_line(self.state.line_name)
 
-    def _apply_train_tools(self):
-        tid = self.trainCombo.currentText()
-        mph = float(self.speedSpinTB.value())
-        mps = mph / MPS_TO_MPH
-        meters = float(self.authSpinTB.value())
-        self.state.set_suggested_speed(tid, mps)
-        self.state.set_suggested_authority(tid, meters)
-        QtWidgets.QMessageBox.information(
-            self, "Train tools",
-            f"Applied to {tid}: {mph:.1f} mph, {int(meters)} m."
-        )
+    #def _apply_train_tools(self):
+     #   tid = self.trainCombo.currentText()
+     #   mph = float(self.speedSpinTB.value())
+     #   mps = mph / MPS_TO_MPH
+     #   meters = float(self.authSpinTB.value())
+     #   self.state.set_suggested_speed(tid, mps)
+     #   self.state.set_suggested_authority(tid, meters)
+     #   QtWidgets.QMessageBox.information(
+      #      self, "Train tools",
+      #      f"Applied to {tid}: {mph:.1f} mph, {int(meters)} m."
+      #  )
 
     # ---------- test bench: pause/step ----------
     def _toggle_pause(self):

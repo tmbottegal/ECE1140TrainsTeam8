@@ -25,12 +25,14 @@ class Block:
     block_id: int
     status: str
     station: str
+    #change to bool 
     signal: str
+    #change to bool 
     switch: str
     light: str
-    crossing: str
     beacon:str 
     broken_rail: bool = False
+    has_crossing: bool = False
 
 # -------------------------
 # TrackState: CTC backend facade
@@ -58,6 +60,7 @@ class TrackState:
         blocks: List[Block] = []
         for t in tuples:
             line, bid, status, station, signal, sw, light, crossing, last = t
+            has_cross = str(crossing).strip().lower() == "true"   # <-- normalize to bool
             # 'last' in your LINE_DATA is used to mark beacons ("Beacon" or ""), so map to Block.beacon
             blocks.append(Block(
                 line=line,
@@ -67,7 +70,7 @@ class TrackState:
                 signal=signal,
                 switch=sw,
                 light=light,
-                crossing=crossing,
+                has_crossing=has_cross,
                 beacon=last,            # <- keep the static beacon marker from LINE_DATA
                 broken_rail=False       # <- live value comes from snapshots
             ))
@@ -187,7 +190,8 @@ class TrackState:
             blk.broken_rail = bool(pb.get("broken_rail", False))  # True/False
             blk.beacon = str(pb.get("beacon", "") or blk.beacon) 
 
-            blk.crossing = "True" if bool(pb.get("crossing", False)) else ""
+            blk.has_crossing = bool(pb.get("has_crossing", getattr(blk, "has_crossing", False)))
+
 
     #return list of trains from the last snapshot 
     def get_trains(self) -> List[Dict[str, object]]:

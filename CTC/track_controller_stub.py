@@ -501,7 +501,7 @@ class TrackControllerStub:
                 "switch":    self._switch_of_block.get(b, ""),
 
                 # Crossings and faults
-                "crossing":      bool(self._crossing_active.get(b, False)),
+                "has_crossing": bool(self._has_crossing.get(b, False)),
                 "beacon":        self._beacon.get(b, ""),
                 "broken_rail":   bool(self._broken_rail.get(b, False)),
             })

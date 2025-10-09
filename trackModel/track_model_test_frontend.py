@@ -129,7 +129,6 @@ class NetworkStatusUI(QWidget):
         layout.addWidget(terminal_widget, 1)  # 1 part for terminal
         
         # The tab widget should get the majority of space (80%)
-        # We need to adjust this using stretch factors
         layout.setStretchFactor(self.tab_widget, 4)  # 4 parts for tables
         layout.setStretchFactor(terminal_widget, 1)   # 1 part for terminal
         

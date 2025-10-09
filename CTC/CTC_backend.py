@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 import math
 
-from .track_controller_stub import TrackControllerStub
+from track_controller_stub import TrackControllerStub
 
 #Global Policies 
 BLOCK_LEN_M: float = 50.0

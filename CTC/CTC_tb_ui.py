@@ -1,6 +1,6 @@
 # CTC_tb_ui.py
 from PyQt6 import QtWidgets, QtCore, QtGui
-from .CTC_backend import TrackState
+from CTC_backend import TrackState
 
 # Keep UI-side constants in sync with backend policy for display/convert
 BLOCK_LEN_M = 50.0          # meters per block (demo line)

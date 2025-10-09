@@ -72,3 +72,74 @@ class TrainState:
                 self.state.left_doors_open = bool(left_open)
             if right_open is not None:
                 self.state.right_doors_open = bool(right_open)
+        
+        def set_lights(self, on: bool) -> None:
+            self.state.lights_on = bool(on)
+
+        def update_actual_speed(self, speed_mps: float) -> None:
+            self.state.actual_speed_mps = max(0.0, speed_mps)
+
+        
+        def tick(self, dt: float) -> Dict[str, float]:
+            s = self.state
+            
+            must_stop = (
+                not s.commanded_authority
+                or s.left_doors_open
+                or s.right_doors_open
+                or s.emergency_brake
+            )
+
+            target = 0.0 if must_stop else min(s.commanded_speed_mps, s.MAX_SPEED_MPS)
+            
+            speed_err = target - s.actual_speed_mps
+            s._i_err += speed_err * dt
+
+            if s._i_err > s.I_CLAMP / s.KI:
+                s._i_err = s.I_CLAMP / s.KI
+            elif s._i_err < -s.I_CLAMP / s.KI:
+                s._i_err = -s.I_CLAMP / s.KI
+
+            traction_power = s.KP * speed_err + s.KI * s._i_err
+
+            commanded_service_decel = s.MAX_SERVICE_DECEL if s.service_brake else 0.0
+            commanded_emergency_decel = s.MAX_EMERGENCY_DECEL if s.emergency_brake else 0.0
+            total_brake_decel = max(commanded_service_decel, commanded_emergency_decel)
+
+            if total_brake_decel > 0.0 or must_stop:
+                traction_power = 0.0
+
+            traction_power = max(0.0, min(traction_power, s.MAX_POWER_W))
+            s.power_watts = traction_power
+
+            k_power_to_accel = 1.0 / 25_000.0
+
+            accel_from_power = k_power_to_accel * traction_power
+
+            s.acceleration_mps2 = max(0.0, accel_from_power) - total_brake_decel
+
+            return {
+                "power_watts": s.power_watts,
+                "service_brake": float(commanded_service_decel > 0 ),
+                "emergency_brake": float(commanded_emergency_decel > 0),
+                "target_speed_mps": target,
+                "accel_cmd_mps2": s.acceleration_mps2,
+            }
+        
+
+        def snapshot(self) -> Dict[str, float | bool]:
+            s = self.state
+
+            return {
+                "train_id": self.train_id,
+                "cmd_speed_mps": s.commanded_speed_mps,
+                "cmd_authority": s.commanded_authority,
+                "service_brake": s.service_break,
+                "emergency_brake": s.emergency_brake,
+                "doors_left": s.left_doors_open,
+                "doors_right": s.right_doors_open,
+                "lights_on": s.lights_on,
+                "actual_speed_mps": s.actual_speed_mps,
+                "accel_mps2": s.acceleration_mps2,
+                "power_watts": s.power_watts,
+            }

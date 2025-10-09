@@ -5,7 +5,7 @@ from .CTC_backend import TrackState
 # Keep UI-side constants in sync with backend policy for display/convert
 BLOCK_LEN_M = 50.0          # meters per block (demo line)
 MPS_TO_MPH  = 2.23693629
-SCENARIOS = ["Manual Sandbox", "Meet-and-Branch", "Maintenance Detour", "Broken Rail"]
+SCENARIOS = ["Manual Sandbox", "Meet-and-Branch", "Maintenance Detour", "Broken Rail", "Crossing Gate Demo"]
 
 LINE_DATA = {
     "Blue Line": [
@@ -211,6 +211,27 @@ class CTCWindow(QtWidgets.QMainWindow):
        # applyTrainBtn.clicked.connect(self._apply_train_tools)
         #testLayout.addWidget(trainGroup)
 
+                # ---- Crossing tools (TC → CTC telemetry) ----
+        xGroup = QtWidgets.QGroupBox("Crossing tools (TC → CTC telemetry)")
+        xl = QtWidgets.QGridLayout(xGroup)
+
+        self.crossingBlockCombo = QtWidgets.QComboBox()
+        # Only include blocks that actually have a crossing; on Blue it's A3
+        self.crossingBlockCombo.addItems([b for b in [f"{blk.line}{blk.block_id}" for blk in self.state.get_blocks()] if b == "A3"])
+
+        self.crossingMode = QtWidgets.QComboBox()
+        self.crossingMode.addItems(["Auto (derived)", "Force Down", "Force Up"])
+
+        applyXBtn = QtWidgets.QPushButton("Apply Crossing State")
+
+        xl.addWidget(QtWidgets.QLabel("Crossing block:"), 0, 0); xl.addWidget(self.crossingBlockCombo, 0, 1)
+        xl.addWidget(QtWidgets.QLabel("State:"),           1, 0); xl.addWidget(self.crossingMode,      1, 1)
+        xl.addWidget(applyXBtn,                            2, 0, 1, 2)
+
+        applyXBtn.clicked.connect(self._apply_crossing_tools)
+        testLayout.addWidget(xGroup)
+
+
         testLayout.addStretch(1)
         # ---- Reset / Control tools ----
         ctrlGroup = QtWidgets.QGroupBox("Reset / Control")
@@ -281,7 +302,9 @@ class CTCWindow(QtWidgets.QMainWindow):
             "Manual Sandbox": "No trains. Add trains or use tools. Nothing moves until Run/Step.",
             "Meet-and-Branch": "T1→B, T2→C. SW1 AUTO lines by approach.",
             "Maintenance Detour": "B7 closed initially; reopen to proceed.",
-            "Broken Rail": "When near C11, inject broken rail on C12; train must stop before fault."
+            "Broken Rail": "When near C11, inject broken rail on C12; train must stop before fault.",
+            "Crossing Gate Demo": "T1 starts at A1 with A3 crossing DOWN. Open the gate here to let it proceed.",
+
         }.get(name, "")
         if desc:
             self.scenarioDesc.setText(desc)
@@ -586,6 +609,21 @@ class CTCWindow(QtWidgets.QMainWindow):
         pos = self.switchPos.currentText()
         self.state.set_switch(sw, pos)
         self._reload_line(self.state.line_name)
+        
+    def _apply_crossing_tools(self):
+        bid = self.crossingBlockCombo.currentText().strip()
+        mode = self.crossingMode.currentText()
+        # Map UI choice → Optional[bool]
+        if "Auto" in mode:
+            state = None        # Auto (derived)
+        elif "Down" in mode:
+            state = True        # Force DOWN
+        else:
+            state = False       # Force UP
+        self.state.set_crossing_override(bid, state)
+        self._reload_line(self.state.line_name)
+
+    
 
     #def _apply_train_tools(self):
      #   tid = self.trainCombo.currentText()

@@ -114,6 +114,17 @@ class TrackState:
         print(f"[CTC] set_suggested_authority: {tid} → {meters:.1f}m = {blocks} blocks")
         if self._stub:
             self._stub.set_suggested_authority(tid, blocks)
+    def set_crossing_override(self, block_id: str, state: Optional[bool]) -> None:
+            """
+            state:
+            None  → Auto (derived)
+            True  → Force DOWN
+            False → Force UP
+            """
+            if self._stub:
+                self._stub.set_crossing_override(block_id, state)
+        
+
     
     #Move a switch if indicated by stub 
     def set_switch(self, switch_id: str, position: str):
@@ -211,7 +222,14 @@ class TrackState:
             blk.beacon = str(pb.get("beacon", "") or blk.beacon) 
 
             if blk.has_crossing:
-             blk.crossing_open = True
+                # Use the stub’s telemetry (True=open, False=closed/down). May be None early.
+                co = pb.get("crossing_open", None)
+                if isinstance(co, bool):
+                    blk.crossing_open = co
+                else:
+                    # default to True if missing, to avoid confusing UI
+                    blk.crossing_open = True
+
 
 
     #return list of trains from the last snapshot 
@@ -362,6 +380,9 @@ class TrackState:
         if name == "Broken Rail":
             self._stub.seed_broken_rail()
             return "Broken Rail loaded"
+        if name == "Crossing Gate Demo":
+            self._stub.seed_crossing_demo()
+            return "Crossing Gate Demo loaded"
         # fallback
         self._stub.seed_manual_sandbox()
         return "Manual Sandbox loaded"

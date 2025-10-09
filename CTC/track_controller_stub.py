@@ -34,6 +34,7 @@ class TrackControllerStub:
         self._beacon: Dict[str, str] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
         self._scenario_broken_active: bool = False
+        self._crossing_forced: Dict[str, Optional[bool]] = {}
         
 
 
@@ -100,7 +101,7 @@ class TrackControllerStub:
         self.add_train("T1", "A1", "B")
         self.set_block_maintenance("B7", True)
         self.broadcast()
-#*************
+
     def seed_broken_rail(self) -> None:
         self.reset_all()
         self.unlock_switches()
@@ -108,13 +109,48 @@ class TrackControllerStub:
         self._scenario_broken_active = True          # <-- enable proximity trigger
         self.add_train("T1", "A3", "C")              # start close so it reaches C11 soon
         self.broadcast()
+
+    def seed_crossing_demo(self) -> None:
+        """Start T1 at A1 with the A3 crossing forced DOWN. Train should hold before A3 until opened."""
+        self.reset_all()
+        self.unlock_switches()
+        self._auto_line = True
+        self._crossing_forced["A3"] = True   # force gate DOWN
+        self.add_train("T1", "A1", "B")      # branch can be B or C; auto-line will match desired
+        self.broadcast()
+
+
+        # ----- Crossing effective state (forced beats derived) -----
+    def _crossing_effective_open(self, block_key: str) -> Optional[bool]:
+        """Returns True/False for crossing blocks, or None if not a crossing."""
+        if not self._has_crossing.get(block_key, False):
+            return None
+        forced = self._crossing_forced.get(block_key, None)
+        if forced is not None:
+            return not forced   # forced=True means gate DOWN → open=False
+        # derived from _crossing_active (True = active/down → open=False)
+        return not self._crossing_active.get(block_key, False)
+
+    # Public API for backend/UI to control crossing telemetry (TC → CTC)
+    def set_crossing_override(self, block_key: str, state: Optional[bool]) -> None:
+        """
+        state:
+          None  → Auto (derived from trains/occupancy)
+          True  → Force DOWN (road closed)
+          False → Force UP   (road open)
+        """
+        if not self._has_crossing.get(block_key, False):
+            return
+        self._crossing_forced[block_key] = state
+        self._recompute_crossings()
+        self.broadcast()
+
  
 
     # ---------- registration ----------
     def on_status(self, callback: Callable[[Snapshot], None]) -> None:
         self._status_cb = callback
 
-    # ---------- CTC commands ----------
     # ---------- CTC commands (from backend policy) ----------
     def set_suggested_speed(self, train_id: str, mps: float) -> None:
         """CTC policy: sticky speed suggestion (visible in snapshot)."""
@@ -299,6 +335,8 @@ class TrackControllerStub:
                 branch = str(self._trains[tid].get("desired_branch", "B")).upper()
                 if cur in ("A4", "A5"):
                     self._switch_pos["SW1"] = "STRAIGHT" if branch == "B" else "DIVERGE"
+    
+    
 
         # ----- Move trains (stop at EOL — no wrap) -----
         for tid in sorted(self._trains.keys()):
@@ -329,6 +367,13 @@ class TrackControllerStub:
                     self._trains[tid]["authority_blocks"] = max(0, auth)
 
             nxt = self._next_for_train(tid, cur)
+                        # --- Crossing gate at A3: when DOWN, do not enter A3 ---
+            if nxt == "A3":
+                eff_open = self._crossing_effective_open("A3")
+                if eff_open is not None and eff_open is False:
+                    # Treat like not enterable this tick
+                    nxt = None
+
 
             if nxt and self._is_enterable(nxt) and not self._is_occupied(nxt):
                 self._trains[tid]["block"] = nxt
@@ -430,6 +475,14 @@ class TrackControllerStub:
                 neighbors = {b}
             active[b] = any(nb in occ for nb in neighbors)
         self._crossing_active = active
+                # forced overrides win over derived activity
+        for b, forced in self._crossing_forced.items():
+            if forced is None:
+                continue
+            # forced=True means active/down
+            if self._has_crossing.get(b, False):
+                self._crossing_active[b] = bool(forced)
+
 
     # ---------- topology helpers ----------
     def _is_occupied(self, block_key: str) -> bool:
@@ -510,7 +563,8 @@ class TrackControllerStub:
                 "switch":    self._switch_of_block.get(b, ""),
 
                 # Crossings and faults
-                "crossing_open": (not self._crossing_active.get(b, False)) if self._has_crossing.get(b, False) else None,
+                "crossing_open": self._crossing_effective_open(b) if self._has_crossing.get(b, False) else None,
+
                 "beacon":        self._beacon.get(b, ""),
                 "broken_rail":   bool(self._broken_rail.get(b, False)),
             })

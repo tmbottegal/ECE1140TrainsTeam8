@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QApplication
 )
 
-from trainControllerFrontend import TrainControllerFrontend
+from TrainControllerFrontend import TrainControllerFrontend
 
 class TrainControllerUI(QWidget):
     def __init__(self, frontend: TrainControllerFrontend) -> None:
@@ -41,7 +41,7 @@ class TrainControllerUI(QWidget):
         row.addWidget(self.spin_cmd_speed, 1)
 
         self.chk_authority = QCheckBox("Authority Granted")
-        row.addWidget(self.chk_authoirty)
+        row.addWidget(self.chk_authority)
         cmd_layout.addLayout(row)
 
         row2 = QHBoxLayout()
@@ -65,7 +65,7 @@ class TrainControllerUI(QWidget):
         self.lbl_accel = QLabel("Accel command: 0.00 m/s²")
 
         for w in (self.lbl_actual, self.lbl_target, self.lbl_power, self.lbl_accel):
-            w.setAlignment(Qt.AlightmentFlag.AlignLeft)
+            w.setAlignment(Qt.AlignmentFlag.AlignLeft)
             tele_layout.addWidget(w)
 
         root.addWidget(tele_box)
@@ -82,45 +82,45 @@ class TrainControllerUI(QWidget):
 
         ctrl_row.addWidget(self.btn_start)
         ctrl_row.addWidget(self.btn_step)
-        ctrl_row.addWdiget(self.btn_stop)
+        ctrl_row.addWidget(self.btn_stop)
         root.addLayout(ctrl_row)
 
         self._push_commands()
 
-        def _start(self) -> None:
-            self._push_commands()
-            self.timer.start()
+    def _start(self) -> None:
+        self._push_commands()
+        self.timer.start()
 
-        def _stop(self) -> None:
-            self.timer.stop()
+    def _stop(self) -> None:
+        self.timer.stop()
 
-        def _step_once(self) -> None:
-            self._push_commands()
-            self.frontend.step(0.1)
-            self._refresh_labels()
+    def _step_once(self) -> None:
+        self._push_commands()
+        self.frontend.step(0.1)
+        self._refresh_labels()
 
-        def _on_tick(self) -> None:
-            self._push_commands()
-            snap = self.frontend.snapshot()
-            measured = snap["actual_speed_mps"]
-            measured += 0.1 * (snap["cmd_speed_mps"] - measured)
-            measured = max(0.0, measured)
-            self.frontend.ingest_measured_speed(measured)
+    def _on_tick(self) -> None:
+        self._push_commands()
+        snap = self.frontend.snapshot()
+        measured = snap["actual_speed_mps"]
+        measured += 0.1 * (snap["cmd_speed_mps"] - measured)
+        measured = max(0.0, measured)
+        self.frontend.ingest_measured_speed(measured)
 
-            self.frontend.step(0.1)
-            self._refresh_labels()
+        self.frontend.step(0.1)
+        self._refresh_labels()
 
-        def _push_commands(self) -> None:
-            self.frontend.set_ctc_command(self.spin_cmd_speed.value(), self.chk_authority.isChecked())
-            self.frontend.set_service_brake(self.chk_service.isChecked())
-            self.frontend.set_emergency_brake(self.chk_emerg.isChecked())
-            self.frontend.set_doors(self.chk_l_door.isChecked(), self.chk_r_door.isChecked())
-            self.frontend.set_lights(self.chk_lights.isChecked())
+    def _push_commands(self) -> None:
+        self.frontend.set_ctc_command(self.spin_cmd_speed.value(), self.chk_authority.isChecked())
+        self.frontend.set_service_brake(self.chk_service.isChecked())
+        self.frontend.set_emergency_brake(self.chk_emerg.isChecked())
+        self.frontend.set_doors(self.chk_l_door.isChecked(), self.chk_r_door.isChecked())
+        self.frontend.set_lights(self.chk_lights.isChecked())
 
-        def _refresh_labels(self) -> None:
-            snap = self.frontend.snapshot()
-            self.lbl_actual.setText(f"Actual speed: {snap['actual_speed_mps']:.2f} m/s")
-            outputs = self.frontend.step(0.0)
-            self.lbl_target.setText(f"Target speed: {outputs['target_speed_mps']:.2f} m/s")
-            self.lbl_power.setText(f"Power request: {outputs['power_watts']/1000.0:.1f} kW")
-            self.lbl_accel.setText(f"Accel command: {outputs['accel_cmd_mps2']:.2f} m/s²")
+    def _refresh_labels(self) -> None:
+        snap = self.frontend.snapshot()
+        self.lbl_actual.setText(f"Actual speed: {snap['actual_speed_mps']:.2f} m/s")
+        outputs = self.frontend.step(0.0)
+        self.lbl_target.setText(f"Target speed: {outputs['target_speed_mps']:.2f} m/s")
+        self.lbl_power.setText(f"Power request: {outputs['power_watts']/1000.0:.1f} kW")
+        self.lbl_accel.setText(f"Accel command: {outputs['accel_cmd_mps2']:.2f} m/s²")

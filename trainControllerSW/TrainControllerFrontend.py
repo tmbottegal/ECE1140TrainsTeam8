@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 from typing import Optional, Dict, Callable
-from trainControllerBackend import trainControllerBackend
+from TrainControllerBackend import TrainControllerBackend
+
 
 class TrainControllerFrontend:
-    def __init__(self, controller: Optional[trainControllerBackend] = None) -> None:
-        self.ctrl = controller or trainControllerBackend()
+    def __init__(self, controller: Optional[TrainControllerBackend] = None) -> None:
+        self.ctrl = controller or TrainControllerBackend()
+
         self.send_to_train_model: Optional[Callable[[Dict], None]] = None
         self.publish_state: Optional[Callable[[Dict], None]] = None
 

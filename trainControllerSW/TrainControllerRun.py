@@ -7,8 +7,8 @@
 from __future__ import annotations
 import sys
 from PyQt6.QtWidgets import QApplication
-from trainControllerFrontend import TrainControllerFrontend
-from trainControllerUI import TrainControllerUI
+from TrainControllerFrontend import TrainControllerFrontend
+from TrainControllerUI import TrainControllerUI
 
 def main() -> None:
     app = QApplication(sys.argv)

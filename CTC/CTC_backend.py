@@ -231,9 +231,10 @@ class TrackState:
         if not self._stub:
             return
 
-        # Build the payload for this tick:
-        # - speed_mps (sticky) from _overrides
-        # - authority_blocks only for tids present in _oneshot_auth (one-shot)
+        # 1) Compute policy using the last snapshot
+        self._policy_tick()
+
+        # 2) Prepare the one-tick override payload to the stub
         send_ov: Dict[str, Dict[str, object]] = {}
         for tid, ov in (self._overrides or {}).items():
             if not ov.get("enabled"):
@@ -245,21 +246,17 @@ class TrackState:
                 entry["authority_blocks"] = int(self._oneshot_auth[tid])
             send_ov[tid] = entry
 
-        # Push overrides for this tick
+        # 3) Push overrides (speed sticky, authority one-shot)
         self._stub.set_train_overrides(send_ov)
 
-        # Advance movement first (so positions/authority_blocks update)
+        # 4) Advance the simulation one tick (movement happens here)
         self._stub.tick()
 
-        # One-shot has been used; clear for next tick
+        # 5) Clear one-shot authorities after they’ve been used
         self._oneshot_auth.clear()
 
-        # Recompute policy from fresh snapshot
-        self._policy_tick()
-
-        # Broadcast again so Train Info shows newly computed suggestions
+        # 6) Broadcast the new snapshot for the UI
         self._stub.broadcast()
-
 
     #deciding suggested speed and suggested authority 
     def _policy_tick(self):
@@ -267,7 +264,9 @@ class TrackState:
             print("[CTC backend]  No snapshot yet — skipping policy tick.")
             return
 
-        switches = dict(self._last_snapshot.get("switches", {}))
+        # NOTE: stub snapshot uses "switch_pos", not "switches"
+        switches = dict(self._last_snapshot.get("switch_pos", {}))
+
         blocks_payload: List[Dict[str, object]] = self._last_snapshot.get("blocks", [])
         occ_map    = {b["key"]: b.get("occupancy", "free") for b in blocks_payload}
         broken_map = {b["key"]: bool(b.get("broken_rail", False)) for b in blocks_payload}
@@ -278,6 +277,7 @@ class TrackState:
             cur = str(t["block"])
             nxt = self._next_block(cur, switches)
 
+            # --- speed policy based on next block state ---
             if nxt is None or cur in EOL:
                 speed_mps = 0.0
             else:
@@ -291,14 +291,15 @@ class TrackState:
                 else:
                     speed_mps = LINE_SPEED_LIMIT_MPS
 
-            # Policy authority (no sticky override here)
+            # --- authority lookahead ---
             authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
 
-            # Apply ONLY speed override (sticky)
+            # --- apply ONLY sticky speed override here ---
             ov = self._overrides.get(tid, {})
             if ov.get("enabled", False) and "speed_mps" in ov:
                 speed_mps = float(ov["speed_mps"])
 
+            # send to stub
             self.set_suggested_speed(tid, speed_mps)
             self.set_suggested_authority(tid, authority_m)
 

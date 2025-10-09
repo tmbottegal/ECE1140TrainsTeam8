@@ -115,15 +115,26 @@ class TrackControllerStub:
         self._status_cb = callback
 
     # ---------- CTC commands ----------
+    # ---------- CTC commands (from backend policy) ----------
     def set_suggested_speed(self, train_id: str, mps: float) -> None:
-        """Receive suggested speed from backend; store for snapshot visibility."""
+        """CTC policy: sticky speed suggestion (visible in snapshot)."""
         if train_id in self._trains:
             self._trains[train_id]["speed_mps"] = float(max(0.0, mps))
 
-
     def set_suggested_authority(self, train_id: str, blocks: int) -> None:
+        """CTC policy: one-shot authority for the *next* tick only."""
         if train_id in self._trains:
-            self._trains[train_id]["authority_blocks"] = int(max(0, blocks))
+            # Store as a one-shot command; your tick() already consumes & clears it.
+            self._trains[train_id]["cmd_authority_blocks"] = int(max(0, blocks))
+
+
+    def set_train_overrides(self, overrides: Dict[str, Dict[str, object]]) -> None:
+        self._overrides = overrides or {}
+        # normalize: if an override authority is present, put it into cmd_authority_blocks
+        for tid, ov in self._overrides.items():
+            if ov.get("enabled") and ("authority_blocks" in ov):
+                if tid in self._trains:
+                    self._trains[tid]["cmd_authority_blocks"] = int(ov["authority_blocks"])
 
     def set_block_maintenance(self, block_key: str, closed: bool) -> None:
         if block_key in self._closed_by_maintenance:
@@ -268,21 +279,18 @@ class TrackControllerStub:
                 break
 
     def tick(self) -> None:
-        #self._auto_line_sw1_if_needed()  
+        # self._auto_line_sw1_if_needed()
         self._tick += 1
+
         # Inject broken rail on C12 when a train is approaching/at C11 (Broken Rail scenario)
         if self._scenario_broken_active and not self._broken_rail.get("C12", False):
             for tid, t in self._trains.items():
                 cur = t["block"]
-                # Use next-for-train to respect physical switch routing
                 nxt = self._next_for_train(tid, cur)
-                # Trigger when we're about to enter C11 or already on it
                 if nxt == "C11" or cur == "C11":
                     self.set_broken_rail("C12", True)
-                    # one-time injection for this scenario
                     self._scenario_broken_active = False
                     break
-
 
         # Auto-line SW1 for approaching trains (optional) unless user locked it
         if self._auto_line and not self._manual_switch_lock:
@@ -292,47 +300,48 @@ class TrackControllerStub:
                 if cur in ("A4", "A5"):
                     self._switch_pos["SW1"] = "STRAIGHT" if branch == "B" else "DIVERGE"
 
-        # Move trains (stop at EOL — no wrap)
-                # Move trains (stop at EOL — no wrap)
+        # ----- Move trains (stop at EOL — no wrap) -----
         for tid in sorted(self._trains.keys()):
             cur = self._trains[tid]["block"]
             if cur in self._eol:
                 self._trains[tid]["authority_blocks"] = 0
                 continue
 
-            auth = int(self._trains[tid]["authority_blocks"] or 0)
+            # WORKING AUTHORITY FOR THIS TICK
+            if "cmd_authority_blocks" in self._trains[tid]:
+                auth = int(self._trains[tid]["cmd_authority_blocks"])
+                self._trains[tid]["authority_blocks"] = max(0, auth)
+                del self._trains[tid]["cmd_authority_blocks"]   # consume one-shot
+            else:
+                auth = int(self._trains[tid].get("authority_blocks", 0))
+                self._trains[tid]["authority_blocks"] = max(0, auth)
+
             if auth <= 0:
-                # make sure snapshot always has the visible value
-                self._trains[tid]["authority_blocks"] = 0
                 continue
 
-            # apply overrides
+            # Apply overrides (sticky speed; authority only if present)
             ov = self._overrides.get(tid, {})
             if ov.get("enabled", False):
                 if "speed_mps" in ov:
                     self._trains[tid]["speed_mps"] = float(ov["speed_mps"])
                 if "authority_blocks" in ov:
                     auth = int(ov["authority_blocks"])
-
-            # <-- publish the (possibly overridden) authority so UI sees it even if we don't move
-            self._trains[tid]["authority_blocks"] = auth
+                    self._trains[tid]["authority_blocks"] = max(0, auth)
 
             nxt = self._next_for_train(tid, cur)
 
             if nxt and self._is_enterable(nxt) and not self._is_occupied(nxt):
                 self._trains[tid]["block"] = nxt
                 # decrement only on successful advance
-                self._trains[tid]["authority_blocks"] = max(0, auth - 1)
+                self._trains[tid]["authority_blocks"] = max(0, int(self._trains[tid]["authority_blocks"]) - 1)
             elif nxt is None:
                 self._trains[tid]["authority_blocks"] = 0
-
 
         self._recompute_occupancy()
         self._recompute_signals()
         self._recompute_crossings()
 
-       
-        # then broadcast snapshot once for all trains
+        # Broadcast snapshot once for all trains
         if self._status_cb:
             self._status_cb(self._make_snapshot())
 

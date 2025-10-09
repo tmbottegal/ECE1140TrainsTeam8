@@ -1,29 +1,21 @@
-""" 
-
- This is the Train Controller Front End.
-
 """
-
+Train Controller Frontend
+"""
 from __future__ import annotations
-from typing import Optional
 
 try:
-    from .TrainControllerBackend import TrainControllerBackend, mph_to_mps
+    from .TrainControllerBackend import TrainControllerBackend, mph_to_mps, mps_to_mph
 except Exception:
-    from TrainControllerBackend import TrainControllerBackend, mph_to_mps
+    from TrainControllerBackend import TrainControllerBackend, mph_to_mps, mps_to_mph
 
 
 class TrainControllerFrontend:
-    """
-    Thin façade between UI and backend. Owns the controller object and exposes
-    simple typed methods for the UI. Also provides a periodic tick() hook the UI
-    calls via QTimer.
-    """
-
     def __init__(self, train_id: str = "T1") -> None:
         self.ctrl = TrainControllerBackend(train_id=train_id)
+        # demo-only internal speed if no train model is hooked up
+        self._demo_speed_mps = 0.0
 
-    # ---- UI -> Backend setters ----
+    # ---------- UI -> Backend setters ----------
     def set_auto_mode(self, enabled: bool) -> None:
         self.ctrl.set_auto_mode(enabled)
 
@@ -65,10 +57,37 @@ class TrainControllerFrontend:
         self.ctrl.set_temp_setpoint_c(temp_c)
 
     def set_actual_speed_mph(self, mph: float) -> None:
-        # For Iteration #2 demo, allow the user to knob this to see the PI response
-        self.ctrl.set_actual_speed(mph_to_mps(mph))
+        self._demo_speed_mps = mph_to_mps(mph)
+        self.ctrl.set_actual_speed(self._demo_speed_mps)
 
-    # ---- Tick & telemetry ----
+    # ---------- Tick & telemetry ----------
     def tick(self, dt_s: float) -> dict:
+        """
+        Demo physics:
+          - If emergency brake: strong decel
+          - Else if service brake: medium decel
+          - Else: accelerate a bit if there is power, coast otherwise
+        """
+        # 1) Run backend with the current measured speed
+        self.ctrl.set_actual_speed(self._demo_speed_mps)
         self.ctrl.update(dt_s)
+
+        # 2) Demo speed update (ONLY for sandbox)
+        disp = self.ctrl.get_display_values()
+        power_kw = float(disp.get("power_kw", 0.0))
+        eb_on = bool(disp.get("emergency_brake", False))
+        sb_on = bool(disp.get("service_brake", False))
+
+        if eb_on:
+            a = -3.0  # m/s^2
+        elif sb_on:
+            a = -1.0
+        else:
+            # Crude mapping power->accel for demo
+            a = 0.02 * power_kw  # cap happens in backend already
+
+        self._demo_speed_mps = max(0.0, self._demo_speed_mps + a * dt_s)
+        self.ctrl.set_actual_speed(self._demo_speed_mps)
+
+        # 3) Return telemetry for the UI
         return self.ctrl.get_display_values()

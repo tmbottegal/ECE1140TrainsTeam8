@@ -238,6 +238,27 @@ class CTCWindow(QtWidgets.QMainWindow):
         applyXBtn.clicked.connect(self._apply_crossing_tools)
         testLayout.addWidget(xGroup)
 
+                # ---- CTC → TC Policy (live) ----
+        policyGroup = QtWidgets.QGroupBox("CTC → TC Policy (live)")
+        pl = QtWidgets.QVBoxLayout(policyGroup)
+
+        self.policyTable = QtWidgets.QTableWidget(0, 4)
+        self.policyTable.setHorizontalHeaderLabels(
+            ["Train ID", "Suggested Speed (mph)", "Authority (m)", "Destination"]
+        )
+        self.policyTable.verticalHeader().setVisible(False)
+        self.policyTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.policyTable.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        pl.addWidget(self.policyTable)
+
+        # optional: a tiny hint
+        hint2 = QtWidgets.QLabel("Values are computed by CTC each tick and sent to the stub.")
+        hint2.setStyleSheet("color:#888;")
+        pl.addWidget(hint2)
+
+        testLayout.addWidget(policyGroup)
+
+
 
         testLayout.addStretch(1)
         # ---- Reset / Control tools ----
@@ -444,6 +465,17 @@ class CTCWindow(QtWidgets.QMainWindow):
         if self._manualPage and self.actionArea.currentWidget() is self._manualPage:
             self._populate_manual_table()
 
+                # If Train Info / Manual pages are open, refresh them too
+        if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
+            self._populate_train_info_table()
+        if self._manualPage and self.actionArea.currentWidget() is self._manualPage:
+            self._populate_manual_table()
+
+        # Update the live policy panel
+        if hasattr(self, "policyTable"):
+            self._refresh_policy_view()
+
+
     def _get_selected_block(self):
         row = self.mapTable.currentRow()
         if row < 0:
@@ -570,6 +602,24 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.actionArea.addWidget(page)
         self.actionArea.setCurrentWidget(page)
         self._populate_train_info_table()
+    
+    def _refresh_policy_view(self):
+        """Populate the live CTC→TC policy table from the current snapshot."""
+        trains = self.state.get_trains()
+        self.policyTable.setRowCount(len(trains))
+        for r, t in enumerate(trains):
+            tid = str(t.get("train_id", ""))
+            spd_mps = float(t.get("suggested_speed_mps", 0.0))
+            mph = spd_mps * MPS_TO_MPH
+            auth_blocks = int(t.get("authority_blocks", 0))
+            auth_m = int(auth_blocks * BLOCK_LEN_M)
+            dest = str(t.get("desired_branch", ""))
+
+            self.policyTable.setItem(r, 0, QtWidgets.QTableWidgetItem(tid))
+            self.policyTable.setItem(r, 1, QtWidgets.QTableWidgetItem(f"{mph:.1f}"))
+            self.policyTable.setItem(r, 2, QtWidgets.QTableWidgetItem(str(auth_m)))
+            self.policyTable.setItem(r, 3, QtWidgets.QTableWidgetItem(dest))
+
 
     def _populate_train_info_table(self):
         trains = self.state.get_trains()

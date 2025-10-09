@@ -6,121 +6,218 @@
 
 from __future__ import annotations
 
+import math
+from typing import Optional
+
 from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QCheckBox, QDoubleSpinBox,
-    QPushButton, QGroupBox, QApplication
+    QWidget, QMainWindow, QApplication, QLabel, QSpinBox, QDoubleSpinBox,
+    QVBoxLayout, QHBoxLayout, QPushButton, QLCDNumber, QGroupBox, QGridLayout,
+    QSlider, QCheckBox
 )
 
-from TrainControllerFrontend import TrainControllerFrontend
+# dual import for script vs package
+try:
+    from .TrainControllerFrontend import TrainControllerFrontend
+except Exception:  # pragma: no cover
+    from TrainControllerFrontend import TrainControllerFrontend
 
-class TrainControllerUI(QWidget):
+
+class TrainControllerUI(QMainWindow):
+    """
+    Iteration #2 UI: speed/authority displays, manual/auto toggle, KP/KI,
+    lights/doors/temp, service & emergency brake, and a live "speedometer".
+    """
+
     def __init__(self, frontend: TrainControllerFrontend) -> None:
         super().__init__()
         self.frontend = frontend
-
         self.setWindowTitle("Train Controller")
         self._build_ui()
+        self._wire_signals()
+        self._start_timer()
 
-        self.timer = QTimer(self)
-        self.timer.setInterval(100)
-        self.timer.timeout.connect(self._on_tick)
-
+    # -------- UI construction --------
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        root = QWidget()
+        self.setCentralWidget(root)
+        main = QGridLayout(root)
 
-        cmd_box = QGroupBox("Commands (from CTC / Driver)")
-        cmd_layout = QVBoxLayout(cmd_box)
+        # ===== Top row: Suggested speed, Train ID, Authority =====
+        self.lcd_suggested = QLCDNumber()
+        self.lcd_suggested.setDigitCount(3)
+        self._lcd_label(main, self.lcd_suggested, "SUGGESTED SPEED (mph)", 0, 0)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Commanded Speed (m/s):"))
-        self.spin_cmd_speed = QDoubleSpinBox()
-        self.spin_cmd_speed.setRange(0.0, 40.0)
-        self.spin_cmd_speed.setDecimals(2)
-        self.spin_cmd_speed.setSingleStep(0.5)
-        row.addWidget(self.spin_cmd_speed, 1)
+        self.lbl_train_id = QLabel("T1")
+        self.lbl_train_id.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_train_id.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        main.addWidget(self._boxed("TRAIN IDENTIFIER", self.lbl_train_id), 0, 1)
 
-        self.chk_authority = QCheckBox("Authority Granted")
-        row.addWidget(self.chk_authority)
-        cmd_layout.addLayout(row)
+        self.lcd_authority = QLCDNumber()
+        self.lcd_authority.setDigitCount(4)
+        self._lcd_label(main, self.lcd_authority, "AUTHORITY (m)", 0, 2)
 
-        row2 = QHBoxLayout()
-        self.chk_service = QCheckBox("Service Brake")
-        self.chk_emerg = QCheckBox("Emergency Brake")
-        self.chk_l_door = QCheckBox("Left Doors Open")
-        self.chk_r_door = QCheckBox("Right Doors Open")
-        self.chk_lights = QCheckBox("Lights On")
-        for w in (self.chk_service, self.chk_emerg, self.chk_l_door, self.chk_r_door, self.chk_lights):
-            row2.addWidget(w)
-        cmd_layout.addLayout(row2)
+        # ===== Center: Speedometer (numeric) =====
+        self.lcd_speed = QLCDNumber()
+        self.lcd_speed.setDigitCount(3)
+        self._lcd_label(main, self.lcd_speed, "TRAIN SPEED (mph)", 1, 0, 1, 2)
 
-        root.addWidget(cmd_box)
+        # Manual “actual speed” knob (for demo/testing during Iteration #2)
+        self.spin_actual_speed = QSpinBox()
+        self.spin_actual_speed.setRange(0, 160)
+        self.spin_actual_speed.setSuffix(" mph")
+        main.addWidget(self._boxed("SIMULATED ACTUAL SPEED (demo)", self.spin_actual_speed), 1, 2)
 
-        tele_box = QGroupBox("Telemetry")
-        tele_layout = QVBoxLayout(tele_box)
+        # ===== Left column: Commanded speed slider =====
+        self.slider_cmd = QSlider(Qt.Orientation.Vertical)
+        self.slider_cmd.setRange(0, 160)
+        self.slider_cmd.setTickInterval(10)
+        self.slider_cmd.setTickPosition(QSlider.TickPosition.TicksLeft)
+        main.addWidget(self._boxed("COMMANDED SPEED (driver, mph)", self.slider_cmd), 0, 3, 3, 1)
 
-        self.lbl_actual = QLabel("Actual speed: 0.00 m/s")
-        self.lbl_target = QLabel("Target speed: 0.00 m/s")
-        self.lbl_power = QLabel("Power request: 0.0 kW")
-        self.lbl_accel = QLabel("Accel command: 0.00 m/s²")
+        # ===== Mode & Gains =====
+        mode_box = QGroupBox("MODE / GAINS")
+        g = QGridLayout(mode_box)
 
-        for w in (self.lbl_actual, self.lbl_target, self.lbl_power, self.lbl_accel):
-            w.setAlignment(Qt.AlignmentFlag.AlignLeft)
-            tele_layout.addWidget(w)
+        self.chk_auto = QCheckBox("AUTO (use CTC speed)")
+        self.chk_auto.setChecked(True)
+        g.addWidget(self.chk_auto, 0, 0, 1, 2)
 
-        root.addWidget(tele_box)
+        g.addWidget(QLabel("Speed limit (mph):"), 1, 0)
+        self.spin_limit = QSpinBox()
+        self.spin_limit.setRange(0, 160)
+        self.spin_limit.setValue(70)
+        g.addWidget(self.spin_limit, 1, 1)
 
-        #Controls
-        ctrl_row = QHBoxLayout()
-        self.btn_start = QPushButton("Start")
-        self.btn_step = QPushButton("Step")
-        self.btn_stop = QPushButton("Stop")
+        g.addWidget(QLabel("Kp:"), 2, 0)
+        self.spin_kp = QDoubleSpinBox()
+        self.spin_kp.setRange(0.0, 10.0)
+        self.spin_kp.setSingleStep(0.1)
+        self.spin_kp.setValue(0.8)
+        g.addWidget(self.spin_kp, 2, 1)
 
-        self.btn_start.clicked.connect(self._start)
-        self.btn_step.clicked.connect(self._step_once)
-        self.btn_stop.clicked.connect(self._stop)
+        g.addWidget(QLabel("Ki:"), 3, 0)
+        self.spin_ki = QDoubleSpinBox()
+        self.spin_ki.setRange(0.0, 10.0)
+        self.spin_ki.setSingleStep(0.1)
+        self.spin_ki.setValue(0.3)
+        g.addWidget(self.spin_ki, 3, 1)
 
-        ctrl_row.addWidget(self.btn_start)
-        ctrl_row.addWidget(self.btn_step)
-        ctrl_row.addWidget(self.btn_stop)
-        root.addLayout(ctrl_row)
+        main.addWidget(mode_box, 2, 0)
 
-        self._push_commands()
+        # ===== Brakes =====
+        brake_box = QGroupBox("BRAKES")
+        hb = QHBoxLayout(brake_box)
+        self.btn_service = QPushButton("SERVICE BRAKE")
+        self.btn_service.setCheckable(True)
+        self.btn_eb = QPushButton("EMERGENCY BRAKE")
+        self.btn_eb.setCheckable(True)
+        hb.addWidget(self.btn_service)
+        hb.addWidget(self.btn_eb)
+        main.addWidget(brake_box, 2, 1)
 
-    def _start(self) -> None:
-        self._push_commands()
-        self.timer.start()
+        # ===== Doors / Lights / Temp =====
+        misc_box = QGroupBox("DOORS / LIGHTS / TEMP")
+        m = QGridLayout(misc_box)
 
-    def _stop(self) -> None:
-        self.timer.stop()
+        self.btn_door_left = QPushButton("Door Left")
+        self.btn_door_left.setCheckable(True)
+        self.btn_door_right = QPushButton("Door Right")
+        self.btn_door_right.setCheckable(True)
+        m.addWidget(self.btn_door_left, 0, 0)
+        m.addWidget(self.btn_door_right, 0, 1)
 
-    def _step_once(self) -> None:
-        self._push_commands()
-        self.frontend.step(0.1)
-        self._refresh_labels()
+        self.btn_head = QPushButton("Headlights")
+        self.btn_head.setCheckable(True)
+        self.btn_cabin = QPushButton("Cabin Lights")
+        self.btn_cabin.setCheckable(True)
+        m.addWidget(self.btn_head, 1, 0)
+        m.addWidget(self.btn_cabin, 1, 1)
 
-    def _on_tick(self) -> None:
-        self._push_commands()
-        snap = self.frontend.snapshot()
-        measured = snap["actual_speed_mps"]
-        measured += 0.1 * (snap["cmd_speed_mps"] - measured)
-        measured = max(0.0, measured)
-        self.frontend.ingest_measured_speed(measured)
+        m.addWidget(QLabel("Cabin Temp (°C):"), 2, 0)
+        self.spin_temp = QDoubleSpinBox()
+        self.spin_temp.setRange(10.0, 30.0)
+        self.spin_temp.setSingleStep(0.5)
+        self.spin_temp.setValue(20.0)
+        m.addWidget(self.spin_temp, 2, 1)
 
-        self.frontend.step(0.1)
-        self._refresh_labels()
+        main.addWidget(misc_box, 2, 2)
+
+        # ===== CTC/Track circuit demo inputs (for iteration demo) =====
+        ctc_box = QGroupBox("CTC / TRACK CIRCUIT INPUTS (demo)")
+        c = QGridLayout(ctc_box)
+        c.addWidget(QLabel("CTC Suggested Speed (mph):"), 0, 0)
+        self.spin_ctc_speed = QSpinBox()
+        self.spin_ctc_speed.setRange(0, 160)
+        self.spin_ctc_speed.setValue(45)
+        c.addWidget(self.spin_ctc_speed, 0, 1)
+
+        c.addWidget(QLabel("Authority (m):"), 1, 0)
+        self.spin_authority = QSpinBox()
+        self.spin_authority.setRange(0, 5000)
+        self.spin_authority.setValue(400)
+        c.addWidget(self.spin_authority, 1, 1)
+
+        self.btn_push_ctc = QPushButton("Push CTC to Controller")
+        c.addWidget(self.btn_push_ctc, 2, 0, 1, 2)
+
+        main.addWidget(ctc_box, 0, 0, 1, 3)
+
+    def _boxed(self, title: str, inner: QWidget) -> QGroupBox:
+        g = QGroupBox(title)
+        l = QVBoxLayout(g)
+        l.addWidget(inner)
+        return g
+
+    def _lcd_label(self, grid: QGridLayout, lcd: QLCDNumber, title: str,
+                   row: int, col: int, rowspan: int = 1, colspan: int = 1) -> None:
+        box = QGroupBox(title)
+        v = QVBoxLayout(box)
+        v.addWidget(lcd)
+        grid.addWidget(box, row, col, rowspan, colspan)
+
+    # -------- Signal wiring --------
+    def _wire_signals(self) -> None:
+        self.slider_cmd.valueChanged.connect(
+            lambda v: self.frontend.set_driver_speed_mph(float(v))
+        )
+        self.chk_auto.toggled.connect(self.frontend.set_auto_mode)
+        self.spin_limit.valueChanged.connect(lambda v: self.frontend.set_speed_limit_mph(float(v)))
+        self.spin_kp.valueChanged.connect(lambda v: self.frontend.set_kp(float(v)))
+        self.spin_ki.valueChanged.connect(lambda v: self.frontend.set_ki(float(v)))
+        self.btn_service.toggled.connect(self.frontend.set_service_brake)
+        self.btn_eb.toggled.connect(self.frontend.set_emergency_brake)
+        self.btn_door_left.toggled.connect(self.frontend.set_doors_left)
+        self.btn_door_right.toggled.connect(self.frontend.set_doors_right)
+        self.btn_head.toggled.connect(self.frontend.set_headlights)
+        self.btn_cabin.toggled.connect(self.frontend.set_cabin_lights)
+        self.spin_temp.valueChanged.connect(lambda v: self.frontend.set_temp_c(float(v)))
+        self.spin_actual_speed.valueChanged.connect(lambda v: self.frontend.set_actual_speed_mph(float(v)))
+        self.btn_push_ctc.clicked.connect(self._push_commands)
 
     def _push_commands(self) -> None:
-        self.frontend.set_ctc_command(self.spin_cmd_speed.value(), self.chk_authority.isChecked())
-        self.frontend.set_service_brake(self.chk_service.isChecked())
-        self.frontend.set_emergency_brake(self.chk_emerg.isChecked())
-        self.frontend.set_doors(self.chk_l_door.isChecked(), self.chk_r_door.isChecked())
-        self.frontend.set_lights(self.chk_lights.isChecked())
+        self.frontend.set_ctc_command(
+            float(self.spin_ctc_speed.value()),
+            float(self.spin_authority.value()),
+        )
 
-    def _refresh_labels(self) -> None:
-        snap = self.frontend.snapshot()
-        self.lbl_actual.setText(f"Actual speed: {snap['actual_speed_mps']:.2f} m/s")
-        outputs = self.frontend.step(0.0)
-        self.lbl_target.setText(f"Target speed: {outputs['target_speed_mps']:.2f} m/s")
-        self.lbl_power.setText(f"Power request: {outputs['power_watts']/1000.0:.1f} kW")
-        self.lbl_accel.setText(f"Accel command: {outputs['accel_cmd_mps2']:.2f} m/s²")
+    # -------- Timer / refresh --------
+    def _start_timer(self) -> None:
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)  # 100 ms
+        self._timer.timeout.connect(self._on_tick)
+        self._timer.start()
+
+    def _on_tick(self) -> None:
+        # Advance controller and refresh displays
+        telemetry = self.frontend.tick(0.1)
+
+        self.lbl_train_id.setText(telemetry["train_id"])
+        self.lcd_suggested.display(int(round(telemetry["cmd_speed_mph"])))
+        self.lcd_authority.display(int(round(telemetry["authority_m"])))
+        self.lcd_speed.display(int(round(telemetry["actual_speed_mph"])))
+
+        # Mirror EB/SB status (controller may force these)
+        self.btn_service.setChecked(telemetry["service_brake"])
+        self.btn_eb.setChecked(telemetry["emergency_brake"])

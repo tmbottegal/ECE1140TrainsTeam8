@@ -376,8 +376,8 @@ class CTCWindow(QtWidgets.QMainWindow):
     def _scenario_reset(self):
         self.state.reset_all()
         self._reload_line(self.state.line_name)
-        self.scenarioCombo.setCurrentText("Manual Sandbox")
-        self.scenarioDesc.setText("Manual Sandbox: no trains spawn; nothing moves until Run/Step.")
+        self.scenarioCombo.setCurrentText("Meet-and-Branch")
+        self.scenarioDesc.setText("Meet-and-Branch: T1→B, T2→C. SW1 AUTO lines by approach.")
 
     def _refresh_block_combo(self, preserve: bool = False):
         if not hasattr(self, "blockCombo"):

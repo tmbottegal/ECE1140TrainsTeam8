@@ -53,6 +53,11 @@ class TrackState:
         self._last_snapshot: Dict[str, object] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}
         self._oneshot_auth: Dict[str, int] = {}              # <-- NEW: on
+                # ---- Route schedule (Excel-driven) ----
+        self._route_schedule: List[Dict[str, object]] = []  # rows: {tid,t,start_block,branch,dest_block,spawned}
+        self._schedule_clock_s: int = 0
+        self._dest_by_tid: Dict[str, str] = {}  # tid -> destination block key (e.g., "B10", "A1")
+
 
         self.set_line(line_name, line_tuples)
 
@@ -168,7 +173,62 @@ class TrackState:
     def reset_all(self):
         if self._stub:
             self._stub.reset_all()
+        # clear schedule/clock/destinations
+        self._route_schedule = []
+        self._schedule_clock_s = 0
+        self._dest_by_tid.clear()
         self._policy_tick()
+
+        # ---------- Schedule: load/clear (route-based) ----------
+    def load_route_schedule(self, rows: List[Tuple[str, int, str, str]]) -> int:
+        """
+        rows: list of (train_id, start_time_s, origin, destination)
+              origin: "YARD" or "A" (both map to A1 on this demo line)
+              destination: "A", "B", or "YARD"  (A/YARD -> A1, B -> B10)
+        """
+        def origin_to_start_block(origin: str) -> str:
+            o = (origin or "").strip().upper()
+            return "A1"  # both YARD and A spawn at A1 on this demo line
+
+        def dest_to_block(dest: str) -> Tuple[str, str]:
+            d = (dest or "").strip().upper()
+            if d == "B":
+                return "B10", "B"   # Station B → branch B
+            if d == "C":
+                return "C15", "C"   # Station C → branch C
+            # A or YARD → A1 (same physical spot on demo), no travel needed
+            return "A1", "B"        # branch value doesn’t matter; authority will cap at A1
+
+        parsed: List[Dict[str, object]] = []
+        for tid, t_s, origin, dest in rows:
+            tid = str(tid).strip()
+            if not tid:
+                continue
+            try:
+                t_val = int(t_s)
+            except Exception:
+                continue
+            start_block = origin_to_start_block(origin)
+            dest_block, branch = dest_to_block(dest)
+            parsed.append({
+                "tid": tid,
+                "t": t_val,
+                "start_block": start_block,
+                "branch": branch,         # used to set desired_branch (B)
+                "dest_block": dest_block, # authority cap target
+                "spawned": False,
+            })
+        self._route_schedule = sorted(parsed, key=lambda r: int(r["t"]))
+        self._schedule_clock_s = 0
+        # destinations mapping will be set when each train actually spawns
+        return len(self._route_schedule)
+
+    def clear_route_schedule(self) -> None:
+        self._route_schedule = []
+        self._schedule_clock_s = 0
+        self._dest_by_tid.clear()
+
+
 
     # Per-train manual override from UI. Converts meters→blocks and forwards to stub.
     #*****
@@ -259,7 +319,30 @@ class TrackState:
         if not self._stub:
             return
 
-        # 1) Compute policy using the last snapshot
+        # ---- Route schedule clock & spawns (runs only when UI timer calls us) ----
+        # advance the relative schedule clock by 1 second per tick
+        self._schedule_clock_s += 1
+
+        # spawn any due trains (not yet spawned and start_time <= clock)
+        if self._route_schedule:
+            for row in self._route_schedule:
+                if row.get("spawned"):
+                    continue
+                if int(row["t"]) <= self._schedule_clock_s:
+                    tid        = str(row["tid"])
+                    start_blk  = str(row["start_block"])
+                    branch     = str(row["branch"])       # e.g., "B"
+                    dest_block = str(row["dest_block"])   # e.g., "B10" or "A1"
+
+                    # create the train with branch intent; stub will set desired_branch
+                    self._stub.add_train(tid, start_blk, branch)
+
+                    # remember destination so policy can cap authority in _policy_tick()
+                    self._dest_by_tid[tid] = dest_block
+
+                    row["spawned"] = True
+
+        # 1) Compute policy using the last snapshot (uses _dest_by_tid to cap authority)
         self._policy_tick()
 
         # 2) Prepare the one-tick override payload to the stub
@@ -287,6 +370,14 @@ class TrackState:
         self._stub.broadcast()
 
     #deciding suggested speed and suggested authority 
+    def _get_destination_block_for_train_on(self, cur_block: str) -> Optional[str]:
+        # Find the train occupying cur_block, then return its destination block (if any)
+        for t in self._last_snapshot.get("trains", []):
+            if str(t.get("block", "")) == str(cur_block):
+                tid = str(t.get("train_id", ""))
+                return self._dest_by_tid.get(tid)
+        return None
+
     def _policy_tick(self):
         if not self._last_snapshot:
             print("[CTC backend]  No snapshot yet — skipping policy tick.")
@@ -320,6 +411,7 @@ class TrackState:
                     speed_mps = LINE_SPEED_LIMIT_MPS
 
             # --- authority lookahead ---
+            dest_blk = self._get_destination_block_for_train_on(cur)
             authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
 
             # --- apply ONLY sticky speed override here ---
@@ -346,8 +438,14 @@ class TrackState:
         return None
 
     # Look ahead from 'cur' until EOL or first blockage, summing safe distance
-    def _lookahead_authority_m(self, cur: str, switches: Dict[str, str],
-                               occ_map: Dict[str, str], broken_map: Dict[str, bool]) -> float:
+    def _lookahead_authority_m(
+        self,
+        cur: str,
+        switches: Dict[str, str],
+        occ_map: Dict[str, str],
+        broken_map: Dict[str, bool],
+        dest_block: Optional[str] = None
+    ) -> float:
         path: List[str] = []
         nxt = cur
         while True:
@@ -355,17 +453,24 @@ class TrackState:
             if nxt is None:
                 break
             path.append(nxt)
+            # stop path if destination is reached
+            if dest_block and nxt == dest_block:
+                break
             if nxt in EOL:
                 break
+
         if SAFETY_BLOCKS > 0 and len(path) > 0:
             path = path[:-SAFETY_BLOCKS] if len(path) > SAFETY_BLOCKS else []
+
         total_m = 0.0
         for b in path:
-            if occ_map.get(b, "free") in ("closed", "occupied"): break
-            if broken_map.get(b, False): break
+            if occ_map.get(b, "free") in ("closed", "occupied"):
+                break
+            if broken_map.get(b, False):
+                break
             total_m += BLOCK_LEN_M
-        # If immediately blocked ahead, grant a 1-block hold so UI isn’t blank
         return total_m
+
 
     def _get_desired_branch_for_train(self, cur_block: str) -> str:
         for t in self._last_snapshot.get("trains", []):

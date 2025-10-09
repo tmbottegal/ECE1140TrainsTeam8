@@ -77,7 +77,6 @@ class TrainModelBackend:
                 callback()
             except Exception:
                 logger.exception("Listener raised an exception")
-
   
     # CORE UPDATE METHODS
     def set_inputs(self, power_kw: float, service_brake: bool,

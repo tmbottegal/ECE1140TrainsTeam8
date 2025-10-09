@@ -639,35 +639,70 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.trainInfoTable.setItem(r, 4, QtWidgets.QTableWidgetItem(branch))
             self.trainInfoTable.setItem(r, 5, QtWidgets.QTableWidgetItem(str(auth_blocks)))
 
-    # ---------- Upload schedule (minimal CSV: train_id,start_block[,authority_m]) ----------
+    # ---------- Upload schedule (minimal excel: train_id,start_block[,authority_m]) ----------
     def _upload_schedule(self):
         fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Upload Schedule", "", "CSV Files (*.csv)"
+            self, "Upload Route Schedule (CSV)", "", "CSV Files (*.csv)"
         )
         if not fname:
             return
 
-        imported = 0
+        rows = []
         try:
             with open(fname, "r", encoding="utf-8") as f:
-                for line in f:
-                    parts = [p.strip() for p in line.split(",") if p.strip() != ""]
-                    if len(parts) < 2:
+                first = True
+                for raw in f:
+                    line = raw.strip()
+                    if not line:
                         continue
-                    tid, start = parts[0], parts[1]
-                    self.state.add_train(tid, start)
-                    if len(parts) >= 3:
-                        try:
-                            meters = float(parts[2])
-                            self.state.set_suggested_authority(tid, meters)
-                        except Exception:
-                            pass
-                    imported += 1
+                    parts = [p.strip() for p in line.split(",")]
+                    if first:
+                        first = False
+                        # expect header: train_id,start_time_s,origin,destination
+                        header = [p.lower() for p in parts]
+                        required = ["train_id", "start_time_s", "origin", "destination"]
+                        if any(col not in header for col in required):
+                            QtWidgets.QMessageBox.warning(
+                                self, "Schedule Upload",
+                                "CSV must include header: train_id,start_time_s,origin,destination"
+                            )
+                            return
+                        # build column indices
+                        idx = {name: header.index(name) for name in required}
+                        continue
+
+                    # map columns by header index
+                    try:
+                        tid  = str(parts[idx["train_id"]]).strip()
+                        t_s  = int(parts[idx["start_time_s"]])
+                        orig = str(parts[idx["origin"]]).strip()
+                        dest = str(parts[idx["destination"]]).strip()
+                    except Exception:
+                        continue  # skip malformed rows
+
+                    if not tid or orig == "" or dest == "":
+                        continue
+                    rows.append((tid, t_s, orig, dest))
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to load: {e}")
+            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to read CSV: {e}")
             return
 
-        QtWidgets.QMessageBox.information(self, "Schedule Uploaded", f"Loaded {imported} train(s).")
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Schedule", "No valid rows found.")
+            return
+
+        try:
+            accepted = self.state.load_route_schedule(rows)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to load schedule: {e}")
+            return
+
+        QtWidgets.QMessageBox.information(
+            self, "Schedule Uploaded",
+            f"Loaded {accepted} route row(s).\n"
+            f"Press Run to start the schedule clock; Pause will pause spawns."
+        )
+
 
     # ---------- Test Bench actions ----------
     def _apply_block_tools(self):

@@ -378,9 +378,7 @@ class TrackState:
         if not self._stub:
             return "no-stub"
         name = (name or "").strip()
-        if name == "Manual Sandbox":
-            self._stub.seed_manual_sandbox()
-            return "Manual Sandbox loaded"
+        
         if name == "Meet-and-Branch":
             self._stub.seed_meet_and_branch()
             return "Meet-and-Branch loaded"
@@ -395,7 +393,7 @@ class TrackState:
             return "Crossing Gate Demo loaded"
         # fallback
         self._stub.seed_manual_sandbox()
-        return "Manual Sandbox loaded"
+        return "Meet-and-Branch loaded"
 
 
     @staticmethod

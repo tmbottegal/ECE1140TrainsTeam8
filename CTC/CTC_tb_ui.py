@@ -5,7 +5,7 @@ from .CTC_backend import TrackState
 # Keep UI-side constants in sync with backend policy for display/convert
 BLOCK_LEN_M = 50.0          # meters per block (demo line)
 MPS_TO_MPH  = 2.23693629
-SCENARIOS = ["Manual Sandbox", "Meet-and-Branch", "Maintenance Detour", "Broken Rail", "Crossing Gate Demo"]
+SCENARIOS = ["Meet-and-Branch", "Maintenance Detour", "Broken Rail", "Crossing Gate Demo"]
 
 LINE_DATA = {
     "Blue Line": [
@@ -136,7 +136,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         testLayout.addLayout(scenRow)
 
         # short description under the row
-        self.scenarioDesc = QtWidgets.QLabel("Manual Sandbox: no trains spawn; nothing moves until Run/Step.")
+        self.scenarioDesc = QtWidgets.QLabel("Meet-and-Branch: T1→B, T2→C. SW1 AUTO lines by approach.")
         self.scenarioDesc.setStyleSheet("color:#888;")
         testLayout.addWidget(self.scenarioDesc)
 
@@ -347,7 +347,6 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line(self.state.line_name)
         # description
         desc = {
-            "Manual Sandbox": "No trains. Add trains or use tools. Nothing moves until Run/Step.",
             "Meet-and-Branch": "T1→B, T2→C. SW1 AUTO lines by approach.",
             "Maintenance Detour": "B7 closed initially; reopen to proceed.",
             "Broken Rail": "When near C11, inject broken rail on C12; train must stop before fault.",

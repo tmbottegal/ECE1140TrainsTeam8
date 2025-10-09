@@ -175,6 +175,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         testLayout.addWidget(blockGroup)
 
         # ---- Switch tools ----
+        # ---- Switch tools ----
         switchGroup = QtWidgets.QGroupBox("Switch tools (TC → CTC position, set here via stub)")
         sl = QtWidgets.QGridLayout(switchGroup)
         self.switchCombo = QtWidgets.QComboBox()
@@ -182,18 +183,24 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.switchPos = QtWidgets.QComboBox(); self.switchPos.addItems(["STRAIGHT", "DIVERGE"])
         applySwitchBtn = QtWidgets.QPushButton("Set Switch Position")
 
+        self.switchReadout = QtWidgets.QLabel("Current: (n/a)")
+        self.unlockSwitchBtn = QtWidgets.QPushButton("Unlock / Return to AUTO")
+
         self.autoLineCheck = QtWidgets.QCheckBox("Auto-line SW1 when trains approach")
         self.autoLineCheck.setChecked(True)
         self.autoLineCheck.toggled.connect(lambda v: self.state.set_auto_line(v))
 
         sl.addWidget(QtWidgets.QLabel("Switch ID:"), 0, 0); sl.addWidget(self.switchCombo, 0, 1)
         sl.addWidget(QtWidgets.QLabel("Position:"), 1, 0); sl.addWidget(self.switchPos, 1, 1)
-        sl.addWidget(applySwitchBtn, 2, 0, 1, 2)
-
-        sl.addWidget(self.autoLineCheck, 3, 0, 1, 2)
+        sl.addWidget(applySwitchBtn,                2, 0, 1, 2)
+        sl.addWidget(self.switchReadout,            3, 0, 1, 2)
+        sl.addWidget(self.unlockSwitchBtn,          4, 0, 1, 2)
+        sl.addWidget(self.autoLineCheck,            5, 0, 1, 2)
 
         applySwitchBtn.clicked.connect(self._apply_switch_tools)
+        self.unlockSwitchBtn.clicked.connect(self._unlock_switches)
         testLayout.addWidget(switchGroup)
+
 
         # ---- Train tools (direct CTC→TC send) ----
        # trainGroup = QtWidgets.QGroupBox("Train tools (CTC → TC: send suggested speed/authority)")
@@ -288,6 +295,26 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._manualPage = None
 
     # ---------- helpers ----------
+    def _update_switch_readout(self):
+        # show current physical switch positions reported by the stub
+        pos = self.state.get_switch_positions()  # { "SW1": "STRAIGHT"/"DIVERGE", ... }
+        if not pos:
+            self.switchReadout.setText("Current: (n/a)")
+            return
+        # if the user selected a specific switch, highlight that; else show all
+        sel = self.switchCombo.currentText().strip()
+        if sel and sel in pos:
+            self.switchReadout.setText(f"Current: {sel} = {pos[sel]}")
+        else:
+            pairs = ", ".join(f"{k}={v}" for k, v in pos.items())
+            self.switchReadout.setText(f"Current: {pairs}")
+
+    def _unlock_switches(self):
+        self.state.unlock_switches()
+        # let auto-line resume immediately and refresh the readout
+        self._reload_line(self.state.line_name)
+        self._update_switch_readout()
+
     def _scenario_load(self):
         name = self.scenarioCombo.currentText()
         msg = self.state.scenario_load(name)  # backend wrapper calls stub.seed_*
@@ -602,6 +629,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line(self.state.line_name)
 
     def _apply_switch_tools(self):
+        
         sw = self.switchCombo.currentText()
         if not sw:
             QtWidgets.QMessageBox.information(self, "Switch tools", "No switches on this line.")
@@ -609,7 +637,8 @@ class CTCWindow(QtWidgets.QMainWindow):
         pos = self.switchPos.currentText()
         self.state.set_switch(sw, pos)
         self._reload_line(self.state.line_name)
-        
+        self._update_switch_readout()
+
     def _apply_crossing_tools(self):
         bid = self.crossingBlockCombo.currentText().strip()
         mode = self.crossingMode.currentText()

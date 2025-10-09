@@ -97,6 +97,16 @@ class TrackState:
 
     # ----- UI -> backend (forward to stub) -----
     #Mark/unmark a block under maintainace closed or setting it back 
+
+    def unlock_switches(self) -> None:
+        if self._stub:
+            self._stub.unlock_switches()
+
+    def get_switch_positions(self) -> Dict[str, str]:
+        sp = self._last_snapshot.get("switch_pos", {})
+        # normalize to {id: POS} as strings
+        return {str(k): str(v) for k, v in sp.items()}
+
     def set_status(self, block_id: str, status: str) -> None:
         # Only toggle the maintenance closure; do NOT touch the static track_status
         is_closed = (str(status).lower() == "closed")

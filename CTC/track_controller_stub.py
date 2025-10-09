@@ -35,6 +35,8 @@ class TrackControllerStub:
         self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
         self._scenario_broken_active: bool = False
         self._crossing_forced: Dict[str, Optional[bool]] = {}
+        self._crossing_auto: bool = False   # disable proximity-based crossing by default
+
         
 
 
@@ -185,6 +187,11 @@ class TrackControllerStub:
         if switch_id:
             self._switch_pos[switch_id] = position.upper()
             self._manual_switch_lock = True  # user locked
+            # make it visible/functional immediately
+            self._recompute_signals()
+            self._recompute_crossings()
+            self.broadcast()
+
 
     def unlock_switches(self) -> None:
         self._manual_switch_lock = False
@@ -463,25 +470,29 @@ class TrackControllerStub:
 
 
     def _recompute_crossings(self) -> None:
-        active = {}
-        occ = {b for b, s in self._occupancy.items() if s == "occupied"}
-        # Crossing near A3: treat A2/A3/A4 neighborhood
-        for b, has in self._has_crossing.items():
-            if not has:
-                continue
-            if b == "A3":
-                neighbors = {"A2", "A3", "A4"}
-            else:
-                neighbors = {b}
-            active[b] = any(nb in occ for nb in neighbors)
-        self._crossing_active = active
-                # forced overrides win over derived activity
-        for b, forced in self._crossing_forced.items():
+        # Base: all crossings inactive unless auto mode says otherwise
+        active: Dict[str, bool] = {b: False for b, has in self._has_crossing.items() if has}
+
+        if self._crossing_auto:
+            occ = {b for b, s in self._occupancy.items() if s == "occupied"}
+            for b, has in self._has_crossing.items():
+                if not has:
+                    continue
+                if b == "A3":
+                    neighbors = {"A2", "A3", "A4"}
+                else:
+                    neighbors = {b}
+                active[b] = any(nb in occ for nb in neighbors)
+
+        # forced overrides win over derived/auto
+        for b, forced in getattr(self, "_crossing_forced", {}).items():
             if forced is None:
                 continue
-            # forced=True means active/down
             if self._has_crossing.get(b, False):
-                self._crossing_active[b] = bool(forced)
+                active[b] = bool(forced)  # True means active/down
+
+        self._crossing_active = active
+
 
 
     # ---------- topology helpers ----------

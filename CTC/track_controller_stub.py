@@ -33,6 +33,7 @@ class TrackControllerStub:
         self._has_crossing: Dict[str, bool] = {}
         self._beacon: Dict[str, str] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
+        self._scenario_broken_active: bool = False
         
 
 
@@ -104,8 +105,10 @@ class TrackControllerStub:
         self.reset_all()
         self.unlock_switches()
         self._auto_line = True
-        self.add_train("T1", "A3", "C")
-        self.broadcast()   
+        self._scenario_broken_active = True          # <-- enable proximity trigger
+        self.add_train("T1", "A3", "C")              # start close so it reaches C11 soon
+        self.broadcast()
+ 
 
     # ---------- registration ----------
     def on_status(self, callback: Callable[[Snapshot], None]) -> None:
@@ -267,6 +270,19 @@ class TrackControllerStub:
     def tick(self) -> None:
         #self._auto_line_sw1_if_needed()  
         self._tick += 1
+        # Inject broken rail on C12 when a train is approaching/at C11 (Broken Rail scenario)
+        if self._scenario_broken_active and not self._broken_rail.get("C12", False):
+            for tid, t in self._trains.items():
+                cur = t["block"]
+                # Use next-for-train to respect physical switch routing
+                nxt = self._next_for_train(tid, cur)
+                # Trigger when we're about to enter C11 or already on it
+                if nxt == "C11" or cur == "C11":
+                    self.set_broken_rail("C12", True)
+                    # one-time injection for this scenario
+                    self._scenario_broken_active = False
+                    break
+
 
         # Auto-line SW1 for approaching trains (optional) unless user locked it
         if self._auto_line and not self._manual_switch_lock:

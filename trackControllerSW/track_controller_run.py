@@ -14,12 +14,10 @@ from __future__ import annotations
 import logging
 import sys
 from typing import NoReturn
-
 from PyQt6.QtWidgets import QApplication, QFileDialog
 from track_controller_backend import TrackNetwork
 from track_controller_ui import TrackControllerUI
 
-# Configure root logger.
 logging.basicConfig(
     level=logging.INFO,
     format="[%(levelname)s] %(name)s: %(message)s"

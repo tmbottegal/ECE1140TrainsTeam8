@@ -12,17 +12,17 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QApplication
 )
 
-from trainControllerFrontend import trainControllerFrontend
+from trainControllerFrontend import TrainControllerFrontend
 
 class TrainControllerUI(QWidget):
-    def __init__(self, frontend: trainControllerFrontend) -> None:
+    def __init__(self, frontend: TrainControllerFrontend) -> None:
         super().__init__()
         self.frontend = frontend
 
         self.setWindowTitle("Train Controller")
         self._build_ui()
 
-        self.timer = Qtimer(self)
+        self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._on_tick)
 
@@ -32,9 +32,9 @@ class TrainControllerUI(QWidget):
         cmd_box = QGroupBox("Commands (from CTC / Driver)")
         cmd_layout = QVBoxLayout(cmd_box)
 
-        rox = QHBoxLayout()
+        row = QHBoxLayout()
         row.addWidget(QLabel("Commanded Speed (m/s):"))
-        self.spin_cmd_speed = QdoubleSpinBox()
+        self.spin_cmd_speed = QDoubleSpinBox()
         self.spin_cmd_speed.setRange(0.0, 40.0)
         self.spin_cmd_speed.setDecimals(2)
         self.spin_cmd_speed.setSingleStep(0.5)

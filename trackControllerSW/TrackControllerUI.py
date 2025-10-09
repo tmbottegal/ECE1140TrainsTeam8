@@ -15,6 +15,7 @@ Refactored per Google Python Style Guide:
 from __future__ import annotations
 
 import logging
+import copy
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -58,10 +59,13 @@ class ManualOverrideDialog(QDialog):
         self.ui = parent_ui
         self.setWindowTitle("Test UI")
         self.setModal(False)
-        self.resize(420, 240)
+        self.resize(420, 380)
 
         self._build_ui()
         self._connect_signals()
+
+        # 🆕 Save original backend state for cancel restore
+        self.original_state = copy.deepcopy(self.ui.backend.report_state())
 
     def _build_ui(self) -> None:
         """Construct dialog layout."""
@@ -76,6 +80,11 @@ class ManualOverrideDialog(QDialog):
         self.occ_combo = QComboBox()
         self.occ_combo.addItems(["No", "Yes"])
         form.addRow("Occupancy", self.occ_combo)
+
+        # Broken rail control
+        self.broken_combo = QComboBox()
+        self.broken_combo.addItems(["No", "Yes"])
+        form.addRow("Broken Rail", self.broken_combo)
 
         # Switch controls
         self.switch_combo = QComboBox()
@@ -112,13 +121,19 @@ class ManualOverrideDialog(QDialog):
         self.signal_combo.addItems(["Red", "Yellow", "Green", "Super Green"])
         form.addRow("Signal Color", self.signal_combo)
 
+        # Commanded speed
+        self.speed_spin = QSpinBox()
+        self.speed_spin.setRange(0, 120)  # adjust max speed if needed
+        form.addRow("Commanded Speed", self.speed_spin)
+
         # Buttons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Apply
             | QDialogButtonBox.StandardButton.Close
         )
         buttons.button(QDialogButtonBox.StandardButton.Apply).setText("Apply")
-        buttons.accepted.connect(self._apply)
+        apply_btn = buttons.button(QDialogButtonBox.StandardButton.Apply)
+        apply_btn.clicked.connect(self._apply)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
@@ -127,6 +142,7 @@ class ManualOverrideDialog(QDialog):
         try:
             self.block_spin.valueChanged.connect(self.refresh_from_backend)
             self.occ_combo.currentTextChanged.connect(self._on_occupancy_changed)
+            self.broken_combo.currentTextChanged.connect(self._on_broken_changed)
             self.switch_combo.currentTextChanged.connect(
                 self._on_switch_selection_changed
             )
@@ -140,6 +156,7 @@ class ManualOverrideDialog(QDialog):
                 self._on_crossing_status_changed
             )
             self.signal_combo.currentTextChanged.connect(self._on_signal_changed)
+            self.speed_spin.valueChanged.connect(self._on_speed_changed)
         except Exception:
             logger.exception("Failed to connect manual override handlers.")
 
@@ -150,13 +167,56 @@ class ManualOverrideDialog(QDialog):
             self.occ_combo.setCurrentText(
                 "Yes" if self.ui.backend.blocks[b]["occupied"] else "No"
             )
+            self.broken_combo.setCurrentText(
+                "Yes" if self.ui.backend.blocks[b]["broken"] else "No"
+            )
             self.signal_combo.setCurrentText(
                 self.ui.backend.blocks[b].get("signal", "Green")
             )
+            self.speed_spin.setValue(self.ui.backend.blocks[b]["commanded_speed"])
         except Exception:
             logger.debug("Failed to refresh block or signal state.")
 
-    # --- Handlers for live changes ---
+    def reject(self) -> None:
+        """Revert backend to its original state when closing without applying."""
+        try:
+            # Restore block states
+            for b, data in self.original_state["blocks"].items():
+                block = self.ui.backend.blocks[b]
+                block.update({
+                    "occupied": data["occupied"],
+                    "broken": data["broken"],
+                    "suggested_speed": data["suggested_speed"],
+                    "commanded_speed": data["commanded_speed"],
+                    "suggested_auth": data["suggested_auth"],
+                    "commanded_auth": data["commanded_auth"],
+                    "signal": data["signal"],
+                })
+
+            # Restore switches
+            self.ui.backend.switches = self.original_state["switches"].copy()
+            self.ui.backend.switch_map = self.original_state["switch_map"].copy()
+
+            # Restore crossings
+            self.ui.backend.crossings = {
+                cid: info["status"]
+                for cid, info in self.original_state["crossings"].items()
+            }
+            self.ui.backend.crossing_blocks = {
+                cid: info["block"]
+                for cid, info in self.original_state["crossings"].items()
+            }
+
+            # Notify listeners and refresh UI
+            self.ui.backend._notify_listeners()
+            self.ui.refresh_tables()
+            logger.info("Manual Override cancelled — backend reverted.")
+        except Exception:
+            logger.exception("Failed to revert backend on cancel.")
+
+        super().reject()
+
+    # Handlers for live changes
     def _on_occupancy_changed(self, text: str) -> None:
         try:
             block = self.block_spin.value()
@@ -165,6 +225,18 @@ class ManualOverrideDialog(QDialog):
             self.applied.emit()
         except Exception as exc:
             QMessageBox.warning(self, "Occupancy Failed", str(exc))
+
+    def _on_broken_changed(self, text: str) -> None:
+        try:
+            block = self.block_spin.value()
+            if text == "Yes":
+                self.ui.backend.break_rail(block)
+            else:
+                self.ui.backend.repair_rail(block)
+            self.applied.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Broken Rail Failed", str(exc))
+            self.refresh_from_backend()
 
     def _on_switch_selection_changed(self, sid_text: str) -> None:
         try:
@@ -217,54 +289,36 @@ class ManualOverrideDialog(QDialog):
             QMessageBox.warning(self, "Signal Failed", str(exc))
             self.refresh_from_backend()
 
+    def _on_speed_changed(self, val: int) -> None:
+        try:
+            block = self.block_spin.value()
+            self.ui.backend.set_commanded_speed(block, val)
+            self.applied.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Speed Failed", str(exc))
+            self.refresh_from_backend()
+
     def _apply(self) -> None:
-        """Apply all dialog changes to backend."""
+        """Apply changes to backend and close if successful."""
         errors: list[str] = []
+        block = self.block_spin.value()
 
         try:
-            block = self.block_spin.value()
-            occ = self.occ_combo.currentText() == "Yes"
-            self.ui.backend.set_block_occupancy(block, occ)
-        except Exception as exc:
-            errors.append(f"Block occupancy: {exc}")
+            # Apply values from UI to backend
+            self.ui.backend.set_signal(block, self.signal_combo.currentText())
+            self.ui.backend.set_commanded_speed(block, self.speed_spin.value())
 
-        if self.switch_combo.isEnabled():
-            try:
-                sid = int(self.switch_combo.currentText())
-                pos = self.switch_pos_combo.currentText()
-                self.ui.backend.safe_set_switch(sid, pos)
-            except Exception as exc:
-                errors.append(f"Switch: {exc}")
-
-        if self.crossing_combo.isEnabled():
-            try:
-                cid = int(self.crossing_combo.currentText())
-                status = self.crossing_status_combo.currentText()
-                self.ui.backend.safe_set_crossing(cid, status)
-            except Exception as exc:
-                errors.append(f"Crossing: {exc}")
-
-        try:
-            block = self.block_spin.value()
-            color = self.signal_combo.currentText()
-            self.ui.backend.set_signal(block, color)
-        except Exception as exc:
-            errors.append(f"Signal: {exc}")
-
-        try:
-            self.ui.refresh_tables()
-        except Exception:
-            logger.debug("Failed to refresh tables after apply.")
+        except Exception as e:
+            errors.append(str(e))
 
         QApplication.processEvents()
         self.applied.emit()
 
         if errors:
-            QMessageBox.warning(self, "Manual Override: Partial Failure",
-                                "\n".join(errors))
+            QMessageBox.warning(self, "Test UI: Error", "\n".join(errors))
         else:
-            QMessageBox.information(self, "Manual Override",
-                                    "Changes applied successfully.")
+            QMessageBox.information(self, "Test UI", "Changes applied.")
+            self.accept()
 
 
 class TrackControllerUI(QWidget):
@@ -345,6 +399,7 @@ class TrackControllerUI(QWidget):
 
         self.manual_button = QPushButton("Test UI")
         self.manual_button.clicked.connect(self.open_manual_override)
+        self.manual_button.setFixedHeight(bigboi.height() * 2)
         bottom_row.addWidget(self.manual_button)
         layout.addLayout(bottom_row)
 
@@ -451,8 +506,24 @@ class TrackControllerUI(QWidget):
                 QHeaderView.ResizeMode.Stretch)
             for i, (block, data) in enumerate(self.backend.blocks.items()):
                 self.tablesignal.setItem(i, 0, QTableWidgetItem(str(block)))
-                self.tablesignal.setItem(
-                    i, 1, QTableWidgetItem(data.get("signal", "Green"))
-                )
+                sig = data.get("signal", "Green")
+                item = QTableWidgetItem(sig)
+
+                # Apply background color
+                if sig == "Red":
+                    item.setBackground(Qt.GlobalColor.red)
+                    item.setForeground(Qt.GlobalColor.black)
+                elif sig == "Yellow":
+                    item.setBackground(Qt.GlobalColor.yellow)
+                    item.setForeground(Qt.GlobalColor.black)
+                elif sig == "Green":
+                    item.setBackground(Qt.GlobalColor.green)
+                    item.setForeground(Qt.GlobalColor.black)
+                elif sig == "Super Green":
+                    item.setBackground(Qt.GlobalColor.cyan)
+                    item.setForeground(Qt.GlobalColor.black)
+
+                self.tablesignal.setItem(i, 1, item)
         except Exception:
             logger.exception("Failed to refresh tables.")
+

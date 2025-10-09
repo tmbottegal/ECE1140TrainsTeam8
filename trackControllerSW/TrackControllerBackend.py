@@ -49,9 +49,9 @@ class TrackControllerBackend:
                 "occupied": False,
                 "broken": False,
                 "suggested_speed": 50,
-                "commanded_speed": 0,
-                "suggested_auth": False,
-                "commanded_auth": False,
+                "commanded_speed": 50,
+                "suggested_auth": 50,
+                "commanded_auth": 50,
                 "signal": "Green",
             }
             for i in range(1, self.num_blocks + 1)
@@ -68,7 +68,7 @@ class TrackControllerBackend:
         # Observers/listeners are callables without args invoked on change.
         self._listeners: List[Callable[[], None]] = []
 
-    # ---- Listener API ----
+    # Listener API
     def add_listener(self, callback: Callable[[], None]) -> None:
         """Register a callback to be invoked when backend state changes.
 
@@ -101,47 +101,36 @@ class TrackControllerBackend:
             except Exception:
                 logger.exception("Listener %r raised while notifying", cb)
 
-    # ---- State mutation methods with safety checks ----
+    # State mutation methods with safety checks
     def set_block_occupancy(self, block: int, status: bool) -> None:
-        """Set occupancy for a block.
-
-        Enforces:
-            * If a block becomes occupied, commanded authority is revoked.
-            * Activates any crossing on that block.
-
-        Args:
-            block: Block id (1-based).
-            status: True if occupied, False otherwise.
-        """
         if not (1 <= block <= self.num_blocks):
             logger.error("Invalid block %d for occupancy change", block)
             return
 
         self.blocks[block]["occupied"] = bool(status)
-        logger.info("%s: block %d occupancy -> %s", self.line_name,
-                    block, status)
+        logger.info("%s: block %d occupancy -> %s", self.line_name, block, status)
 
         if status:
-            # Activate crossings on the occupied block.
+            # Occupied: revoke authority, activate crossings
             for cid, b in self.crossing_blocks.items():
                 if b == block:
                     try:
                         self.safe_set_crossing(cid, "Active")
                     except SafetyException:
-                        logger.warning(
-                            "Could not set crossing %d Active for occupied "
-                            "block %d", cid, block
-                        )
+                        logger.warning("Could not set crossing %d Active for occupied block %d", cid, block)
 
-            # Revoke commanded authority if present.
             if self.blocks[block]["commanded_auth"]:
-                logger.warning(
-                    "Revoking commanded authority on block %d because it "
-                    "became occupied", block
-                )
+                logger.warning("Revoking commanded authority on block %d because it became occupied", block)
                 self.blocks[block]["commanded_auth"] = False
+        else:
+            # Not occupied: if not broken, restore authority from suggestion
+            if not self.blocks[block]["broken"]:
+                self.blocks[block]["commanded_auth"] = self.blocks[block]["suggested_auth"]
+                logger.info("%s: block %d authority restored -> %s", 
+                            self.line_name, block, self.blocks[block]["commanded_auth"])
 
         self._notify_listeners()
+
 
     def break_rail(self, block: int) -> None:
         """Mark a block as having a broken rail.
@@ -168,18 +157,27 @@ class TrackControllerBackend:
         self._notify_listeners()
 
     def repair_rail(self, block: int) -> None:
-        """Repair a previously broken rail.
-
-        Args:
-            block: Block id to repair.
-        """
         if not (1 <= block <= self.num_blocks):
             logger.error("Invalid block %d for repair_rail", block)
             return
 
         self.blocks[block]["broken"] = False
         logger.info("%s: block %d repaired", self.line_name, block)
+
+        # Restore authority if unoccupied
+        if not self.blocks[block]["occupied"]:
+            self.blocks[block]["commanded_auth"] = self.blocks[block]["suggested_auth"]
+            logger.info("%s: block %d authority restored after repair -> %s",
+                        self.line_name, block, self.blocks[block]["commanded_auth"])
+
+        # Restore signal to suggested/default
+        if self.blocks[block]["signal"] == "Red":
+            self.blocks[block]["signal"] = "Green"
+            logger.info("%s: block %d signal restored to Green after repair",
+                        self.line_name, block)
+
         self._notify_listeners()
+
 
     def set_signal(self, block: int, color: str) -> None:
         """Set the signal color for a block.
@@ -279,7 +277,7 @@ class TrackControllerBackend:
                     stat)
         self._notify_listeners()
 
-    # ---- CTC suggestion / Train relay ----
+    # CTC suggestion / Train relay
     def receive_ctc_suggestion(self,
                                block: int,
                                suggested_speed: int,
@@ -390,7 +388,7 @@ class TrackControllerBackend:
         logger.debug("Relaying to train model for block %d: %s", block, data)
         return data
 
-    # ---- PLC upload / interpreter (boolean-only) ----
+    # PLC upload / interpreter (boolean-only)
     def upload_plc(self, filepath: str) -> None:
         """Execute a PLC file.
 
@@ -537,7 +535,7 @@ class TrackControllerBackend:
         # Final notification to listeners.
         self._notify_listeners()
 
-    # ---- Reporting (to CTC office / Dispatcher) ----
+    # Reporting (to CTC office / Dispatcher) - THIS IS A PLACEHOLDER FOR ITERATION 2
     def report_state(self) -> Dict[str, object]:
         """Return a snapshot of the current track state.
 

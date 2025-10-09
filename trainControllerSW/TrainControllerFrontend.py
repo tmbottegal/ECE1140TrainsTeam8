@@ -5,13 +5,11 @@
 """
 
 from __future__ import annotations
-
 from typing import Optional
 
-# Friendlier imports whether you run as a script or a module
 try:
     from .TrainControllerBackend import TrainControllerBackend, mph_to_mps
-except Exception:  # pragma: no cover
+except Exception:
     from TrainControllerBackend import TrainControllerBackend, mph_to_mps
 
 

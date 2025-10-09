@@ -355,7 +355,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             rowdata = [
                 b.line, b.block_id, b.status, b.station,
                 b.signal, b.switch, b.light,
-                str(getattr(b, "has_crossing", False)), str(getattr(b, "broken_rail", False)), b.beacon
+                (str(b.crossing_open) if getattr(b, "has_crossing", False) else ""), str(getattr(b, "broken_rail", False)), b.beacon
             ]
             for c, value in enumerate(rowdata):
                 item = QtWidgets.QTableWidgetItem(str(value))

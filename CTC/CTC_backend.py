@@ -31,8 +31,10 @@ class Block:
     switch: str
     light: str
     beacon:str 
+   
+    has_crossing: bool          # presence (from LINE_DATA)
     broken_rail: bool = False
-    has_crossing: bool = False
+    crossing_open: bool = True   # status (True=open, False=closed) default open
 
 # -------------------------
 # TrackState: CTC backend facade
@@ -190,7 +192,8 @@ class TrackState:
             blk.broken_rail = bool(pb.get("broken_rail", False))  # True/False
             blk.beacon = str(pb.get("beacon", "") or blk.beacon) 
 
-            blk.has_crossing = bool(pb.get("has_crossing", getattr(blk, "has_crossing", False)))
+            if blk.has_crossing:
+             blk.crossing_open = True
 
 
     #return list of trains from the last snapshot 

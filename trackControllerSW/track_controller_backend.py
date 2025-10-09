@@ -12,7 +12,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Tuple
 
 # Module-level logger.
 logger = logging.getLogger(__name__)

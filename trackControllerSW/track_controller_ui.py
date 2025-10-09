@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import copy
 from typing import TYPE_CHECKING
-
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -41,7 +40,7 @@ from PyQt6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
-    from TrackControllerBackend import TrackNetwork, TrackControllerBackend
+    from track_controller_backend import TrackNetwork, TrackControllerBackend
 
 # Configure module-level logger.
 logger = logging.getLogger(__name__)
@@ -439,8 +438,8 @@ class TrackControllerUI(QWidget):
             self.tablemain.setRowCount(self.backend.num_blocks)
             self.tablemain.setColumnCount(6)
             self.tablemain.setHorizontalHeaderLabels([
-                "Block", "Suggested Speed", "Commanded Speed", "Occupancy",
-                "Suggested Authority", "Commanded Authority"
+                "Block", "Suggested Speed (mph)", "Commanded Speed (mph)", "Occupancy",
+                "Suggested Authority (miles)", "Commanded Authority (miles)"
             ])
             self.tablemain.horizontalHeader().setSectionResizeMode(
                 QHeaderView.ResizeMode.Stretch)

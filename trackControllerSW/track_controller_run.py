@@ -16,8 +16,8 @@ import sys
 from typing import NoReturn
 
 from PyQt6.QtWidgets import QApplication, QFileDialog
-from TrackControllerBackend import TrackNetwork
-from TrackControllerUI import TrackControllerUI
+from track_controller_backend import TrackNetwork
+from track_controller_ui import TrackControllerUI
 
 # Configure root logger.
 logging.basicConfig(

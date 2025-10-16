@@ -143,14 +143,20 @@ def test_set_switch_position() -> None:
 
     assert switch.current_position == 0
     assert switch.next_segment == straight_segment
+    assert switch.straight_signal_state == SignalState.GREEN
+    assert switch.diverging_signal_state == SignalState.RED
     
     switch.set_switch_position(1)
     assert switch.current_position == 1
     assert switch.next_segment == diverging_segment
+    assert switch.straight_signal_state == SignalState.RED
+    assert switch.diverging_signal_state == SignalState.GREEN
     
     switch.set_switch_position(0)
     assert switch.current_position == 0
     assert switch.next_segment == straight_segment
+    assert switch.straight_signal_state == SignalState.GREEN
+    assert switch.diverging_signal_state == SignalState.RED
 
 def test_is_straight() -> None:
     switch = TrackSwitch(1, 150, 25, 1.5, False)
@@ -488,11 +494,11 @@ def test_load_track_layout_invalid() -> None:
 
 def test_set_global_temperature() -> None:
     network = TrackNetwork()
-    network.set_global_temperature(25.0)
-    assert network.global_temperature == 25.0
+    network.set_enviromental_temperature(25.0)
+    assert network.environmental_temperature == 25.0
     
-    network.set_global_temperature(-10.0)
-    assert network.global_temperature == -10.0
+    network.set_enviromental_temperature(-10.0)
+    assert network.environmental_temperature == -10.0
 
 def test_set_heater_threshold() -> None:
     network = TrackNetwork()
@@ -506,10 +512,10 @@ def test_set_heater_threshold() -> None:
 
 def test_manage_heaters() -> None:
     network = TrackNetwork()
-    network.set_global_temperature(25.0)
+    network.set_enviromental_temperature(25.0)
     assert network.heaters_active == False
 
-    network.set_global_temperature(-10.0)
+    network.set_enviromental_temperature(-10.0)
     assert network.heaters_active == True
 
 def test_get_heater_status() -> None:

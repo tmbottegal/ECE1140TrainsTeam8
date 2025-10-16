@@ -83,47 +83,25 @@ class NetworkStatusUI(QWidget):
         
         layout.addWidget(self.tab_widget)
         
-        # Terminal section (compact layout)
-        terminal_layout = QVBoxLayout()
+        # Status display section (compact layout)
+        status_layout = QVBoxLayout()
         
-        # Status display (terminal output) - no label needed
+        # Status display (read-only output)
         self.status_display = QTextEdit()
         self.status_display.setReadOnly(True)
         self.status_display.setFont(QFont("Courier", 9))
-        # Remove fixed height - let it be flexible
-        terminal_layout.addWidget(self.status_display)
+        status_layout.addWidget(self.status_display)
         
-        # Command input
-        input_layout = QHBoxLayout()
+        # Create a widget for the status section
+        status_widget = QWidget()
+        status_widget.setLayout(status_layout)
         
-        command_label = QLabel(">>> ")
-        command_label.setFont(QFont("Courier", 9, QFont.Weight.Bold))
-        input_layout.addWidget(command_label)
-        
-        self.command_input = QLineEdit()
-        self.command_input.setFont(QFont("Courier", 9))
-        self.command_input.setPlaceholderText(
-            "Enter backend command (e.g., set_global_temperature(25.0))")
-        self.command_input.returnPressed.connect(self.execute_command)
-        input_layout.addWidget(self.command_input)
-        
-        execute_btn = QPushButton("Execute")
-        execute_btn.clicked.connect(self.execute_command)
-        input_layout.addWidget(execute_btn)
-        
-        terminal_layout.addLayout(input_layout)
-        
-        # Create a widget for the terminal section
-        terminal_widget = QWidget()
-        terminal_widget.setLayout(terminal_layout)
-        
-        # Add terminal section with stretch factor (20% of window)
-        layout.addWidget(terminal_widget, 1)  # 1 part for terminal
+        # Add status section with stretch factor (20% of window)
+        layout.addWidget(status_widget, 1)  # 1 part for status
         
         # The tab widget should get the majority of space (80%)
-        # We need to adjust this using stretch factors
         layout.setStretchFactor(self.tab_widget, 4)  # 4 parts for tables
-        layout.setStretchFactor(terminal_widget, 1)   # 1 part for terminal
+        layout.setStretchFactor(status_widget, 1)   # 1 part for status
         
         # Refresh button
         refresh_btn = QPushButton("Refresh Status")
@@ -226,6 +204,7 @@ class NetworkStatusUI(QWidget):
     def refresh_status(self):
         """Refresh the network status display (without reloading CSV)"""
         try:
+            self.track_network.temperature_sim()
             # Get and display network status
             self.status_display.append("Refreshing network status...")
             network_status = self.track_network.get_network_status()
@@ -261,12 +240,12 @@ class NetworkStatusUI(QWidget):
             
             # Populate track info table
             track_info = {}
-            if 'global_temperature' in network_status:
+            if 'environmental_temperature' in network_status:
                 # Convert temperature from Celsius to Fahrenheit
-                temp_celsius = network_status['global_temperature']
+                temp_celsius = network_status['environmental_temperature']
                 temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
                     temp_celsius)
-                track_info['Global Temperature (°F)'] = f"{temp_fahrenheit:.1f}"
+                track_info['Environmental Temperature (°F)'] = f"{temp_fahrenheit:.1f}"
             if 'heater_threshold' in network_status:
                 # Convert threshold temperature from Celsius to Fahrenheit
                 threshold_celsius = network_status['heater_threshold']
@@ -276,6 +255,12 @@ class NetworkStatusUI(QWidget):
                     f"{threshold_fahrenheit:.1f}")
             if 'heaters_active' in network_status:
                 track_info['Heaters Active'] = network_status['heaters_active']
+            if 'rail_temperature' in network_status:
+                # Convert rail temperature from Celsius to Fahrenheit
+                rail_temp_celsius = network_status['rail_temperature']
+                rail_temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
+                    rail_temp_celsius)
+                track_info['Rail Temperature (°F)'] = f"{rail_temp_fahrenheit:.1f}"
             self.populate_track_info_table(track_info)
             
             # Populate current failures table
@@ -646,10 +631,10 @@ class NetworkStatusUI(QWidget):
             new_celsius = ConversionFunctions.fahrenheit_to_celsius(new_fahrenheit)
             
             # Update backend based on property type
-            if "Global Temperature" in property_name:
-                self.track_network.set_global_temperature(new_celsius)
-                self.status_display.append(f"Global temperature updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")
-                
+            if "Environmental Temperature" in property_name:
+                self.track_network.set_environmental_temperature(new_celsius)
+                self.status_display.append(f"Environmental temperature updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")
+
             elif "Heater Threshold" in property_name:
                 self.track_network.set_heater_threshold(new_celsius)
                 self.status_display.append(f"Heater threshold updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")
@@ -665,62 +650,22 @@ class NetworkStatusUI(QWidget):
         finally:
             self.updating_temperature = False  # Always reset the flag
     
-    def execute_command(self):
-        """Execute a backend command entered in the terminal"""
-        command = self.command_input.text().strip()
-        if not command:
-            return
-            
-        # Display the command in terminal
-        self.status_display.append(f">>> {command}")
+    def populate_segment_dropdown(self, segments_data):
+        """Populate the segment dropdown with available segments"""
+        self.segment_dropdown.clear()
         
-        try:
-            # Create a safe execution environment with access to backend methods
-            safe_globals = {
-                '__builtins__': {},
-                'track_network': self.track_network,
-                'TrackFailureType': TrackFailureType,
-                'SignalState': SignalState,
-                'StationSide': StationSide,
-                'ConversionFunctions': ConversionFunctions,
-                # Add some helpful shortcuts
-                'tn': self.track_network,  # Shortcut for track_network
-            }
+        if isinstance(segments_data, dict):
+            # Add segments to dropdown - handle both string and int keys
+            segment_ids = []
+            for seg_id in segments_data.keys():
+                try:
+                    segment_ids.append(int(seg_id))
+                except (ValueError, TypeError):
+                    continue
             
-            # Allow common functions and methods
-            safe_builtins = {
-                'len': len, 'str': str, 'int': int, 'float': float, 'bool': bool,
-                'list': list, 'dict': dict, 'print': self.terminal_print,
-                'range': range, 'enumerate': enumerate,
-            }
-            safe_globals['__builtins__'] = safe_builtins
-            
-            # If command doesn't start with track_network or tn, prepend it
-            if not (command.startswith('track_network.') or command.startswith('tn.')):
-                command = f"track_network.{command}"
-            
-            # Execute the command
-            result = eval(command, safe_globals, {})
-            
-            # Display result if not None
-            if result is not None:
-                self.status_display.append(f"Result: {result}")
-            else:
-                self.status_display.append("Command executed successfully")
-            
-            # Auto-refresh the network status after successful command execution
-            self.refresh_status()
-                
-        except Exception as e:
-            self.status_display.append(f"Error: {str(e)}")
-        
-        # Clear the input field
-        self.command_input.clear()
-        
-        # Auto-scroll to bottom
-        self.status_display.verticalScrollBar().setValue(
-            self.status_display.verticalScrollBar().maximum()
-        )
+            segment_ids.sort()
+            for seg_id in segment_ids:
+                self.segment_dropdown.addItem(str(seg_id))
     
     def apply_track_failures(self):
         """Apply or clear track failures based on checkbox states"""

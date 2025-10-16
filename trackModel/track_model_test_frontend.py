@@ -111,7 +111,7 @@ class NetworkStatusUI(QWidget):
         self.command_input = QLineEdit()
         self.command_input.setFont(QFont("Courier", 9))
         self.command_input.setPlaceholderText(
-            "Enter backend command (e.g., set_global_temperature(25.0))")
+            "Enter backend command (e.g., set_environmental_temperature(25.0))")
         self.command_input.returnPressed.connect(self.execute_command)
         input_layout.addWidget(self.command_input)
         
@@ -556,6 +556,7 @@ class NetworkStatusUI(QWidget):
     def refresh_status(self):
         """Refresh the network status display (without reloading CSV)"""
         try:
+            self.track_network.temperature_sim()
             # Get and display network status
             self.status_display.append("Refreshing network status...")
             network_status = self.track_network.get_network_status()
@@ -591,13 +592,13 @@ class NetworkStatusUI(QWidget):
             
             # Populate track info table
             track_info = {}
-            if 'global_temperature' in network_status:
+            if 'environmental_temperature' in network_status:
                 # Convert temperature from Celsius to Fahrenheit
-                temp_celsius = network_status['global_temperature']
+                temp_celsius = network_status['environmental_temperature']
                 temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
                     temp_celsius
                 )
-                track_info['Global Temperature (°F)'] = f"{temp_fahrenheit:.1f}"
+                track_info['Environmental Temperature (°F)'] = f"{temp_fahrenheit:.1f}"
             if 'heater_threshold' in network_status:
                 # Convert threshold temperature from Celsius to Fahrenheit
                 threshold_celsius = network_status['heater_threshold']
@@ -609,6 +610,13 @@ class NetworkStatusUI(QWidget):
                 )
             if 'heaters_active' in network_status:
                 track_info['Heaters Active'] = network_status['heaters_active']
+            if 'rail_temperature' in network_status:
+                # Convert rail temperature from Celsius to Fahrenheit
+                rail_temp_celsius = network_status['rail_temperature']
+                rail_temp_fahrenheit = ConversionFunctions.celsius_to_fahrenheit(
+                    rail_temp_celsius
+                )
+                track_info['Rail Temperature (°F)'] = f"{rail_temp_fahrenheit:.1f}"
             self.populate_track_info_table(track_info)
             
             # Populate current failures table
@@ -955,10 +963,10 @@ class NetworkStatusUI(QWidget):
             new_celsius = ConversionFunctions.fahrenheit_to_celsius(new_fahrenheit)
             
             # Update backend based on property type
-            if "Global Temperature" in property_name:
-                self.track_network.set_global_temperature(new_celsius)
-                self.status_display.append(f"Global temperature updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")
-                
+            if "Environmental Temperature" in property_name:
+                self.track_network.set_environmental_temperature(new_celsius)
+                self.status_display.append(f"Environmental temperature updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")
+
             elif "Heater Threshold" in property_name:
                 self.track_network.set_heater_threshold(new_celsius)
                 self.status_display.append(f"Heater threshold updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")

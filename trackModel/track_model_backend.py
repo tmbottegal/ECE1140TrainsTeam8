@@ -289,6 +289,8 @@ class TrackSwitch(TrackSegment):
         self.straight_segment: Optional['TrackSegment'] = None
         self.diverging_segment: Optional['TrackSegment'] = None
         self.current_position = 0
+        self.straight_signal_state = SignalState.GREEN
+        self.diverging_signal_state = SignalState.RED
         
     def set_switch_paths(self, straight_segment: 'TrackSegment', 
                         diverging_segment: 'TrackSegment') -> None:
@@ -319,9 +321,26 @@ class TrackSwitch(TrackSegment):
         match self.current_position:
             case 0:
                 self.next_segment = self.straight_segment
+                self.straight_signal_state = SignalState.GREEN
+                self.diverging_signal_state = SignalState.RED
+                if self.straight_segment is not None:
+                    self.straight_segment.previous_segment = self
+                if self.diverging_segment is not None:
+                    # Remove this switch as previous segment when not selected
+                    if self.diverging_segment.previous_segment == self:
+                        self.diverging_segment.previous_segment = None
+
             case 1:
                 self.next_segment = self.diverging_segment
-            
+                self.straight_signal_state = SignalState.RED
+                self.diverging_signal_state = SignalState.GREEN
+                if self.diverging_segment is not None:
+                    self.diverging_segment.previous_segment = self
+                if self.straight_segment is not None:
+                    # Remove this switch as previous segment when not selected
+                    if self.straight_segment.previous_segment == self:
+                        self.straight_segment.previous_segment = None
+
     def is_straight(self) -> bool:
         """Check if switch is in straight position.
         
@@ -496,7 +515,7 @@ class TrackNetwork:
     Attributes:
         segments: Dictionary of TrackSegment objects.
         trains: Dictionary of Train objects.
-        global_temperature: System-wide environmental temperature.
+        environmental_temperature: System-wide environmental temperature.
         heater_threshold: Temperature threshold for heater activation.
         heaters_active: Current status of global track heaters.
         active_commands: List of currently active train commands.
@@ -509,8 +528,9 @@ class TrackNetwork:
         # EVENTUAL: import train class from train model
         self.trains: Dict[Train] = {}
         # System-wide properties
-        self.global_temperature = 20       # Celsius
-        self.heater_threshold = 0          # Celsius
+        self.environmental_temperature = 20       # Celsius
+        self.rail_temperature = self.environmental_temperature
+        self.heater_threshold = 0                 # Celsius
         self.heaters_active = False
         
         # Command broadcasting system
@@ -782,15 +802,19 @@ class TrackNetwork:
                             f"Unknown segment type {lines['Type']} at row "
                             f"{current_line}.")
                 current_line += 1
+
+        for segment in self.segments.values():
+            if isinstance(segment, TrackSwitch):
+                segment._update_connected_segments()
         pass
 
-    def set_global_temperature(self, temperature: int) -> None:
+    def set_environmental_temperature(self, temperature: int) -> None:
         """Set environmental temperature (Murphy interface).
         
         Args:
             temperature: New global temperature in Celsius.
         """
-        self.global_temperature = temperature
+        self.environmental_temperature = temperature
         self._manage_heaters()
         pass
         
@@ -805,11 +829,25 @@ class TrackNetwork:
         pass
 
     def _manage_heaters(self) -> None:
-        """Automatically manage track heaters based on global temperature."""
-        if self.global_temperature < self.heater_threshold:
+        """Automatically manage track heaters based on rail temperature."""
+        if self.rail_temperature < self.heater_threshold:
             self.heaters_active = True
         else:
             self.heaters_active = False
+
+    def temperature_sim(self) -> None:
+        """Simulate temperature changes over time."""
+        if self.heaters_active:
+            self.rail_temperature += 2
+            self._manage_heaters()
+
+        if self.rail_temperature > self.environmental_temperature:
+            self.rail_temperature = max(self.rail_temperature - 1, self.environmental_temperature)
+            self._manage_heaters()
+        else:
+            self.rail_temperature = min(self.rail_temperature + 1, self.environmental_temperature)
+            self._manage_heaters()
+        
                         
     def get_heater_status(self) -> bool:
         """Get current status of global track heaters.
@@ -1200,7 +1238,8 @@ class TrackNetwork:
                 block_id: self.get_segment_status(block_id)
                 for block_id in self.segments
             },
-            "global_temperature": self.global_temperature,
+            "environmental_temperature": self.environmental_temperature,
+            "rail_temperature": self.rail_temperature,
             "heater_threshold": self.heater_threshold,
             "heaters_active": self.heaters_active,
             "active_commands": self.get_active_commands(),

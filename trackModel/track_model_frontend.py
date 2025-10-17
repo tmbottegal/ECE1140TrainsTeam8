@@ -6,31 +6,21 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from universal.universal import (
-    SignalState,
-    TrainCommand,
     ConversionFunctions
 )
 
 from track_model_backend import (
     TrackNetwork, 
-    TrackSegment, 
-    TrackSwitch, 
-    LevelCrossing,
-    Station,
     TrackFailureType,
-    StationSide
 )
-from typing import List, Dict, Optional
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QTextEdit, 
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, 
-    QHeaderView, QTabWidget, QLineEdit, QHBoxLayout, 
-    QComboBox, QCheckBox
+    QTabWidget, QHBoxLayout, QComboBox, QCheckBox
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
-from sys import argv
 
 #TODO: add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
@@ -216,10 +206,6 @@ class NetworkStatusUI(QWidget):
             
         except Exception as e:
             self.status_display.append(f"Error refreshing status: {str(e)}")
-        
-    def load_and_display(self):
-        """Legacy method - now just calls refresh_status"""
-        self.refresh_status()
 
     def populate_status_table(self, network_status):
         """Populate the status tables with network data"""

@@ -209,6 +209,8 @@ class TrackSegment:
 
         if failure_type not in self.failures:
             self.failures.add(failure_type)
+            if isinstance(self, LevelCrossing):
+                self.set_gate_status(True)
             self._report_track_failure(failure_type, active=True)
 
     def clear_track_failure(self, failure_type: TrackFailureType) -> None:
@@ -219,6 +221,8 @@ class TrackSegment:
         """
         if failure_type in self.failures:
             self.failures.remove(failure_type)
+            if isinstance(self, LevelCrossing):
+                self.set_gate_status(False)
             self._report_track_failure(failure_type, active=False)
 
     def _report_track_failure(self, failure_type: TrackFailureType,
@@ -889,6 +893,7 @@ class TrackNetwork:
                 authority=authority
             )
             self.active_commands.append(new_command)
+            # TODO: train model: train_command_interrupt
 
     def get_active_commands(self) -> List[TrainCommand]:
         """Get all currently active train commands.

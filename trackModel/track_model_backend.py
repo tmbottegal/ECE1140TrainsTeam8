@@ -532,6 +532,7 @@ class TrackNetwork:
         # EVENTUAL: import train class from train model
         self.trains: Dict[Train] = {}
         # System-wide properties
+        self.line_name = ""
         self.environmental_temperature = 20       # Celsius
         self.rail_temperature = self.environmental_temperature
         self.heater_threshold = 0                 # Celsius
@@ -654,6 +655,8 @@ class TrackNetwork:
         Args:
             layout_file: Path to the track layout configuration file.
         """
+
+        self.line_name = os.path.splitext(os.path.basename(layout_file))[0]
 
         # First pass to create segments
         with open(layout_file, mode='r') as file:
@@ -893,7 +896,7 @@ class TrackNetwork:
                 authority=authority
             )
             self.active_commands.append(new_command)
-            # TODO: train model: train_command_interrupt
+            # TODO: foreach train: train model: train_command_interrupt
 
     def get_active_commands(self) -> List[TrainCommand]:
         """Get all currently active train commands.
@@ -1243,6 +1246,7 @@ class TrackNetwork:
                 block_id: self.get_segment_status(block_id)
                 for block_id in self.segments
             },
+            "line_name": self.line_name,
             "environmental_temperature": self.environmental_temperature,
             "rail_temperature": self.rail_temperature,
             "heater_threshold": self.heater_threshold,

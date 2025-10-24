@@ -33,6 +33,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
+#TODO: #92 remove broadcasting tab and integrate into segment properties
 #TODO: add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
     def __init__(self):

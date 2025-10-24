@@ -172,9 +172,10 @@ class TrackSegment:
         
         # Signal status
         self.signal_state = SignalState.RED
-        
-        # Beacon information
+
+        # Beacon and track circuit information
         self.beacon_data = ""
+        self.active_command: Optional['TrainCommand'] = None
         
     def set_occupancy(self, occupied: bool) -> None:
         """Update block occupancy status.
@@ -182,8 +183,12 @@ class TrackSegment:
         Args:
             occupied: Whether the block is currently occupied.
         """
+        if TrackFailureType.BROKEN_RAIL in self.failures:
+            return
         self.occupied = occupied
-
+        if not occupied:
+            self.active_command = None                  # Could cause issues later?
+            
     def set_signal_state(self, state: SignalState) -> None:
         """Set the signal state for this track segment.
         
@@ -213,6 +218,8 @@ class TrackSegment:
                 self.set_gate_status(True)
             self._report_track_failure(failure_type, active=True)
 
+            # TODO: #90 if broken rail, set occupancy to true
+
     def clear_track_failure(self, failure_type: TrackFailureType) -> None:
         """Clear a failure condition.
         
@@ -237,8 +244,6 @@ class TrackSegment:
         if self.network is not None:
             self.network.add_failure_log_entry(self.block_id, 
                                                failure_type, active)
-
-        # TODO: report to track controller
         pass
 
     def get_next_segment(self) -> Optional['TrackSegment']:
@@ -257,6 +262,20 @@ class TrackSegment:
                     is no connection.
         """
         return self.previous_segment
+    
+    def broadcast_train_command(self, commanded_speed: int=None,
+                                 authority: int=None) -> None:
+        """Broadcast a command to any train on this segment.
+        
+        Args:
+            commanded_speed: Speed command for the train in m/s.
+            authority: Movement authority for the train in meters.
+        """
+        if TrackFailureType.POWER_FAILURE in self.failures:
+            return
+
+        self.active_command = TrainCommand(commanded_speed, authority)
+        #TODO: for each train train_command_interrupt(block_id)
 
     def close(self) -> None:
         """Close the block for maintenance."""
@@ -506,6 +525,14 @@ class Station(TrackSegment):
             raise ValueError("Passenger exit count cannot be negative.")
         self.passengers_exited_total += count
         pass
+
+    def get_throughput(self) -> List[int]:
+        """Get passenger throughput statistics.
+        
+        Returns:
+            List containing total boarded and total exited passengers.
+        """
+        return [self.tickets_sold_total, self.passengers_exited_total]
 
 class TrackNetwork:
     """Main Track Model class implementing the Model through a graph
@@ -864,7 +891,7 @@ class TrackNetwork:
         """
         return self.heaters_active
  
-    def broadcast_train_command(self, train_id: int, commanded_speed: int=None, 
+    def broadcast_train_command(self, block_id: int, commanded_speed: int=None, 
                                authority: int=None) -> None:
         """Broadcast a command to a specific train through all track segments.
         
@@ -873,66 +900,12 @@ class TrackNetwork:
             commanded_speed: Speed command for the train in m/s.
             authority: Movement authority for the train in meters.
         """
-        # search for existing command with matching train_id to update
-        found = False
-        for cmd in self.active_commands:
-            if cmd.train_id == train_id:
-                found = True
-                if commanded_speed is not None:
-                    cmd.commanded_speed = commanded_speed
-                if authority is not None:
-                    cmd.authority = authority
-                break
-        # if no existing command, create a new one
-        if not found:
-            if commanded_speed is None or authority is None:
-                raise ValueError(
-                    "New commands must specify both commanded_speed "
-                    "and authority."
-                )
-            new_command = TrainCommand(
-                train_id=train_id,
-                commanded_speed=commanded_speed,
-                authority=authority
-            )
-            self.active_commands.append(new_command)
-            # TODO: foreach train: train model: train_command_interrupt
-
-    def get_active_commands(self) -> List[TrainCommand]:
-        """Get all currently active train commands.
-        
-        Returns:
-            List of active command packets that trains can receive.
-        """
-        return self.active_commands
-        
-    def get_command_for_train(self, train_id: int) -> List[TrainCommand]:
-        """Get the active command for a specific train.
-        
-        Args:
-            train_id: ID of the train to get commands for.
-            
-        Returns:
-            Current command for the specified train, or None if no
-            command exists.
-        """
-        for cmd in self.active_commands:
-            if cmd.train_id == train_id:
-                return cmd
-        return None
-        
-    def clear_train_commands(self, train_id: int) -> None:
-        """Clear active command for a specific train.
-        
-        Args:
-            train_id: ID of the train to clear commands for.
-        """
-        
-        self.active_commands = [
-            cmd for cmd in self.active_commands
-            if cmd.train_id != train_id
-        ]
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        segment.broadcast_train_command(commanded_speed, authority)
         pass
+
     
     def set_occupancy(self, block_id: int, occupied: bool) -> None:
         """Set occupancy status for a specific block.
@@ -1079,6 +1052,22 @@ class TrackNetwork:
         segment.open()
         pass
 
+    def set_gate_status(self, block_id: int, status: bool) -> None:
+        """ Set the gate status of a specific level crossing.
+
+        Args:
+            block_id: ID of the level crossing block to set gate status for.
+            status: Whether the crossing gates are closed 
+                    (True = closed, False = open)
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, LevelCrossing):
+            raise ValueError(f"Block ID {block_id} is not a level crossing.")
+        segment.set_gate_status(status)
+        pass
+
     def sell_tickets(self, block_id: int, count: int=None) -> None:
         """Sell tickets at a specific station.
         
@@ -1115,6 +1104,22 @@ class TrackNetwork:
         segment.passengers_boarding(train_id, count)
         # TODO: remove -1 count when train model is integrated
         pass
+
+    def get_throughput(self, block_id: int) -> List[int]:
+        """Get passenger throughput statistics for a specific block.
+
+        Args:
+            block_id: ID of the block to get throughput for.
+
+        Returns:
+            List containing total tickets sold and total passengers exited.
+        """
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, Station):
+            raise ValueError(f"Block ID {block_id} is not a station.")
+        return segment.get_throughput()
 
     def passengers_exiting(self, block_id: int, count: int) -> None:
         """Record passengers exiting at a specific station.
@@ -1172,7 +1177,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         segment.set_occupancy(occupied)
         pass
-
+    
     def get_segment_status(self, block_id: int) -> Dict[str, Any]:
         """Get status information for a single segment.
         
@@ -1196,6 +1201,7 @@ class TrackNetwork:
             "signal_state": segment.signal_state,
             "failures": list(segment.failures),
             "beacon_data": segment.beacon_data,
+            "active_command": segment.active_command,
             "closed": segment.closed,
             "next_segment": (
                 segment.next_segment.block_id
@@ -1251,7 +1257,6 @@ class TrackNetwork:
             "rail_temperature": self.rail_temperature,
             "heater_threshold": self.heater_threshold,
             "heaters_active": self.heaters_active,
-            "active_commands": self.get_active_commands(),
             "failure_log": self.get_failure_log()
         }
         return network_status

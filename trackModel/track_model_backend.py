@@ -187,14 +187,16 @@ class TrackSegment:
             return
         self.occupied = occupied
         if not occupied:
-            self.active_command = None                  # Could cause issues later?
+            self.active_command = None
             
     def set_signal_state(self, state: SignalState) -> None:
         """Set the signal state for this track segment.
         
         Args:
             state: The new signal state to set.
-        """       
+        """
+        if TrackFailureType.POWER_FAILURE in self.failures:
+            return
         self.signal_state = state
 
     def set_beacon_data(self, beacon_data: str) -> None:
@@ -271,7 +273,7 @@ class TrackSegment:
             commanded_speed: Speed command for the train in m/s.
             authority: Movement authority for the train in meters.
         """
-        if TrackFailureType.POWER_FAILURE in self.failures:
+        if TrackFailureType.TRACK_CIRCUIT_FAILURE in self.failures:
             return
 
         self.active_command = TrainCommand(commanded_speed, authority)
@@ -335,6 +337,8 @@ class TrackSwitch(TrackSegment):
         """
         if position not in [0, 1]:
             raise ValueError("Invalid switch position. Must be 0 or 1.")
+        if TrackFailureType.POWER_FAILURE in self.failures:
+            return
         self.current_position = position
         self._update_connected_segments()
         

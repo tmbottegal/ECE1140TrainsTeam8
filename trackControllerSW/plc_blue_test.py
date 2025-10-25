@@ -1,8 +1,3 @@
-"""Test PLC file for Blue Line."""
-# Switch positions
-# True = Normal, False = Alternate
-switch_1 = True
 
-# Crossing states
-# True = Active, False = Inactive
+switch_1 = True
 crossing_1 = False

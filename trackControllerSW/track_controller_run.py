@@ -1,22 +1,15 @@
-"""Track Controller application entry point.
-
-This module launches the PyQt-based Track Controller user interface and
-wires together the TrackNetwork backend with UI controls.
-
-Refactored to follow the Google Python Style Guide:
-- Type hints
-- Proper docstrings
-- Structured logging
-"""
-
 from __future__ import annotations
+import sys,os,logging
 
-import logging
-import sys
+_pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..")) # it makes shit work
+if _pkg_root not in sys.path:
+    sys.path.append(_pkg_root)
+
 from typing import NoReturn
 from PyQt6.QtWidgets import QApplication, QFileDialog
-from track_controller_backend import TrackNetwork
+from track_controller_backend import TrackControllerBackend
 from track_controller_ui import TrackControllerUI
+from trackModel.track_model_backend import TrackNetwork as TrackModelNetwork
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,53 +17,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 def main() -> NoReturn:
-    """Launch the Track Controller GUI application."""
     app = QApplication(sys.argv)
-
-    # Initialize network and user interface.
-    network = TrackNetwork()
-    ui = TrackControllerUI(network)
-
+    track_model_network = TrackModelNetwork()
+    controllers = {
+        "Blue Line": TrackControllerBackend(track_model_network, line_name="Blue Line"),
+        "Red Line": TrackControllerBackend(track_model_network, line_name="Red Line"),
+        "Green Line": TrackControllerBackend(track_model_network, line_name="Green Line"),
+    }
+    ui = TrackControllerUI(controllers)
     def upload_file() -> None:
-        """Handle PLC file uploads via file dialog."""
-        filepath, _ = QFileDialog.getOpenFileName(
-            ui,
-            "Open PLC File",
-            "",
-            "PLC Files (*.txt *.plc *.py)"
-        )
-
+        filepath, _ = QFileDialog.getOpenFileName(ui, "Open PLC File", "", "PLC Files (*.txt *.plc *.py)")
         if not filepath:
             logger.info("PLC file selection cancelled.")
             return
-
         ui.filename_box.setText(f"File: {filepath}")
-
-        # Apply PLC file to the currently selected line.
-        current_line_name = ui.track_picker.currentText()
         try:
-            backend = ui.network.get_line(current_line_name)
+            current_line_name = ui.track_picker.currentText()
+            backend = controllers[current_line_name]
             backend.upload_plc(filepath)
-            ui.backend = backend
             ui.refresh_tables()
             logger.info("PLC file %s uploaded for %s", filepath, current_line_name)
         except Exception as exc:
-            logger.exception("PLC upload failed for %s: %s", current_line_name, exc)
-
-    # Connect UI actions.
+            logger.exception("PLC upload failed: %s", exc)
     ui.plc_button.clicked.connect(upload_file)
-
-    # Initialize UI layout.
     ui.refresh_tables()
-    ui.resize(1000, 1000)
-    ui.setWindowTitle("Track Controller Module")
+    ui.resize(1800, 1100)
+    ui.setWindowTitle("Track Controller Module (Blank Tables)")
     ui.show()
-
     logger.info("Track Controller UI launched successfully.")
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()

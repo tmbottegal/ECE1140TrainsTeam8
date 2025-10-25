@@ -34,7 +34,7 @@ from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
 #TODO: #92 remove broadcasting tab and integrate into segment properties
-#TODO: add support for multiple TrackNetwork (red line and green line)
+#TODO: #60 add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
     def __init__(self):
         super().__init__()
@@ -86,7 +86,7 @@ class NetworkStatusUI(QWidget):
         self.tab_widget.addTab(self.station_info_widget, "Station Info")
         self.tab_widget.addTab(self.track_info_widget, "Network Info")
         self.tab_widget.addTab(self.failure_table, "Failure Log")
-        self.tab_widget.addTab(self.command_info_widget, "Command Info")
+        self.tab_widget.addTab(self.command_info_widget, "Command Info") #TODO #92 remove
 
 
         
@@ -215,7 +215,7 @@ class NetworkStatusUI(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_command_info_widget(self):
+    def create_command_info_widget(self):  #TODO #92 remove
         """Create the Command Info tab with table and broadcast command 
         controls."""
         widget = QWidget()
@@ -464,7 +464,7 @@ class NetworkStatusUI(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def broadcast_train_command(self):
+    def broadcast_train_command(self):   # TODO #92 modify to only have new TrainCommand
         """Broadcast a train command with the specified parameters"""
         try:
             # Get input values
@@ -626,7 +626,7 @@ class NetworkStatusUI(QWidget):
             
             # Populate command info table
             if 'active_commands' in network_status:
-                self.populate_command_table(network_status['active_commands'])
+                self.populate_command_table(network_status['active_commands']) #TODO #92 remove
             
             # Populate failure log table
             if 'failure_log' in network_status:
@@ -666,18 +666,18 @@ class NetworkStatusUI(QWidget):
         
         # Define attributes to exclude from Segment Info
         excluded_segment_attributes = {
-            'diverging_segment', 'failures', 'gate_status', 
+            'diverging_segment', 'failures', 
             'passengers_boarded_total', 'passengers_exited_total', 
             'passengers_waiting', 'station_side', 'straight_segment', 
-            'tickets_sold_total', 'station_name'
+            'tickets_sold_total', 'station_name', 'underground'
         }
         
         # Define custom column order for Segment Info
         segment_column_order = [
             'block_id', 'type', 'occupied', 'closed', 'signal_state', 
-            'speed_limit', 'length', 'grade', 'underground', 
-            'previous_segment', 'next_segment', 'current_position', 
-            'beacon_data',
+            'speed_limit', 'length', 'grade', 'active_command',
+            'previous_segment', 'next_segment', 'current_position',
+            'gate_status', 'beacon_data',
         ]
         
         # Check if this is being called for segments (based on table widget 

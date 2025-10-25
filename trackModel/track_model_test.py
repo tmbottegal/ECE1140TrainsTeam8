@@ -492,12 +492,12 @@ def test_load_track_layout_invalid() -> None:
     #TODO: Implement function before test
     pass
 
-def test_set_global_temperature() -> None:
+def test_set_environmental_temperature() -> None:
     network = TrackNetwork()
-    network.set_enviromental_temperature(25.0)
+    network.set_environmental_temperature(25.0)
     assert network.environmental_temperature == 25.0
     
-    network.set_enviromental_temperature(-10.0)
+    network.set_environmental_temperature(-10.0)
     assert network.environmental_temperature == -10.0
 
 def test_set_heater_threshold() -> None:
@@ -510,14 +510,6 @@ def test_set_heater_threshold() -> None:
     assert network.heater_threshold == 0
     assert network.heaters_active == False
 
-def test_manage_heaters() -> None:
-    network = TrackNetwork()
-    network.set_enviromental_temperature(25.0)
-    assert network.heaters_active == False
-
-    network.set_enviromental_temperature(-10.0)
-    assert network.heaters_active == True
-
 def test_get_heater_status() -> None:
     network = TrackNetwork()
     network.heaters_active = False
@@ -525,87 +517,6 @@ def test_get_heater_status() -> None:
 
     network.heaters_active = True
     assert network.get_heater_status() == True
-
-def test_broadcast_train_command_valid() -> None:
-    network = TrackNetwork()
-
-    # Add first command
-    command = TrainCommand(train_id=1, commanded_speed=50, authority=5)
-    network.broadcast_train_command(train_id=1, commanded_speed=50, authority=5)
-    assert len(network.active_commands) == 1
-    command = network.active_commands[0]
-
-    # Add another command
-    command2 = TrainCommand(train_id=2, commanded_speed=30, authority=10)
-    network.broadcast_train_command(train_id=2, commanded_speed=30, authority=10)
-    assert len(network.active_commands) == 2
-    command = network.active_commands[1]
-
-    # Override command (full override)
-    override_command = TrainCommand(train_id=1, commanded_speed=30, authority=10)
-    network.broadcast_train_command(train_id=1, commanded_speed=30, authority=10)
-    assert len(network.active_commands) == 2
-    command = network.active_commands[0]
-
-    # Override command (no authority change)
-    overerride_command2 = TrainCommand(train_id=2, commanded_speed=20, authority=10)
-    network.broadcast_train_command(train_id=2, commanded_speed=20)
-    assert len(network.active_commands) == 2
-    command = network.active_commands[1]
-
-def test_broadcast_train_command_invalid() -> None:
-    network = TrackNetwork()
-    
-    with pytest.raises(ValueError):
-        network.broadcast_train_command(train_id=1, commanded_speed=None, authority=5)
-    
-    with pytest.raises(ValueError):
-        network.broadcast_train_command(train_id=2, commanded_speed=30, authority=None)
-    
-    with pytest.raises(ValueError):
-        network.broadcast_train_command(train_id=3, commanded_speed=None, authority=None)
-
-def test_get_active_commands() -> None:
-    network = TrackNetwork()
-    network.broadcast_train_command(train_id=1, commanded_speed=50, authority=5)
-    network.broadcast_train_command(train_id=2, commanded_speed=30, authority=10)
-    
-    active_commands = network.get_active_commands()
-    assert len(active_commands) == 2
-    assert active_commands[0].train_id == 1
-    assert active_commands[1].train_id == 2
-
-def test_get_command_for_train() -> None:
-    network = TrackNetwork()
-    assert network.get_command_for_train(train_id=1) == None
-
-    network.broadcast_train_command(train_id=1, commanded_speed=50, authority=5)
-    network.broadcast_train_command(train_id=2, commanded_speed=30, authority=10)
-    network.broadcast_train_command(train_id=1, commanded_speed=20, authority=8)
-    network.broadcast_train_command(train_id=3, commanded_speed=40, authority=15)
-
-    command1 = TrainCommand(train_id=1, commanded_speed=20, authority=8)
-    command2 = TrainCommand(train_id=2, commanded_speed=30, authority=10)
-    
-    retrieved_command = network.get_command_for_train(train_id=1)
-    assert retrieved_command == command1
-
-    retrieved_command = network.get_command_for_train(train_id=2)
-    assert retrieved_command == command2
-    
-def test_clear_train_commands() -> None:
-    network = TrackNetwork()
-    network.broadcast_train_command(train_id=1, commanded_speed=50, authority=5)
-    network.broadcast_train_command(train_id=2, commanded_speed=30, authority=10)
-    
-    assert len(network.active_commands) == 2
-    
-    network.clear_train_commands(train_id=1)
-    assert len(network.active_commands) == 1
-    assert network.active_commands[0].train_id == 2
-    
-    network.clear_train_commands(train_id=2)
-    assert len(network.active_commands) == 0
 
 def test_network_set_track_failure_valid() -> None:
     network = TrackNetwork()
@@ -743,23 +654,18 @@ def test_get_network_status() -> None:
     network.add_segment(segment2)
     network.set_track_failure(block_id=1, failure_type=TrackFailureType.BROKEN_RAIL)
     network.close_block(2)
-    network.broadcast_train_command(train_id=1, commanded_speed=50, authority=5)
 
     status = network.get_network_status()
 
-    assert status["global_temperature"] == 20.0
+    assert status["environmental_temperature"] == 20.0
     assert status["heater_threshold"] == 0
     assert status["heaters_active"] == False
     assert len(status["segments"]) == 2
-    assert len(status["active_commands"]) == 1
     assert len(status["failure_log"]) == 1
     assert status["segments"][1]["block_id"] == 1
     assert status["segments"][1]["failures"] == [TrackFailureType.BROKEN_RAIL]
     assert status["segments"][2]["block_id"] == 2
     assert status["segments"][2]["closed"] == True
-    assert status["active_commands"][0].train_id == 1
-    assert status["active_commands"][0].commanded_speed == 50
-    assert status["active_commands"][0].authority == 5
     assert status["failure_log"][0]["block_id"] == 1
     assert status["failure_log"][0]["failure_type"] == TrackFailureType.BROKEN_RAIL
     assert status["failure_log"][0]["active"] == True

@@ -23,7 +23,6 @@ class TrainCommand:
         commanded_speed: Speed command for the train in m/s.
         authority: Movement authority for the train in meters.
     """
-    train_id: int
     commanded_speed: int
     authority: int
 

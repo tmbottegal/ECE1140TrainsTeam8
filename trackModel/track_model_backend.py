@@ -60,7 +60,7 @@ class Train:
         
         if distance < 0:
             if self.segment_displacement + distance < 0:
-                prev_segment = self.get_previous_segment()
+                prev_segment = self.get_previous_segment()   # issue: can't go back more than one segment
                 if prev_segment is None:
                     raise ValueError(
                         "Cannot move backwards, no previous segment.")
@@ -84,7 +84,7 @@ class Train:
             if (self.segment_displacement + distance > 
                     self.current_segment.length):
                 #need to move to next segment
-                next_segment = self.get_next_segment()
+                next_segment = self.get_next_segment()      # issue: can't go forward more than one segment
                 if next_segment is None:
                     raise ValueError("Cannot move forwards, no next segment.")
                 if (next_segment.signal_state == SignalState.RED or 
@@ -216,11 +216,10 @@ class TrackSegment:
 
         if failure_type not in self.failures:
             self.failures.add(failure_type)
-            if isinstance(self, LevelCrossing):
-                self.set_gate_status(True)
             self._report_track_failure(failure_type, active=True)
 
-            # TODO: #90 if broken rail, set occupancy to true
+        if failure_type == TrackFailureType.BROKEN_RAIL:
+            self.occupied = True
 
     def clear_track_failure(self, failure_type: TrackFailureType) -> None:
         """Clear a failure condition.
@@ -230,9 +229,10 @@ class TrackSegment:
         """
         if failure_type in self.failures:
             self.failures.remove(failure_type)
-            if isinstance(self, LevelCrossing):
-                self.set_gate_status(False)
             self._report_track_failure(failure_type, active=False)
+
+        if failure_type == TrackFailureType.BROKEN_RAIL:
+            self.occupied = False
 
     def _report_track_failure(self, failure_type: TrackFailureType,
                               active: bool) -> None:
@@ -403,23 +403,9 @@ class LevelCrossing(TrackSegment):
         # Level crossing specific properties
         self.gate_status = False  # False = open, True = closed
         
-    def set_occupancy(self, occupied: bool) -> None:
-        """Update block occupancy status and gate status.
-        
-        Overrides the parent method to tie gate status to occupancy.
-        When occupied = True, gates close (gate_status = True).
-        When occupied = False, gates open (gate_status = False).
-        
-        Args:
-            occupied: Whether the block is currently occupied.
-        """
-
-        super().set_occupancy(occupied)
-        
-        self.gate_status = occupied
 
     def set_gate_status(self, status: bool) -> None:
-        """ Update the gate status independantly of the occupaancy.
+        """ Update the gate status.
 
         Args:
             status: Whether the crossing gates are closed 
@@ -568,9 +554,6 @@ class TrackNetwork:
         self.rail_temperature = self.environmental_temperature
         self.heater_threshold = 0                 # Celsius
         self.heaters_active = False
-        
-        # Command broadcasting system
-        self.active_commands: List[TrainCommand] = []
         
         # Logging
         self.failure_log: List[Dict] = []
@@ -895,8 +878,8 @@ class TrackNetwork:
         """
         return self.heaters_active
  
-    def broadcast_train_command(self, block_id: int, commanded_speed: int=None, 
-                               authority: int=None) -> None:
+    def broadcast_train_command(self, block_id: int, commanded_speed: int, 
+                               authority: int) -> None:
         """Broadcast a command to a specific train through all track segments.
         
         Args:
@@ -1244,6 +1227,62 @@ class TrackNetwork:
             )
 
         return segment_status
+    
+    def _get_wayside_segment_status(self, block_id: int) -> Dict[str, Any]:
+        """Get status information for a single track segment relevant to wayside operations.
+        
+        Args:
+            block_id: The ID of the track segment to get status for.
+        Returns:
+            Dictionary containing status information relevant to wayside operations.
+        """
+
+        segment = self.segments.get(block_id)
+        if segment is None:
+            raise ValueError(f"Block ID {block_id} not found in track network.")
+        
+        segment_status = {
+            "block_id": segment.block_id,
+            "type": type(segment).__name__,
+            "length": segment.length,
+            "speed_limit": segment.speed_limit,
+            "occupied": segment.occupied,
+            "signal_state": segment.signal_state,
+            "beacon_data": segment.beacon_data,
+            "active_command": segment.active_command,
+            "closed": segment.closed,
+            "next_segment": (
+                segment.next_segment.block_id
+                if segment.next_segment else None
+            ),
+            "previous_segment": (
+                segment.previous_segment.block_id
+                if segment.previous_segment else None
+            ),
+        }
+
+        if isinstance(segment, LevelCrossing):
+            segment_status["gate_status"] = segment.gate_status
+        
+        if isinstance(segment, TrackSwitch):
+            segment_status["current_position"] = segment.current_position
+
+        return segment_status
+
+    def get_wayside_status(self) -> Dict[str, Any]:
+        """Get complete wayside status.
+
+        Returns:
+            Dictionary containing wayside-relevant status information.
+        """
+        wayside_status = {
+            "segments": {
+                block_id: self._get_wayside_segment_status(block_id)
+                for block_id in self.segments
+            },
+            "line_name": self.line_name,
+        }
+        return wayside_status
     
     def get_network_status(self) -> Dict[str, Any]:
         """Get complete network status.

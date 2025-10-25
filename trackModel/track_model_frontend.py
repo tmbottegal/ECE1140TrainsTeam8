@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 
-#TODO: add support for multiple TrackNetwork (red line and green line)
+#TODO: #92 remove broadcasting tab and integrate into segment properties
+#TODO: #60 add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
     def __init__(self):
         super().__init__()
@@ -255,7 +256,7 @@ class NetworkStatusUI(QWidget):
             
             # Populate command info table
             if 'active_commands' in network_status:
-                self.populate_command_table(network_status['active_commands'])
+                self.populate_command_table(network_status['active_commands']) #TODO #92 remove
             
             # Populate failure log table
             if 'failure_log' in network_status:
@@ -293,18 +294,18 @@ class NetworkStatusUI(QWidget):
         
         # Define attributes to exclude from Segment Info
         excluded_segment_attributes = {
-            'diverging_segment', 'failures', 'gate_status', 
+            'diverging_segment', 'failures', 
             'passengers_boarded_total', 'passengers_exited_total', 
             'passengers_waiting', 'station_side', 'straight_segment', 
-            'tickets_sold_total', 'station_name'
+            'tickets_sold_total', 'station_name', 'underground'
         }
         
         # Define custom column order for Segment Info
         segment_column_order = [
             'block_id', 'type', 'occupied', 'closed', 'signal_state', 
-            'speed_limit', 'length', 'grade', 'underground', 
-            'previous_segment', 'next_segment', 'current_position', 
-            'beacon_data',
+            'speed_limit', 'length', 'grade', 'active_command',
+            'previous_segment', 'next_segment', 'current_position',
+            'gate_status', 'beacon_data',
         ]
         
         # Check if this is being called for segments (based on table widget 

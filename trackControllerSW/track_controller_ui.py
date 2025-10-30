@@ -128,6 +128,11 @@ class TrackControllerUI(QWidget):
     def toggle_manual_mode(self, enabled: bool) -> None:
         self.manual_mode_enabled = enabled
         logger.info("Maintenance Mode %s", "enabled" if enabled else "disabled")
+        try:
+            for c in self.controllers.values():
+                c.set_maintenance_mode(enabled)
+        except Exception:
+            logger.exception("Failed to set maintenance mode on controllers")
         self.refresh_tables()
 
     def refresh_tables(self) -> None:
@@ -144,9 +149,9 @@ class TrackControllerUI(QWidget):
 
             # Blocks table
             line_block_map = {
-                "Blue Line": range(1, 16),    # 1..15
-                "Green Line": range(1, 151),  # 1..150
-                "Red Line": range(1, 77),     # 1..76
+                "Blue Line": range(1, 16),
+                "Green Line": list(range(1, 63)) + list(range(122, 151)), # A through J, W through Z
+                "Red Line": range(1, 45), # A through first half of H
             }
             block_ids = line_block_map.get(self.backend.line_name, [])
             self.tablemain.setRowCount(len(block_ids))
@@ -162,21 +167,37 @@ class TrackControllerUI(QWidget):
             for i, block in enumerate(block_ids):
                 self.tablemain.setItem(i, 0, QTableWidgetItem(str(block)))
                 data = blocks_data.get(block, {})
-                self._set_table_item(self.tablemain, i, 1, str(data.get("suggested_speed", "")))
-                self._set_table_item(self.tablemain, i, 2, str(data.get("suggested_auth", "")))
-                occ_text = ""
-                if "occupied" in data:
-                    occ_text = "Yes" if data["occupied"] else "No"
-                self._set_table_item(self.tablemain, i, 3, occ_text)
-                self._set_table_item(self.tablemain, i, 4, str(data.get("commanded_speed", "")))
-                self._set_table_item(self.tablemain, i, 5, str(data.get("commanded_auth", "")))
-                sig_text = ""
-                if "signal" in data:
-                    sig_text = data["signal"].name.title()
+
+                # suggested values
+                self._set_table_item(self.tablemain, i, 1, str(data.get("suggested_speed", "N/A")), editable=False)
+                self._set_table_item(self.tablemain, i, 2, str(data.get("suggested_auth", "N/A")), editable=False)
+
+                # occupancy
+                occ_val = data.get("occupied", "N/A")
+                if occ_val == "N/A":
+                    occ_text = "N/A"
+                else:
+                    occ_text = "Yes" if occ_val else "No"
+                self._set_table_item(self.tablemain, i, 3, occ_text, editable=False)
+
+                # commanded speed/auth
+                cmd_speed = data.get("commanded_speed", "N/A")
+                cmd_auth = data.get("commanded_auth", "N/A")
+                self._set_table_item(self.tablemain, i, 4, str(cmd_speed), editable=False)
+                self._set_table_item(self.tablemain, i, 5, str(cmd_auth), editable=False)
+
+                # signal state
+                sig = data.get("signal", "N/A")
+                if isinstance(sig, SignalState):
+                    sig_text = sig.name.title()
+                else:
+                    sig_text = "N/A"
                 item = QTableWidgetItem(sig_text)
-                if "signal" in data:
-                    self._color_signal_item(item, data["signal"])
-                self._apply_editable(item)
+                if isinstance(sig, SignalState):
+                    self._color_signal_item(item, sig)
+                else:
+                    item.setBackground(Qt.GlobalColor.blue)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.tablemain.setItem(i, 6, item)
 
             # Switches table
@@ -187,7 +208,7 @@ class TrackControllerUI(QWidget):
                     switch_map[1] = (5, 6, 11)
                 elif self.backend.line_name == "Red Line":
                     switch_map[1] = (15, 16, 1)
-                    switch_map[2] = (27, 28, 76) 
+                    switch_map[2] = (27, 28, 76)
                     switch_map[3] = (32, 33, 72)
                     switch_map[4] = (38, 39, 71)
                     switch_map[5] = (43, 44, 67)
@@ -195,10 +216,10 @@ class TrackControllerUI(QWidget):
                 elif self.backend.line_name == "Green Line":
                     switch_map[1] = (12, 13, 1)
                     switch_map[2] = (28, 29, 150)
-                    switch_map[3] = (76, 77, 101) 
+                    switch_map[3] = (76, 77, 101)
                     switch_map[4] = (85, 86, 100)
                 for sid in switch_map:
-                    switches[sid] = "Normal"
+                    switches[sid] = "N/A"
             self.tableswitch.setRowCount(max(len(switches), 1))
             self.tableswitch.setColumnCount(3)
             self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Blocks", "Position"])
@@ -208,7 +229,7 @@ class TrackControllerUI(QWidget):
                 blocks = switch_map.get(sid, ())
                 self.tableswitch.setItem(i, 1, QTableWidgetItem(str(blocks)))
                 item = QTableWidgetItem(pos)
-                self._apply_editable(item)
+                self._apply_editable(item, editable=self.manual_mode_enabled)
                 self.tableswitch.setItem(i, 2, item)
             if not switches:
                 for col in range(3):
@@ -225,7 +246,7 @@ class TrackControllerUI(QWidget):
                 elif self.backend.line_name == "Green Line":
                     crossing_blocks[1] = 19
                 for cid in crossing_blocks:
-                    crossings[cid] = "Inactive"
+                    crossings[cid] = "N/A"
             self.tablecrossing.setRowCount(max(len(crossings), 1))
             self.tablecrossing.setColumnCount(3)
             self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
@@ -235,7 +256,7 @@ class TrackControllerUI(QWidget):
                 self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
                 self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block)))
                 item = QTableWidgetItem(status)
-                self._apply_editable(item)
+                self._apply_editable(item, editable=self.manual_mode_enabled)
                 self.tablecrossing.setItem(i, 2, item)
             if not crossings:
                 for col in range(3):
@@ -244,14 +265,15 @@ class TrackControllerUI(QWidget):
         except Exception:
             logger.exception("Failed to refresh tables.")
 
-
-    def _set_table_item(self, table, row: int, col: int, text: str) -> None:
+    def _set_table_item(self, table, row: int, col: int, text: str, editable: bool = False) -> None:
         item = QTableWidgetItem(text)
-        self._apply_editable(item)
+        self._apply_editable(item, editable=editable)
         table.setItem(row, col, item)
 
-    def _apply_editable(self, item: QTableWidgetItem) -> None:
-        if self.manual_mode_enabled:
+    def _apply_editable(self, item: QTableWidgetItem, editable: bool = False) -> None:
+        """Set item editable or not based on the boolean. We restrict UI edits
+        to switches and crossings only (per the requirement)."""
+        if editable:
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         else:
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -270,19 +292,12 @@ class TrackControllerUI(QWidget):
     def _on_block_clicked(self, row: int, col: int) -> None:
         if not self.manual_mode_enabled:
             return
+        if col in (3, 6):
+            QMessageBox.information(self, "Maintenance Mode", "Occupancy and signal state cannot be edited from UI in maintenance mode. Use PLC upload for signal/command changes.")
+            return
         try:
-            block_item = self.tablemain.item(row, 0)
-            if block_item is None:
-                return
-            block = int(block_item.text())
-            if col == 3:  # Occupancy
-                new_val = not self.backend.blocks[block]["occupied"]
-                self.backend.set_block_occupancy(block, new_val)
-            elif col == 6:  # Signal
-                current: SignalState = self.backend.blocks[block]["signal"]
-                cycle = [SignalState.RED, SignalState.YELLOW, SignalState.GREEN, SignalState.SUPERGREEN]
-                next_sig = cycle[(cycle.index(current) + 1) % len(cycle)]
-                self.backend.set_signal(block, next_sig.name.title())
+            # no other interactable block columns for UI edits
+            return
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
             self.refresh_tables()

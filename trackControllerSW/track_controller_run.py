@@ -25,6 +25,11 @@ def main() -> NoReturn:
         "Red Line": TrackControllerBackend(track_model_network, line_name="Red Line"),
         "Green Line": TrackControllerBackend(track_model_network, line_name="Green Line"),
     }
+
+    # Start live update link for all controllers
+    for backend in controllers.values():
+        backend.start_live_link(poll_interval=1.0)
+
     ui = TrackControllerUI(controllers)
     def upload_file() -> None:
         filepath, _ = QFileDialog.getOpenFileName(ui, "Open PLC File", "", "PLC Files (*.txt *.plc *.py)")
@@ -43,7 +48,7 @@ def main() -> NoReturn:
     ui.plc_button.clicked.connect(upload_file)
     ui.refresh_tables()
     ui.resize(1800, 1100)
-    ui.setWindowTitle("Track Controller Module (Blank Tables)")
+    ui.setWindowTitle("Track Controller Module")
     ui.show()
     logger.info("Track Controller UI launched successfully.")
     sys.exit(app.exec())

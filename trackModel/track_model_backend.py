@@ -140,7 +140,7 @@ class TrackSegment:
 
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit:int, 
+    def __init__(self, block_id: int, length: float, speed_limit: float,
                  grade: float, underground: bool) -> None:
         """Initialize a track segment.
         
@@ -298,8 +298,8 @@ class TrackSwitch(TrackSegment):
         diverging_segment: Segment for diverging path (position 1).
         current_position: Current switch position (0 or 1).
     """
-    
-    def __init__(self, block_id: str, length: int, speed_limit: int, 
+
+    def __init__(self, block_id: int, length: float, speed_limit: float, 
                  grade: float, underground: bool) -> None:
         """Initialize a track switch.
         
@@ -387,7 +387,7 @@ class LevelCrossing(TrackSegment):
                 (True = closed, False = open).
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit: int, 
+    def __init__(self, block_id: int, length: float, speed_limit: float, 
                  grade: float, underground: bool) -> None:
         """Initialize a level crossing segment.
         
@@ -429,7 +429,7 @@ class Station(TrackSegment):
         ticket_sales_log: Historical record of ticket sales.
     """
     
-    def __init__(self, block_id: str, length: int, speed_limit: int,
+    def __init__(self, block_id: int, length: float, speed_limit: float,
                  grade: float, station_name: str,
                  station_side: StationSide) -> None:
         """Initialize a station.
@@ -692,12 +692,12 @@ class TrackNetwork:
                         f"Invalid 'block_id' field in layout file at row "
                         f"{current_line}.")
                 if ("length" not in lines or 
-                        not re.match("^[0-9]+$", lines["length"])):
+                        not re.match("^[0-9.-]+$", lines["length"])):
                     raise ValueError(
                         f"Invalid 'length' field in layout file at row "
                         f"{current_line}.")
                 if ("speed_limit" not in lines or 
-                        not re.match("^[0-9]+$", lines["speed_limit"])):
+                        not re.match("^[0-9.-]+$", lines["speed_limit"])):
                     raise ValueError(
                         f"Invalid 'speed_limit' field in layout file at row "
                         f"{current_line}.")
@@ -717,8 +717,8 @@ class TrackNetwork:
                     case "TrackSegment":
                         segment = TrackSegment(
                             block_id=int(lines["block_id"]),
-                            length=int(lines["length"]),
-                            speed_limit=int(lines["speed_limit"]),
+                            length=float(lines["length"]),
+                            speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
                             underground=lines["underground"].lower() == "true"
                         )
@@ -726,8 +726,8 @@ class TrackNetwork:
                     case "TrackSwitch":
                         switch = TrackSwitch(
                             block_id=int(lines["block_id"]),
-                            length=int(lines["length"]),
-                            speed_limit=int(lines["speed_limit"]),
+                            length=float(lines["length"]),
+                            speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
                             underground=lines["underground"].lower() == "true"
                         )
@@ -735,15 +735,15 @@ class TrackNetwork:
                     case "LevelCrossing":
                         crossing = LevelCrossing(
                             block_id=int(lines["block_id"]),
-                            length=int(lines["length"]),
-                            speed_limit=int(lines["speed_limit"]),
+                            length=float(lines["length"]),
+                            speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
                             underground=lines["underground"].lower() == "true"
                         )
                         self.add_segment(crossing)
                     case "Station":
                         if ("station_name" not in lines or 
-                                not re.match("^[a-zA-Z0-9 _-]+$", 
+                                not re.match(r"^[\w\s\.\'\-\u00C0-\u017F]+$", 
                                            lines["station_name"])):
                             raise ValueError(
                                 f"Invalid 'station_name' field in layout "
@@ -757,8 +757,8 @@ class TrackNetwork:
                                 f"file at row {current_line}.")
                         station = Station(
                             block_id=int(lines["block_id"]),
-                            length=int(lines["length"]),
-                            speed_limit=int(lines["speed_limit"]),
+                            length=float(lines["length"]),
+                            speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
                             station_name=lines["station_name"],
                             station_side=StationSide(

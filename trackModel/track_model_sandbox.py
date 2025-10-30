@@ -43,3 +43,8 @@ if __name__ == "__main__":
     print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
     train.move(500)
     print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
+
+    red_line = TrackNetwork()
+    red_line.load_track_layout("trackModel/red_line.csv")
+
+    print(red_line.get_network_status())

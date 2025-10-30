@@ -33,7 +33,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
-#TODO: #92 remove broadcasting tab and integrate into segment properties
+#TODO: #92 remove broadcasting tab and integrate commands into segment tab
 #TODO: #60 add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
     def __init__(self):
@@ -541,7 +541,7 @@ class NetworkStatusUI(QWidget):
         """Load the track layout from CSV file (called once on startup)"""
         try:
             # Load track layout with proper path
-            csv_path = os.path.join(os.path.dirname(__file__), "blue_line.csv")
+            csv_path = os.path.join(os.path.dirname(__file__), "red_line.csv")
             self.status_display.append(
                 f"Loading track layout from {csv_path}..."
             )

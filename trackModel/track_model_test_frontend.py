@@ -541,7 +541,7 @@ class NetworkStatusUI(QWidget):
         """Load the track layout from CSV file (called once on startup)"""
         try:
             # Load track layout with proper path
-            csv_path = os.path.join(os.path.dirname(__file__), "red_line.csv")
+            csv_path = os.path.join(os.path.dirname(__file__), "green_line.csv")
             self.status_display.append(
                 f"Loading track layout from {csv_path}..."
             )

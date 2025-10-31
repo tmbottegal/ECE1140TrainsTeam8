@@ -60,7 +60,7 @@ class Train:
         
         if distance < 0:
             if self.segment_displacement + distance < 0:
-                prev_segment = self.get_previous_segment()   # issue: can't go back more than one segment
+                prev_segment = self.get_previous_segment()   # issue: can't go back more than one segment (not my problem)
                 if prev_segment is None:
                     raise ValueError(
                         "Cannot move backwards, no previous segment.")
@@ -84,7 +84,7 @@ class Train:
             if (self.segment_displacement + distance > 
                     self.current_segment.length):
                 #need to move to next segment
-                next_segment = self.get_next_segment()      # issue: can't go forward more than one segment
+                next_segment = self.get_next_segment()      # issue: can't go back more than one segment (not my problem)
                 if next_segment is None:
                     raise ValueError("Cannot move forwards, no next segment.")
                 if (next_segment.signal_state == SignalState.RED or 

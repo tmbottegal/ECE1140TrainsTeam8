@@ -25,26 +25,5 @@ from typing import List, Dict, Optional
 
 if __name__ == "__main__":
     network = TrackNetwork()
-    network.load_track_layout("trackModel/blue_line.csv")
-    train = Train(1)
-    network.set_signal_state(3, SignalState.GREEN)
-    network.set_signal_state(2, SignalState.GREEN)
-    network.set_signal_state(1, SignalState.GREEN)
-    network.add_train(train)
-    network.connect_train(1, 2, 0)
-    print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
-    train.move(60)
-    print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
-    train.move(-40)
-    print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
-    train.move(-40)
-    print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
-    train.move(-300)
-    print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
-    train.move(500)
-    print(f"Current Segment: {train.current_segment.block_id}, Position in Segment: {train.segment_displacement}")
-
-    red_line = TrackNetwork()
-    red_line.load_track_layout("trackModel/red_line.csv")
-
-    print(red_line.get_network_status())
+    network.load_track_layout("trackModel/green_line.csv")
+    print(network.get_network_status())

@@ -38,7 +38,7 @@ H35,TrackSegment,35,50,0,8.334,TRUE,34,36,,,,
 I36,TrackSegment,36,50,0,8.334,TRUE,35,37,,,,
 I37,TrackSegment,37,50,0,8.334,TRUE,36,38,,,,
 I38,TrackSegment,38,50,0,8.334,TRUE,37,39,,,,
-I39,Station,39,50,0,8.334,TRUE,38,40,,,Central I,Right
+I39,Station,39,50,0,8.334,TRUE,38,40,,,Central,Right
 I40,TrackSegment,40,50,0,8.334,TRUE,39,41,,,,
 I41,TrackSegment,41,50,0,8.334,TRUE,40,42,,,,
 I42,TrackSegment,42,50,0,8.334,TRUE,41,43,,,,
@@ -56,7 +56,7 @@ I53,TrackSegment,53,50,0,8.334,TRUE,52,54,,,,
 I54,TrackSegment,54,50,0,8.334,TRUE,53,55,,,,
 I55,TrackSegment,55,50,0,8.334,TRUE,54,56,,,,
 I56,TrackSegment,56,50,0,8.334,TRUE,55,57,,,,
-I57,Station,57,50,0,8.334,TRUE,56,58,,,Overbrook I,Right
+I57,Station,57,50,0,8.334,TRUE,56,58,,,Overbrook,Right
 J58,TrackSwitch,58,50,0,8.334,FALSE,57,,59,0,,
 J59,TrackSegment,59,50,0,8.334,FALSE,58,60,,,,
 J60,TrackSegment,60,50,0,8.334,FALSE,59,61,,,,
@@ -64,7 +64,7 @@ J61,TrackSegment,61,50,0,8.334,FALSE,60,63,,,,
 J62,TrackSwitch,62,50,0,8.334,FALSE,,,,,,
 K63,TrackSegment,63,100,0,19.446,FALSE,61,64,,,,
 K64,TrackSegment,64,100,0,19.446,FALSE,63,65,,,,
-K65,Station,65,200,0,19.446,FALSE,64,66,,,Glenbury I,Right
+K65,Station,65,200,0,19.446,FALSE,64,66,,,Glenbury,Right
 K66,TrackSegment,66,200,0,19.446,FALSE,65,67,,,,
 K67,TrackSegment,67,100,0,11.112,FALSE,66,68,,,,
 K68,TrackSegment,68,100,0,11.112,FALSE,67,69,,,,
@@ -72,7 +72,7 @@ L69,TrackSegment,69,100,0,11.112,FALSE,68,70,,,,
 L70,TrackSegment,70,100,0,11.112,FALSE,69,71,,,,
 L71,TrackSegment,71,100,0,11.112,FALSE,70,72,,,,
 L72,TrackSegment,72,100,0,11.112,FALSE,71,73,,,,
-L73,Station,73,100,0,11.112,FALSE,72,74,,,Dormont I,Right
+L73,Station,73,100,0,11.112,FALSE,72,74,,,Dormont,Right
 M74,TrackSegment,74,100,0,11.112,FALSE,73,75,,,,
 M75,TrackSegment,75,100,0,11.112,FALSE,74,76,,,,
 M76,TrackSwitch,76,100,0,11.112,FALSE,75,,77,101,,
@@ -104,7 +104,7 @@ R101,TrackSegment,101,35,0,7.2228,FALSE,100,102,,,,
 S102,TrackSegment,102,100,0,7.7784,FALSE,101,103,,,,
 S103,TrackSegment,103,100,0,7.7784,FALSE,102,104,,,,
 S104,TrackSegment,104,80,0,7.7784,FALSE,103,105,,,,
-T105,Station,105,100,0,7.7784,FALSE,104,106,,,Dormont II,Right
+T105,Station,105,100,0,7.7784,FALSE,104,106,,,Dormont,Right
 T106,TrackSegment,106,100,0,7.7784,FALSE,105,107,,,,
 T107,TrackSegment,107,90,0,7.7784,FALSE,106,108,,,,
 T108,LevelCrossing,108,100,0,7.7784,FALSE,107,109,,,,
@@ -113,7 +113,7 @@ U110,TrackSegment,110,100,0,8.334,FALSE,109,111,,,,
 U111,TrackSegment,111,100,0,8.334,FALSE,110,112,,,,
 U112,TrackSegment,112,100,0,8.334,FALSE,111,113,,,,
 U113,TrackSegment,113,100,0,8.334,FALSE,112,114,,,,
-U114,Station,114,162,0,8.334,FALSE,113,115,,,Glenbury II,Right
+U114,Station,114,162,0,8.334,FALSE,113,115,,,Glenbury,Right
 U115,TrackSegment,115,100,0,8.334,FALSE,114,116,,,,
 U116,TrackSegment,116,100,0,8.334,FALSE,115,117,,,,
 V117,TrackSegment,117,50,0,4.167,FALSE,116,118,,,,
@@ -122,7 +122,7 @@ V119,TrackSegment,119,40,0,4.167,FALSE,118,120,,,,
 V120,TrackSegment,120,50,0,4.167,FALSE,119,121,,,,
 V121,TrackSegment,121,50,0,4.167,TRUE,120,122,,,,
 W122,TrackSegment,122,50,0,5.556,TRUE,121,123,,,,
-W123,Station,123,50,0,5.556,TRUE,122,124,,,Overbrook II,Right
+W123,Station,123,50,0,5.556,TRUE,122,124,,,Overbrook,Right
 W124,TrackSegment,124,50,0,5.556,TRUE,123,125,,,,
 W125,TrackSegment,125,50,0,5.556,TRUE,124,126,,,,
 W126,TrackSegment,126,50,0,5.556,TRUE,125,127,,,,
@@ -131,7 +131,7 @@ W128,TrackSegment,128,50,0,5.556,TRUE,127,129,,,,
 W129,TrackSegment,129,50,0,5.556,TRUE,128,130,,,,
 W130,TrackSegment,130,50,0,5.556,TRUE,129,131,,,,
 W131,TrackSegment,131,50,0,5.556,TRUE,130,132,,,,
-W132,Station,132,50,0,5.556,TRUE,131,133,,,Inglewood II,Left
+W132,Station,132,50,0,5.556,TRUE,131,133,,,Inglewood,Left
 W133,TrackSegment,133,50,0,5.556,TRUE,132,134,,,,
 W134,TrackSegment,134,50,0,5.556,TRUE,133,135,,,,
 W135,TrackSegment,135,50,0,5.556,TRUE,134,136,,,,
@@ -140,7 +140,7 @@ W137,TrackSegment,137,50,0,5.556,TRUE,136,138,,,,
 W138,TrackSegment,138,50,0,5.556,TRUE,137,139,,,,
 W139,TrackSegment,139,50,0,5.556,TRUE,138,140,,,,
 W140,TrackSegment,140,50,0,5.556,TRUE,139,141,,,,
-W141,Station,141,50,0,5.556,TRUE,140,142,,,Central II,Right
+W141,Station,141,50,0,5.556,TRUE,140,142,,,Central,Right
 W142,TrackSegment,142,50,0,5.556,TRUE,141,143,,,,
 W143,TrackSegment,143,50,0,5.556,FALSE,142,144,,,,
 X144,TrackSegment,144,50,0,5.556,FALSE,143,145,,,,

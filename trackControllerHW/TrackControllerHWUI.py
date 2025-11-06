@@ -16,7 +16,7 @@ from TrackControllerHWBackend import (
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.DEBUG)  # change to WARNING to reduce log spam
 if not logger.handlers:
     h = logging.StreamHandler(sys.stdout)
     h.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
@@ -63,7 +63,7 @@ class TrackControllerHWUI(QWidget):
         side_layout.setContentsMargins(8, 8, 8, 8)
         side_layout.setSpacing(8)
 
-        # (Removed the left-panel title per request)
+        # (Removed the left-panel title per your request)
 
         side_layout.addWidget(QLabel("Line:"))
         self.line_picker = QComboBox()
@@ -72,7 +72,7 @@ class TrackControllerHWUI(QWidget):
         self.line_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         side_layout.addWidget(self.line_picker)
 
-        # Add a little vertical space before the Maintenance button
+        # Space between Line dropdown and Maintenance button (tweak this number)
         side_layout.addSpacing(14)
 
         self.btn_maint = QPushButton("Maintenance Mode")
@@ -100,7 +100,7 @@ class TrackControllerHWUI(QWidget):
         self.tabs = QTabWidget()
         content_layout.addWidget(self.tabs)
 
-        # -------- Blocks table (updated columns) --------
+        # -------- Blocks table (separate suggested/commanded columns; removed "—" col) --------
         self.tbl_blocks = QTableWidget()
         self.tbl_blocks.setColumnCount(7)
         self.tbl_blocks.setHorizontalHeaderLabels([
@@ -226,6 +226,9 @@ class TrackControllerHWUI(QWidget):
             self._refresh_blocks()
             self._refresh_switches()
             self._refresh_crossings()
+        except KeyboardInterrupt:
+            # Ctrl+C landed mid-slot; swallow so we can quit cleanly.
+            return
         except Exception:
             logger.exception("Refresh failed")
 
@@ -424,7 +427,21 @@ def _build_networks() -> Dict[str, TrackModelAdapter]:
 
 
 if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGINT, lambda *args: QApplication.quit())
+
     app = QApplication(sys.argv)
+
+    # Quiet excepthook for Ctrl+C so no traceback prints
+    def _quiet_excepthook(exctype, value, tb):
+        if exctype is KeyboardInterrupt:
+            try:
+                QApplication.quit()
+            except Exception:
+                pass
+            return
+        sys.__excepthook__(exctype, value, tb)
+    sys.excepthook = _quiet_excepthook
 
     nets = _build_networks()
     tm_blue, tm_red, tm_green = nets["Blue Line"], nets["Red Line"], nets["Green Line"]
@@ -441,4 +458,20 @@ if __name__ == "__main__":
     ui.resize(1600, 1000)
     ui.setWindowTitle("Wayside Controller – Hardware UI")
     ui.show()
-    sys.exit(app.exec())
+
+    # Clean shutdown on window close or Ctrl+C
+    app.aboutToQuit.connect(ui._hb_timer.stop)
+    app.aboutToQuit.connect(lambda: [b.stop_live_link() for b in controllers.values()])
+
+    # --- clean exit on Ctrl+C, no traceback ---
+    try:
+        rc = app.exec()
+    except KeyboardInterrupt:
+        rc = 0
+    finally:
+        for b in controllers.values():
+            try:
+                b.stop_live_link()
+            except Exception:
+                pass
+    sys.exit(rc)

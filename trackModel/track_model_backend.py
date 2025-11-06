@@ -5,7 +5,7 @@ import csv
 import re
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, time
 from enum import Enum
 from random import Random
 from typing import Any, Dict, List, Optional
@@ -528,14 +528,13 @@ class TrackNetwork:
     """Main Track Model class implementing the Model through a graph
     data structure.
     
-    Manages the entire railway network including segments, switches,
-    and stations.
-    Provides interfaces for track layout loading, failure injection, and status
-    reporting.
+    Manages the entire network including segments, switches, and stations.
+    Provides interfaces for track layout loading, failure injection, and status reporting.
     
     Attributes:
         segments: Dictionary of TrackSegment objects.
         trains: Dictionary of Train objects.
+        line_name: Name of the line.
         environmental_temperature: System-wide environmental temperature.
         heater_threshold: Temperature threshold for heater activation.
         heaters_active: Current status of global track heaters.
@@ -550,6 +549,7 @@ class TrackNetwork:
         self.trains: Dict[Train] = {}
         # System-wide properties
         self.line_name = ""
+        self.time = datetime(1,1,1,0,0,0)
         self.environmental_temperature = 20       # Celsius
         self.rail_temperature = self.environmental_temperature
         self.heater_threshold = 0                 # Celsius
@@ -978,7 +978,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         
         entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": self.time,
             "block_id": block_id,
             "failure_type": failure_type,
             "active": active
@@ -1164,6 +1164,13 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         segment.set_occupancy(occupied)
         pass
+
+    def set_time(self, new_time: datetime) -> None:
+        """Set the current time in the track network.
+        Args:
+            new_time: The new time to set.
+        """
+        self.time = new_time
     
     def get_segment_status(self, block_id: int) -> Dict[str, Any]:
         """Get status information for a single segment.
@@ -1281,6 +1288,7 @@ class TrackNetwork:
                 for block_id in self.segments
             },
             "line_name": self.line_name,
+            "line_time": self.time,
         }
         return wayside_status
     
@@ -1296,6 +1304,7 @@ class TrackNetwork:
                 for block_id in self.segments
             },
             "line_name": self.line_name,
+            "line_time": self.time,
             "environmental_temperature": self.environmental_temperature,
             "rail_temperature": self.rail_temperature,
             "heater_threshold": self.heater_threshold,

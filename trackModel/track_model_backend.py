@@ -5,7 +5,7 @@ import csv
 import re
 import sys
 import os
-from datetime import datetime, time
+from datetime import datetime
 from enum import Enum
 from random import Random
 from typing import Any, Dict, List, Optional
@@ -277,7 +277,7 @@ class TrackSegment:
             return
 
         self.active_command = TrainCommand(commanded_speed, authority)
-        #TODO: for each train train_command_interrupt(block_id)
+        #TODO: #106 for each train train_command_interrupt(block_id)
 
     def close(self) -> None:
         """Close the block for maintenance."""
@@ -501,7 +501,7 @@ class Station(TrackSegment):
                 count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        # TODO: train_model.board_passengers(trainID, count)
+        # TODO: #105 train_model.board_passengers(trainID, count)
         pass
         
     def passengers_exiting(self, count: int) -> None:
@@ -549,7 +549,7 @@ class TrackNetwork:
         self.trains: Dict[Train] = {}
         # System-wide properties
         self.line_name = ""
-        self.time = datetime(1,1,1,0,0,0)
+        self.time = datetime(2000,1,1,0,0,0)
         self.environmental_temperature = 20       # Celsius
         self.rail_temperature = self.environmental_temperature
         self.heater_threshold = 0                 # Celsius
@@ -663,7 +663,8 @@ class TrackNetwork:
         else:
             manipulated_segment.next_segment = next_segment
 
-    def load_track_layout(self, layout_file: str) -> None:
+    #TODO: #104 improve error messages to be more specific about required formatting
+    def load_track_layout(self, layout_file: str) -> None: 
         """Load track layout from file.
         
         Args:
@@ -1171,6 +1172,24 @@ class TrackNetwork:
             new_time: The new time to set.
         """
         self.time = new_time
+        self.temperature_sim()
+        pass
+
+    def manual_set_time(self, year: int, month: int, day: int,
+                        hour: int, minute: int, second: int) -> None:
+        """Manually set the current time in the track network.
+        
+        Args:
+            year: Year component of the new time.
+            month: Month component of the new time.
+            day: Day component of the new time.
+            hour: Hour component of the new time.
+            minute: Minute component of the new time.
+            second: Second component of the new time.
+        """
+        self.time = datetime(year, month, day, hour, minute, second)
+        self.temperature_sim()
+        pass
     
     def get_segment_status(self, block_id: int) -> Dict[str, Any]:
         """Get status information for a single segment.
@@ -1288,7 +1307,7 @@ class TrackNetwork:
                 for block_id in self.segments
             },
             "line_name": self.line_name,
-            "line_time": self.time,
+            "time": self.time,
         }
         return wayside_status
     
@@ -1304,7 +1323,7 @@ class TrackNetwork:
                 for block_id in self.segments
             },
             "line_name": self.line_name,
-            "line_time": self.time,
+            "time": self.time,
             "environmental_temperature": self.environmental_temperature,
             "rail_temperature": self.rail_temperature,
             "heater_threshold": self.heater_threshold,

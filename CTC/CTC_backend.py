@@ -2,8 +2,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 import math
+from universal.global_clock import clock
 
-from track_controller_stub import TrackControllerStub
+#will change this to be importing from trackControllerSW
+from .track_controller_stub import TrackControllerStub
 
 #Global Policies 
 BLOCK_LEN_M: float = 50.0
@@ -57,6 +59,13 @@ class TrackState:
         self._route_schedule: List[Dict[str, object]] = []  # rows: {tid,t,start_block,branch,dest_block,spawned}
         self._schedule_clock_s: int = 0
         self._dest_by_tid: Dict[str, str] = {}  # tid -> destination block key (e.g., "B10", "A1")
+
+        self.trackModel = None
+        self.trainModel = None
+        self.trackControllerHW = None
+        self.trackControllerSW = None
+        self.trainControllerHW = None
+        self.trainControllerSW = None
 
 
         self.set_line(line_name, line_tuples)
@@ -138,8 +147,7 @@ class TrackState:
             """
             if self._stub:
                 self._stub.set_crossing_override(block_id, state)
-        
-
+   
     
     #Move a switch if indicated by stub 
     def set_switch(self, switch_id: str, position: str):
@@ -315,13 +323,44 @@ class TrackState:
     # 2) tell stub to advance movement
     # 3) compute CTC policy using the fresh snapshot
     # 4) broadcast updated state to UI 
-    def stub_tick(self):
+    
+
+    def simulation_tick(self):
+        # === Global Clock Update ===
+        # Every simulation tick, the CTC backend advances the universal simulation clock.
+        # This ensures that all modules share the exact same simulated time reference each update.
+        clock.tick()
+
+       # -------------------------------------------------------
+        # Future integration hooks 
+        # When other subsystems are ready, uncomment these lines.
+        # They will notify each module that the simulation time has advanced.
+        # -------------------------------------------------------
+        # if hasattr(self, "trackModel") and self.trackModel:
+        #   self.trackModel.set_time(clock.get_time())
+        #if hasattr(self, "trackControllerHW") and self.trackControllerHW:
+        #    self.trackControllerHW.set_time(clock.get_time())
+        #if hasattr(self, "trackControllerSW") and self.trackControllerSW:
+        #    self.trackControllerSW.set_time(clock.get_time())
+        #if hasattr(self, "trainModel") and self.trainModel:
+        #    self.trainModel.set_time(clock.get_time())
+        #if hasattr(self, "trainControllerHW") and self.trainControllerHW:
+        #    self.trainControllerHW.set_time(clock.get_time())
+        #if hasattr(self, "trainControllerSW") and self.trainControllerSW:
+        #    self.trainControllerSW.set_time(clock.get_time())
+        # -------------------------------------------------------
+
+        # (temporary) print to confirm time advancing
+        print(f"[CTC Clock] Simulation time: {clock}")
+
         if not self._stub:
             return
 
-        # ---- Route schedule clock & spawns (runs only when UI timer calls us) ----
-        # advance the relative schedule clock by 1 second per tick
+        # ---- Route schedule clock & spawns ----
         self._schedule_clock_s += 1
+
+
+
 
         # spawn any due trains (not yet spawned and start_time <= clock)
         if self._route_schedule:
@@ -409,6 +448,35 @@ class TrackState:
                     speed_mps = LINE_SPEED_LIMIT_MPS * YELLOW_FACTOR
                 else:
                     speed_mps = LINE_SPEED_LIMIT_MPS
+            
+            # --- Optional fallback ---
+            #  simplified version ignores signals, occupancy, or safety conditions.
+            #  simply commands a constant cruise speed for the train
+
+            # Example constant speed in m/s (≈70 km/h)
+            # LINE_SPEED_LIMIT_MPS = 19.4  # Uncomment if you want a faster constant speed
+            # constant_speed_mps = 19.4
+
+            # for t in self._last_snapshot.get("trains", []):
+            #     tid = str(t["train_id"])
+            #     cur = str(t["block"])
+            #
+            #     # Use the same constant speed for every train, unless it's at end-of-line
+            #     if cur in EOL:
+            #         speed_mps = 0.0
+            #     else:
+            #         speed_mps = constant_speed_mps
+            #
+            #     # Forward suggestion to the Track Controller (or stub)
+            #     self.set_suggested_speed(tid, speed_mps)
+            #
+            #     # Authority is still computed dynamically (safe stopping distance)
+            #     dest_blk = self._get_destination_block_for_train_on(cur)
+            #     authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
+            #     self.set_suggested_authority(tid, authority_m)
+
+            # --- End of optional fallback ---
+
 
             # --- authority lookahead ---
             dest_blk = self._get_destination_block_for_train_on(cur)
@@ -419,7 +487,7 @@ class TrackState:
             if ov.get("enabled", False) and "speed_mps" in ov:
                 speed_mps = float(ov["speed_mps"])
 
-            # send to stub
+            # send to stub or track controller 
             self.set_suggested_speed(tid, speed_mps)
             self.set_suggested_authority(tid, authority_m)
 
@@ -499,8 +567,8 @@ class TrackState:
         # fallback
         self._stub.seed_manual_sandbox()
         return "Meet-and-Branch loaded"
-
-
+    
+   
     @staticmethod
     # Utility: successor inside a linear chain;
     def _succ_in_chain(b: str, chain: List[str], wrap_to: Optional[str] = None) -> Optional[str]:
@@ -508,3 +576,14 @@ class TrackState:
         if i + 1 < len(chain):
             return chain[i + 1]
         return wrap_to
+
+ 
+ # Test to see if the global clock works 
+if __name__ == "__main__":
+    from time import sleep
+    print("Starting clock test...")
+    for i in range(5):
+        clock.tick()
+        print(f"Tick {i+1}: {clock}")
+        sleep(1)
+    

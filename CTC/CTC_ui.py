@@ -46,10 +46,13 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         self.greenRadio = QtWidgets.QRadioButton("Green Line")
         self.redRadio = QtWidgets.QRadioButton("Red Line")
-        self.greenRadio.toggled.connect(self._switch_line)
-        self.redRadio.toggled.connect(self._switch_line)
+        self._ui_ready = False 
+        self.greenRadio.setChecked(True)
+        
 
-        #self.greenRadio.setChecked(True)
+        
+         # temporary lock to prevent early refresh
+
         self.maintRadio = QtWidgets.QRadioButton("Maintenance Mode")
 
         spacer = QtWidgets.QWidget()
@@ -171,21 +174,29 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.maintBtn.clicked.connect(self._show_maintenance)
         self.uploadBtn.clicked.connect(self._show_upload)
 
+        self.greenRadio.toggled.connect(self._switch_line)
+        self.redRadio.toggled.connect(self._switch_line)
+        self._ui_ready = True
         # initial refresh
         self._refresh_map()
         self._refresh_trains()
 
 
     def _switch_line(self):
+        if not getattr(self, "_ui_ready", False):
+            return  # skip if UI still being constructed
         if self.greenRadio.isChecked():
-            self.backend.set_line("Green", [])
             print("[UI] Switched to Green Line")
+            # only reload if not already green
+            if self.backend.line_name.lower() != "green":
+                self.backend.set_line("Green", self.backend._lines.get("Green", []))
         elif self.redRadio.isChecked():
-            self.backend.set_line("Red", [])
             print("[UI] Switched to Red Line")
-
+            # Red not yet implemented — clear table for now
+            self.backend.set_line("Red", [])
         self._refresh_map()
         self._refresh_trains()
+
 
     # =======================================================
     # --- Periodic Tick: update clock, trains, and map ---

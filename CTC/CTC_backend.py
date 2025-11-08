@@ -3,18 +3,22 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 import math
 from universal.global_clock import clock
+import pandas as pd
+import os
+
 
 #will change this to be importing from trackControllerSW
 from .track_controller_stub import TrackControllerStub
 
-#Global Policies 
+#Global Policies
+# **Check with Green Line  
 BLOCK_LEN_M: float = 50.0
 LINE_SPEED_LIMIT_MPS: float = 13.9
 YELLOW_FACTOR: float = 0.60
 SAFETY_BLOCKS: int = 0
 CONTROL_SIGNALS = {"B6", "C11"}
 
-#Line topology 
+#Change to Green Line topology 
 A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
 B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]
 C_CHAIN = ["C11", "C12", "C13", "C14", "C15"]
@@ -38,6 +42,44 @@ class Block:
     broken_rail: bool = False
     crossing_open: bool = True   # status (True=open, False=closed) default open
 
+import pandas as pd
+import os
+
+def load_green_line_csv():
+    """Load Green Line CSV and return a list of Block objects with proper attributes."""
+    csv_path = os.path.join(os.path.dirname(__file__), "greenLine.csv")
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Missing track data file: {csv_path}")
+
+    df = pd.read_csv(csv_path)
+
+    blocks = []
+    for _, row in df.iterrows():
+        line = "Green"
+        block_id = int(row["block_id"])
+        station = str(row["station_name"]) if not pd.isna(row["station_name"]) else ""
+        type_str = str(row["Type"]).lower() if "Type" in row and not pd.isna(row["Type"]) else ""
+        crossing = type_str == "levelcrossing"
+
+        b = Block(
+            line=line,
+            block_id=block_id,
+            status="free",
+            station=station,
+            signal="",
+            switch="",
+            light="",
+            beacon="",
+            has_crossing=crossing
+        )
+        blocks.append(b)
+
+    print(f"[Backend] Loaded {len(blocks)} Green Line blocks (including {sum(b.has_crossing for b in blocks)} crossings).")
+    return blocks
+
+
+    
+
 # -------------------------
 # TrackState: CTC backend facade
 # - Owns the current line's block list
@@ -46,7 +88,7 @@ class Block:
 # - Computes policy each tick (speeds/authority) and forwards to stub
 # -------------------------
 class TrackState:
-    def __init__(self, line_name: str, line_tuples: List[Tuple]):
+    def __init__(self, line_name: str, line_tuples = None):
         self.line_name = line_name
         self._lines: Dict[str, List[Block]] = {}            #list of block object 
         self._by_key: Dict[str, Block] = {}                 #each block 
@@ -68,35 +110,44 @@ class TrackState:
         self.trainControllerSW = None
 
 
+        self.blocks = {}
+        self.trains = {}
+        self.line_name = line_name
+        self.maintenance_blocks = set()
+        self.switch_states = {}
+        self.crossings = {}
+        self.active_trains = []
+
+        if not line_tuples:
+            # Auto-load Green Line CSV if none provided
+            if line_name.lower() == "green":
+                from .CTC_backend import load_green_line_csv
+                line_tuples = load_green_line_csv()
+            else:
+                line_tuples = []
+
         self.set_line(line_name, line_tuples)
+
 
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
+        blocks: List[object] = []
 
-        # tuples are: (line, block_id, status, station, signal, switch, light, crossing, maintenance/beacon)
-        blocks: List[Block] = []
-        for t in tuples:
-            line, bid, status, station, signal, sw, light, crossing, last = t
-            has_cross = str(crossing).strip().lower() == "true"   # <-- normalize to bool
-            # 'last' in your LINE_DATA is used to mark beacons ("Beacon" or ""), so map to Block.beacon
-            blocks.append(Block(
-                line=line,
-                block_id=bid,
-                status=status,
-                station=station,
-                signal=signal,
-                switch=sw,
-                light=light,
-                has_crossing=has_cross,
-                beacon=last,            # <- keep the static beacon marker from LINE_DATA
-                broken_rail=False       # <- live value comes from snapshots
-            ))
+        for b in tuples:
+            # Use the same Block object directly
+            blocks.append(b)
+            bid = getattr(b, "block_id", "")
+            self.blocks[bid] = b  # store reference for lookup
 
         self._lines[name] = blocks
         self._rebuild_index()
-        self._stub = TrackControllerStub(name, tuples)
-        self._stub.on_status(self.apply_snapshot)
-        self._stub.tick()
+
+
+
+       
+        #self._stub = TrackControllerStub(name, tuples)
+        #self._stub.on_status(self.apply_snapshot)
+        #self._stub.tick()
 
     #Access the current line's Block objects (for tables/map rendering)
     def get_blocks(self) -> List[Block]:
@@ -546,27 +597,8 @@ class TrackState:
                 return str(t.get("desired_branch", "B")).upper()
         return "B"
     
-    #Call into the stub to set initial positions/states
-    def scenario_load(self, name: str) -> str:
-        if not self._stub:
-            return "no-stub"
-        name = (name or "").strip()
-        
-        if name == "Meet-and-Branch":
-            self._stub.seed_meet_and_branch()
-            return "Meet-and-Branch loaded"
-        if name == "Maintenance Detour":
-            self._stub.seed_maintenance_detour()
-            return "Maintenance Detour loaded"
-        if name == "Broken Rail":
-            self._stub.seed_broken_rail()
-            return "Broken Rail loaded"
-        if name == "Crossing Gate Demo":
-            self._stub.seed_crossing_demo()
-            return "Crossing Gate Demo loaded"
-        # fallback
-        self._stub.seed_manual_sandbox()
-        return "Meet-and-Branch loaded"
+    #REMOVED SCENARIO_LOAD
+
     
    
     @staticmethod
@@ -586,4 +618,9 @@ if __name__ == "__main__":
         clock.tick()
         print(f"Tick {i+1}: {clock}")
         sleep(1)
+
+if __name__ == "__main__":
+    blocks = load_green_line_csv()
+    print(f"First 5 blocks: {blocks[:5]}")
+
     

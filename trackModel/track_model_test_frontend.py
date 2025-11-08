@@ -32,14 +32,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
+
 #TODO: #60 add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
-    def __init__(self):
+    def __init__(self, network=None):
         super().__init__()
-        self.track_network = TrackNetwork()
+        self.track_network = network if network is not None else TrackNetwork()
         self.updating_temperature = False  # Flag to prevent recursive updates
         self.init_ui()
-        self.load_track_layout()  # Load CSV on startup
+        if not network:
+            self.load_track_layout() # Load CSV on startup
+        else:
+            self.status_display.append("Loading track layout from given TrackNetwork argument...\n")
+            self.refresh_status()  # Load existing network status
+            self.status_display.append("Track layout loaded successfully!\n")
         
     def init_ui(self):
         self.setWindowTitle("Track Model - Test Network Status")
@@ -467,6 +473,17 @@ class NetworkStatusUI(QWidget):
                 authority_yards
             )
             
+            # Determine block_id from selected segment dropdowns (edit or general)
+            selected_segment = self.edit_segment_dropdown.currentText() or self.segment_dropdown.currentText()
+            if not selected_segment:
+                self.status_display.append("Error: No segment selected for broadcasting train command")
+                return
+            try:
+                block_id = int(selected_segment)
+            except (ValueError, TypeError):
+                self.status_display.append(f"Error: Invalid segment id '{selected_segment}'")
+                return
+
             # Call the backend method with speed in m/s and authority in meters
             self.track_network.broadcast_train_command(
                 block_id, commanded_speed_mps, authority_meters

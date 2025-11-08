@@ -151,7 +151,7 @@ class TrackControllerUI(QWidget):
             line_block_map = {
                 "Blue Line": range(1, 16),
                 "Green Line": list(range(1, 63)) + list(range(122, 151)), # A through J, W through Z
-                "Red Line": range(1, 45), # A through first half of H
+                "Red Line": range(1, 34), # A through first half of H
             }
             block_ids = line_block_map.get(self.backend.line_name, [])
             self.tablemain.setRowCount(len(block_ids))
@@ -173,7 +173,7 @@ class TrackControllerUI(QWidget):
                 self._set_table_item(self.tablemain, i, 2, str(data.get("suggested_auth", "N/A")), editable=False)
 
                 # occupancy
-                occ_val = data.get("occupied", "N/A")
+                occ_val = data.get("occupied")
                 if occ_val == "N/A":
                     occ_text = "N/A"
                 else:
@@ -181,13 +181,13 @@ class TrackControllerUI(QWidget):
                 self._set_table_item(self.tablemain, i, 3, occ_text, editable=False)
 
                 # commanded speed/auth
-                cmd_speed = data.get("commanded_speed", "N/A")
-                cmd_auth = data.get("commanded_auth", "N/A")
+                cmd_speed = data.get("commanded_speed")
+                cmd_auth = data.get("commanded_auth")
                 self._set_table_item(self.tablemain, i, 4, str(cmd_speed), editable=False)
                 self._set_table_item(self.tablemain, i, 5, str(cmd_auth), editable=False)
 
                 # signal state
-                sig = data.get("signal", "N/A")
+                sig = data.get("signal")
                 if isinstance(sig, SignalState):
                     sig_text = sig.name.title()
                 else:
@@ -327,3 +327,5 @@ class TrackControllerUI(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
             self.refresh_tables()
+
+# add clock clock ui location

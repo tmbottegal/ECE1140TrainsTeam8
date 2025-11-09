@@ -101,10 +101,12 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.infoBtn   = QtWidgets.QPushButton("Train Information")
         self.uploadBtn = QtWidgets.QPushButton("Upload Schedule")
         self.maintBtn  = QtWidgets.QPushButton("Maintenance / Inputs")
+        self.dispatchBtn = QtWidgets.QPushButton("Dispatch Train")
         for b in (self.manualBtn, self.infoBtn, self.uploadBtn, self.maintBtn):
             b.setMinimumHeight(40)
             b.setStyleSheet("font-size:14px; font-weight:bold;")
         btnRow = QtWidgets.QHBoxLayout()
+        btnRow.addWidget(self.dispatchBtn)
         btnRow.addWidget(self.manualBtn)
         btnRow.addWidget(self.infoBtn)
         btnRow.addWidget(self.uploadBtn)
@@ -496,6 +498,10 @@ class CTCWindow(QtWidgets.QMainWindow):
         # Notify the backend
         if hasattr(self, "state"):
             self.state.set_mode(self.mode)
+
+        # update dispatch button availability
+        if hasattr(self, "dispatchBtn"):
+            self.dispatchBtn.setEnabled(self.mode == "manual")
         print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
 
     # ---------- actions (Occupancy tab) ----------
@@ -511,6 +517,50 @@ class CTCWindow(QtWidgets.QMainWindow):
             status = "closed" if "Closed" in choice else "free"
             self.state.set_status(block_id, status)
             self._reload_line(self.state.line_name)
+
+    def _dispatch_train(self):
+        # Must be in manual mode
+        if self.mode != "manual":
+            QtWidgets.QMessageBox.warning(self, "Mode Error", "Switch to Manual Mode to dispatch a train.")
+            return
+
+        # Ask for station + arrival time
+        station, ok1 = QtWidgets.QInputDialog.getItem(
+            self, "Dispatch Train", "Select destination station:",
+            ["Edgebrook", "Station B", "Station C"], 0, False
+        )
+        if not ok1:
+            return
+
+        arrival_str, ok2 = QtWidgets.QInputDialog.getText(
+            self, "Dispatch Train", f"Enter desired arrival time at {station} (HH:MM):"
+        )
+        if not ok2 or not arrival_str:
+            return
+
+        # Convert arrival time into a datetime for calculation
+        from datetime import datetime, timedelta
+        try:
+            arrival_time = datetime.strptime(arrival_str, "%H:%M")
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self, "Invalid Time", "Please enter time as HH:MM.")
+            return
+
+        # Assume the train departs from YARD block and average speed from your backend (m/s)
+        avg_speed_mps = 10  # placeholder, you can use your track constants
+        distance_m = 1000   # distance YARD → station (placeholder, update for real Green Line)
+        travel_time = timedelta(seconds=(distance_m / avg_speed_mps))
+        departure_time = arrival_time - travel_time
+
+        QtWidgets.QMessageBox.information(
+            self, "Dispatch Train",
+            f"Train will depart YARD at {departure_time.strftime('%H:%M')} "
+            f"to arrive at {station} by {arrival_time.strftime('%H:%M')}."
+        )
+
+        # Add the train to backend
+        self.state.add_train("T1", "YARD")
+        self.state.set_train_destination("T1", station)
 
     # ---------- Manual Override ---------- MUST REV 
     def _manual_override(self):

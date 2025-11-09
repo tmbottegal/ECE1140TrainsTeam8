@@ -264,6 +264,7 @@ class TrackState:
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
         self.track_model = TrackNetwork()
+        self.mode = "auto"  # default mode
         clock.register_listener(self.track_model.set_time)
         #will add for other modules later 
         self._lines: Dict[str, List[Block]] = {}            #list of block object 
@@ -276,6 +277,14 @@ class TrackState:
 
         self.set_line(line_name, line_tuples)
 
+    def set_mode(self, mode: str):
+        """Update CTC mode between 'manual' and 'auto'."""
+        mode = mode.lower()
+        if mode not in ("manual", "auto"):
+            raise ValueError(f"Invalid mode '{mode}'")
+        self.mode = mode
+        print(f"[CTC Backend] Mode set to {mode.upper()}")
+    
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
 

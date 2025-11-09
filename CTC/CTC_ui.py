@@ -24,6 +24,35 @@ class CTCWindow(QtWidgets.QMainWindow):
         cw = QtWidgets.QWidget(self)
         self.setCentralWidget(cw)
 
+                # === Mode toggle toolbar (Manual / Auto) ===
+        self.mode = "auto"  # default
+
+        toolbar = QtWidgets.QToolBar("Mode Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setStyleSheet("QToolBar { spacing: 10px; }")
+
+        self.mode_label = QtWidgets.QLabel("Mode:")
+        self.mode_label.setStyleSheet("font-weight: bold; font-size: 14pt;")
+
+        self.mode_toggle_button = QtWidgets.QPushButton("Auto Mode")
+        self.mode_toggle_button.setCheckable(True)
+        self.mode_toggle_button.setChecked(False)
+        self.mode_toggle_button.setStyleSheet("background-color: lightblue; font-weight: bold;")
+
+        self.mode_toggle_button.toggled.connect(self.toggle_mode)
+
+        toolbar.addWidget(self.mode_label)
+        toolbar.addWidget(self.mode_toggle_button)
+        toolbar.addSeparator()
+
+        # add the toolbar to the top of the main window
+        self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, toolbar)
+
+
+            
+
+
+
         # === Backend state ===
         self.state = TrackState("Green Line", GREEN_LINE_DATA)
         self._trainInfoPage = None
@@ -453,6 +482,21 @@ class CTCWindow(QtWidgets.QMainWindow):
         sec = self.mapTable.item(row, 0).text()
         blk = self.mapTable.item(row, 1).text()
         return row, f"{sec}{blk}"
+
+    def toggle_mode(self, enabled: bool):
+        if enabled:
+            self.mode = "manual"
+            self.mode_toggle_button.setText("Manual Mode (Active)")
+            self.mode_toggle_button.setStyleSheet("background-color: lightgreen; font-weight: bold;")
+        else:
+            self.mode = "auto"
+            self.mode_toggle_button.setText("Auto Mode (Active)")
+            self.mode_toggle_button.setStyleSheet("background-color: lightblue; font-weight: bold;")
+
+        # Notify the backend
+        if hasattr(self, "state"):
+            self.state.set_mode(self.mode)
+        print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
 
     # ---------- actions (Occupancy tab) ----------
     def _maintenance_inputs(self):

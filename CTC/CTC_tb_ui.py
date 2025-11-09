@@ -1,11 +1,13 @@
 # CTC_tb_ui.py
 from PyQt6 import QtWidgets, QtCore, QtGui
 from .CTC_backend import TrackState
+from universal.global_clock import clock
+
 
 # Keep UI-side constants in sync with backend policy for display/convert
 BLOCK_LEN_M = 50.0          # meters per block (demo line)
 MPS_TO_MPH  = 2.23693629
-SCENARIOS = ["Meet-and-Branch", "Maintenance Detour", "Broken Rail", "Crossing Gate Demo"]
+SCENARIOS = ["Manual Sandbox", "Meet-and-Branch", "Maintenance Detour", "Broken Rail", "Crossing Gate Demo"]
 
 LINE_DATA = {
     "Blue Line": [
@@ -78,6 +80,11 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line("Blue Line")
         occLayout.addWidget(self.mapTable)
 
+        
+
+       
+
+
         # Buttons under the table
         self.manualBtn = QtWidgets.QPushButton("Manual Override")
         self.infoBtn   = QtWidgets.QPushButton("Train Information")
@@ -136,7 +143,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         testLayout.addLayout(scenRow)
 
         # short description under the row
-        self.scenarioDesc = QtWidgets.QLabel("Meet-and-Branch: T1→B, T2→C. SW1 AUTO lines by approach.")
+        self.scenarioDesc = QtWidgets.QLabel("Manual Sandbox: no trains spawn; nothing moves until Run/Step.")
         self.scenarioDesc.setStyleSheet("color:#888;")
         testLayout.addWidget(self.scenarioDesc)
 
@@ -238,27 +245,6 @@ class CTCWindow(QtWidgets.QMainWindow):
         applyXBtn.clicked.connect(self._apply_crossing_tools)
         testLayout.addWidget(xGroup)
 
-                # ---- CTC → TC Policy (live) ----
-        policyGroup = QtWidgets.QGroupBox("CTC → TC Policy (live)")
-        pl = QtWidgets.QVBoxLayout(policyGroup)
-
-        self.policyTable = QtWidgets.QTableWidget(0, 4)
-        self.policyTable.setHorizontalHeaderLabels(
-            ["Train ID", "Suggested Speed (mph)", "Authority (m)", "Destination"]
-        )
-        self.policyTable.verticalHeader().setVisible(False)
-        self.policyTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.policyTable.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        pl.addWidget(self.policyTable)
-
-        # optional: a tiny hint
-        hint2 = QtWidgets.QLabel("Values are computed by CTC each tick and sent to the stub.")
-        hint2.setStyleSheet("color:#888;")
-        pl.addWidget(hint2)
-
-        testLayout.addWidget(policyGroup)
-
-
 
         testLayout.addStretch(1)
         # ---- Reset / Control tools ----
@@ -303,6 +289,11 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(issuesTab, "Issues")
 
         layout = QtWidgets.QVBoxLayout(cw)
+
+        self.clockLabel = QtWidgets.QLabel(f"Time: {clock}")
+        self.clockLabel.setStyleSheet("font-weight:bold; font-size:14px;")
+        layout.addWidget(self.clockLabel)
+
         layout.addWidget(QtWidgets.QLabel("MAP"))
         layout.addWidget(self.tabs, stretch=2)
 
@@ -347,6 +338,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line(self.state.line_name)
         # description
         desc = {
+            "Manual Sandbox": "No trains. Add trains or use tools. Nothing moves until Run/Step.",
             "Meet-and-Branch": "T1→B, T2→C. SW1 AUTO lines by approach.",
             "Maintenance Detour": "B7 closed initially; reopen to proceed.",
             "Broken Rail": "When near C11, inject broken rail on C12; train must stop before fault.",
@@ -376,8 +368,8 @@ class CTCWindow(QtWidgets.QMainWindow):
     def _scenario_reset(self):
         self.state.reset_all()
         self._reload_line(self.state.line_name)
-        self.scenarioCombo.setCurrentText("Meet-and-Branch")
-        self.scenarioDesc.setText("Meet-and-Branch: T1→B, T2→C. SW1 AUTO lines by approach.")
+        self.scenarioCombo.setCurrentText("Manual Sandbox")
+        self.scenarioDesc.setText("Manual Sandbox: no trains spawn; nothing moves until Run/Step.")
 
     def _refresh_block_combo(self, preserve: bool = False):
         if not hasattr(self, "blockCombo"):
@@ -463,17 +455,6 @@ class CTCWindow(QtWidgets.QMainWindow):
             self._populate_train_info_table()
         if self._manualPage and self.actionArea.currentWidget() is self._manualPage:
             self._populate_manual_table()
-
-                # If Train Info / Manual pages are open, refresh them too
-        if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
-            self._populate_train_info_table()
-        if self._manualPage and self.actionArea.currentWidget() is self._manualPage:
-            self._populate_manual_table()
-
-        # Update the live policy panel
-        if hasattr(self, "policyTable"):
-            self._refresh_policy_view()
-
 
     def _get_selected_block(self):
         row = self.mapTable.currentRow()
@@ -601,24 +582,6 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.actionArea.addWidget(page)
         self.actionArea.setCurrentWidget(page)
         self._populate_train_info_table()
-    
-    def _refresh_policy_view(self):
-        """Populate the live CTC→TC policy table from the current snapshot."""
-        trains = self.state.get_trains()
-        self.policyTable.setRowCount(len(trains))
-        for r, t in enumerate(trains):
-            tid = str(t.get("train_id", ""))
-            spd_mps = float(t.get("suggested_speed_mps", 0.0))
-            mph = spd_mps * MPS_TO_MPH
-            auth_blocks = int(t.get("authority_blocks", 0))
-            auth_m = int(auth_blocks * BLOCK_LEN_M)
-            dest = str(t.get("desired_branch", ""))
-
-            self.policyTable.setItem(r, 0, QtWidgets.QTableWidgetItem(tid))
-            self.policyTable.setItem(r, 1, QtWidgets.QTableWidgetItem(f"{mph:.1f}"))
-            self.policyTable.setItem(r, 2, QtWidgets.QTableWidgetItem(str(auth_m)))
-            self.policyTable.setItem(r, 3, QtWidgets.QTableWidgetItem(dest))
-
 
     def _populate_train_info_table(self):
         trains = self.state.get_trains()
@@ -639,70 +602,35 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.trainInfoTable.setItem(r, 4, QtWidgets.QTableWidgetItem(branch))
             self.trainInfoTable.setItem(r, 5, QtWidgets.QTableWidgetItem(str(auth_blocks)))
 
-    # ---------- Upload schedule (minimal excel: train_id,start_block[,authority_m]) ----------
+    # ---------- Upload schedule (minimal CSV: train_id,start_block[,authority_m]) ----------
     def _upload_schedule(self):
         fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Upload Route Schedule (CSV)", "", "CSV Files (*.csv)"
+            self, "Upload Schedule", "", "CSV Files (*.csv)"
         )
         if not fname:
             return
 
-        rows = []
+        imported = 0
         try:
             with open(fname, "r", encoding="utf-8") as f:
-                first = True
-                for raw in f:
-                    line = raw.strip()
-                    if not line:
+                for line in f:
+                    parts = [p.strip() for p in line.split(",") if p.strip() != ""]
+                    if len(parts) < 2:
                         continue
-                    parts = [p.strip() for p in line.split(",")]
-                    if first:
-                        first = False
-                        # expect header: train_id,start_time_s,origin,destination
-                        header = [p.lower() for p in parts]
-                        required = ["train_id", "start_time_s", "origin", "destination"]
-                        if any(col not in header for col in required):
-                            QtWidgets.QMessageBox.warning(
-                                self, "Schedule Upload",
-                                "CSV must include header: train_id,start_time_s,origin,destination"
-                            )
-                            return
-                        # build column indices
-                        idx = {name: header.index(name) for name in required}
-                        continue
-
-                    # map columns by header index
-                    try:
-                        tid  = str(parts[idx["train_id"]]).strip()
-                        t_s  = int(parts[idx["start_time_s"]])
-                        orig = str(parts[idx["origin"]]).strip()
-                        dest = str(parts[idx["destination"]]).strip()
-                    except Exception:
-                        continue  # skip malformed rows
-
-                    if not tid or orig == "" or dest == "":
-                        continue
-                    rows.append((tid, t_s, orig, dest))
+                    tid, start = parts[0], parts[1]
+                    self.state.add_train(tid, start)
+                    if len(parts) >= 3:
+                        try:
+                            meters = float(parts[2])
+                            self.state.set_suggested_authority(tid, meters)
+                        except Exception:
+                            pass
+                    imported += 1
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to read CSV: {e}")
+            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to load: {e}")
             return
 
-        if not rows:
-            QtWidgets.QMessageBox.information(self, "Schedule", "No valid rows found.")
-            return
-
-        try:
-            accepted = self.state.load_route_schedule(rows)
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Schedule Upload", f"Failed to load schedule: {e}")
-            return
-
-        QtWidgets.QMessageBox.information(
-            self, "Schedule Uploaded",
-            f"Loaded {accepted} route row(s).\n"
-            f"Press Run to start the schedule clock; Pause will pause spawns."
-        )
-
+        QtWidgets.QMessageBox.information(self, "Schedule Uploaded", f"Loaded {imported} train(s).")
 
     # ---------- Test Bench actions ----------
     def _apply_block_tools(self):
@@ -770,6 +698,9 @@ class CTCWindow(QtWidgets.QMainWindow):
     def _tick(self):
         self.state.stub_tick()
         self._reload_line(self.state.line_name)
+        self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
+
+
 
 
 if __name__ == "__main__":

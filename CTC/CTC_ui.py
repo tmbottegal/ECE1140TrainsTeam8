@@ -290,14 +290,71 @@ class CTCWindow(QtWidgets.QMainWindow):
     # =======================================================
     # --- Subpages ---
     # =======================================================
+        # =======================================================
+    # --- Dispatch Train Subpage ---
+    # =======================================================
     def _show_dispatch(self):
         page = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(page)
-        layout.addWidget(QtWidgets.QLabel("Dispatch Train"))
-        # TODO: add dropdowns for route / block / dispatch time
-        layout.addStretch()
+        layout = QtWidgets.QFormLayout(page)
+        layout.addRow(QtWidgets.QLabel("<b>Dispatch New Train</b>"))
+
+        # --- Train ID Entry ---
+        self.trainIDEntry = QtWidgets.QLineEdit("Train_1")
+        layout.addRow("Train ID:", self.trainIDEntry)
+
+        # --- Destination Dropdown ---
+        self.destCombo = QtWidgets.QComboBox()
+        # Preload known stations (you can add more later)
+        self.destCombo.addItems([
+            "Edgebrook", "Whited", "Central", "Inglewood", "Overbrook"
+        ])
+        layout.addRow("Destination:", self.destCombo)
+
+        # --- Arrival Time Picker ---
+        self.arrivalTime = QtWidgets.QTimeEdit(QtCore.QTime.currentTime())
+        self.arrivalTime.setDisplayFormat("hh:mm AP")
+        layout.addRow("Planned Arrival Time:", self.arrivalTime)
+
+        # --- Dispatch Button ---
+        dispatchBtn = QtWidgets.QPushButton("Dispatch Train")
+        dispatchBtn.setStyleSheet("font-weight:bold; font-size:14px;")
+        layout.addRow(dispatchBtn)
+
+        dispatchBtn.clicked.connect(self._dispatch_train)
+
         self.subStack.addWidget(page)
         self.subStack.setCurrentWidget(page)
+
+
+    # =======================================================
+    # --- Dispatch Handler ---
+    # =======================================================
+    def _dispatch_train(self):
+        """Spawn a new train from Yard (block 0) toward selected destination."""
+        tid = self.trainIDEntry.text().strip()
+        dest = self.destCombo.currentText().strip()
+        arrival_time = self.arrivalTime.time().toString("hh:mm AP")
+
+        if not tid:
+            QtWidgets.QMessageBox.warning(self, "Dispatch Error", "Train ID cannot be empty.")
+            return
+
+        try:
+            # Always start at Yard (block 0)
+            self.backend.add_train(tid, "0")
+
+            QtWidgets.QMessageBox.information(
+                self, "Train Dispatched",
+                f"Train {tid} dispatched from Yard to {dest}\n"
+                f"Planned arrival: {arrival_time}"
+            )
+
+            self._refresh_trains()
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Dispatch Error", f"Failed to dispatch train:\n{e}"
+            )
+
 
     def _show_select(self):
         page = QtWidgets.QWidget()

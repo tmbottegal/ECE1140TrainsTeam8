@@ -24,9 +24,21 @@ class TrackControllerStub:
 
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
+        self.track_state: Dict[Tuple[str, str], Dict[str, object]] = {}
+
 
         # Metadata from layout
         self._order: List[str] = []
+        # If line uses numeric blocks (Green/Red lines), generate numeric keys
+        if not self._order:
+            # Assume numeric blocks 1–151 for Green, 1–76 for Red
+            if "green" in self.line_name.lower():
+                self._order = [str(i) for i in range(0, 152)]
+            elif "red" in self.line_name.lower():
+                self._order = [str(i) for i in range(0, 77)]
+
+                self.track_state = {}
+
         self._station: Dict[str, str] = {}
         self._track_status: Dict[str, str] = {}
         self._switch_of_block: Dict[str, str] = {}
@@ -41,14 +53,32 @@ class TrackControllerStub:
 
 
         for t in line_tuples:
-            sec, bid, status, station, track_status, sw, light, crossing, maintenance = t
-            key = f"{sec}{bid}"
-            self._order.append(key)
-            self._station[key] = station or ""
-            self._track_status[key] = track_status or "Open"
-            self._switch_of_block[key] = sw or ""
-            self._has_crossing[key] = (str(crossing).strip().lower() == "true")
-            self._beacon[key] = maintenance or ""
+            # --- Support both legacy tuple input and new Block object input ---
+            if hasattr(t, "block_id"):
+                # New-style Block object
+                sec = getattr(t, "name", "")
+                bid = getattr(t, "block_id", "")
+                status = getattr(t, "status", "free")
+                station = getattr(t, "station", "")
+                track_status = getattr(t, "status", "free")
+                sw = getattr(t, "switch", "")
+                light = getattr(t, "light", "")
+                crossing = getattr(t, "crossing", False)
+                maintenance = getattr(t, "beacon", "")
+            else:
+                # Legacy tuple input
+                sec, bid, status, station, track_status, sw, light, crossing, maintenance = t
+
+            self.track_state[(sec, bid)] = {
+                "status": status,
+                "station": station,
+                "track_status": track_status,
+                "switch": sw,
+                "light": light,
+                "crossing": crossing,
+                "maintenance": maintenance
+            }
+
 
         # --- Explicit topology (A → B or A → C only) ---
         self._a_chain = ["A1", "A2", "A3", "A4", "A5"]
@@ -58,6 +88,8 @@ class TrackControllerStub:
 
         # Dynamic state
         self._occupancy: Dict[str, str] = {k: "free" for k in self._order}
+        print(f"[Stub] Order keys = {self._order[:10]}")
+
         # Only create signal state for the actual controlled signal blocks
         self._signals: Dict[str, str] = {b: "GREEN" for b in CONTROL_SIGNALS}
 
@@ -71,6 +103,7 @@ class TrackControllerStub:
 
         # Trains start at Yard side; each has a desired branch (used only by auto-line)
         self._trains: Dict[str, Dict[str, object]] = {}
+
         self._recompute_occupancy()
 
         self._status_cb: Optional[Callable[[Snapshot], None]] = None
@@ -209,17 +242,22 @@ class TrackControllerStub:
 
         # change your add_train to accept a branch and store it
     def add_train(self, tid: str, start_block: str, desired_branch: str = "B"):
+        start_block = str(start_block)
         if tid in self._trains or start_block not in self._occupancy or self._occupancy[start_block] != "free":
+            print(f"[Stub] Train {tid} could not be added — occupancy key mismatch or already taken.")
             return
         self._trains[tid] = {
             "block": start_block,
             "speed_mps": 0.0,
             "authority_blocks": 0,
-            "desired_branch": desired_branch,   # <-- store it
+            "desired_branch": desired_branch,
         }
         self._occupancy[start_block] = "occupied"
+        print(f"[Stub] Added train {tid} at block {start_block}")
         self._emit("train_pos", train_id=tid, value={"block": start_block})
         self._recompute_signals()
+        self.broadcast()
+
 
 
     # NEW: enable/disable automatic lining of SW1
@@ -298,6 +336,7 @@ class TrackControllerStub:
         self.reset_trains()
     def broadcast(self) -> None:
         """Send a snapshot without advancing simulation."""
+        print(f"[Stub] broadcasting snapshot with trains={list(self._trains.keys())}")
         if self._status_cb:
             self._status_cb(self._make_snapshot())
     
@@ -556,29 +595,26 @@ class TrackControllerStub:
         blocks_payload: List[Dict[str, object]] = []
 
         for b in self._order:
-            sec, num = b[0], int(b[1:])
+            # Handle either "A1"/"B6" style or pure numeric like "1"
+            if b.isdigit():
+                sec, num = "", int(b)
+            else:
+                sec, num = b[0], int(b[1:]) if len(b) > 1 else 0
 
             blocks_payload.append({
                 "key": b,
                 "section": sec,
                 "block_id": num,
-
-                # Use .get() with defaults to avoid KeyError during early init
                 "occupancy": self._occupancy.get(b, "free"),
-                "station":   self._station.get(b, ""),
-
-                # Only B6/C11 exist in self._signals; others will resolve to ""
-                "signal":    self._signals.get(b, ""),
-
-                # Metadata from static maps
-                "switch":    self._switch_of_block.get(b, ""),
-
-                # Crossings and faults
-                "crossing_open": self._crossing_effective_open(b) if self._has_crossing.get(b, False) else None,
-
-                "beacon":        self._beacon.get(b, ""),
-                "broken_rail":   bool(self._broken_rail.get(b, False)),
+                "station": self._station.get(b, ""),
+                "signal": self._signals.get(b, ""),
+                "switch": self._switch_of_block.get(b, ""),
+                "crossing_open": self._crossing_effective_open(b)
+                    if self._has_crossing.get(b, False) else None,
+                "beacon": self._beacon.get(b, ""),
+                "broken_rail": bool(self._broken_rail.get(b, False)),
             })
+
 
         # (Optional) include trains snapshot if your UI expects it
        # (Optional) include trains snapshot...

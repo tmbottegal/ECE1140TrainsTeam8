@@ -145,9 +145,10 @@ class TrackState:
 
 
        
-        #self._stub = TrackControllerStub(name, tuples)
-        #self._stub.on_status(self.apply_snapshot)
-        #self._stub.tick()
+        self._stub = TrackControllerStub(name, tuples)
+        self._stub.on_status(self.apply_snapshot)
+        self._stub.tick()
+        print(f"[CTC Backend] TrackControllerStub connected for {name} line.")
 
     #Access the current line's Block objects (for tables/map rendering)
     def get_blocks(self) -> List[Block]:
@@ -211,8 +212,14 @@ class TrackState:
 
     #add train at a starting block ****
     def add_train(self, train_id: str, start_block: str):
+        """Add a new train at a given block."""
         if self._stub:
-            self._stub.add_train(train_id, start_block)
+            print(f"[CTC Backend] Adding train {train_id} at block {start_block}")
+            self._stub.add_train(train_id, str(start_block))
+
+        else:
+            print("[CTC Backend] Warning: no stub connected.")
+
 
     #enable/disable stubs automatic line movement ***
     def set_auto_line(self, enabled: bool):

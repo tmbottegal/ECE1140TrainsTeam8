@@ -341,7 +341,8 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         try:
             # Always start at Yard (block 0)
-            self.backend.add_train(tid, "0")
+            self.backend.add_train(tid, "0", dest)
+
 
             QtWidgets.QMessageBox.information(
                 self, "Train Dispatched",

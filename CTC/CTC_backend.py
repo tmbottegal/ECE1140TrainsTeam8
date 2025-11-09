@@ -42,11 +42,10 @@ class Block:
     broken_rail: bool = False
     crossing_open: bool = True   # status (True=open, False=closed) default open
 
-import pandas as pd
-import os
 
+"""Load Green Line CSV and return a list of Block objects with proper attributes."""
 def load_green_line_csv():
-    """Load Green Line CSV and return a list of Block objects with proper attributes."""
+    
     csv_path = os.path.join(os.path.dirname(__file__), "greenLine.csv")
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Missing track data file: {csv_path}")
@@ -77,9 +76,6 @@ def load_green_line_csv():
     print(f"[Backend] Loaded {len(blocks)} Green Line blocks (including {sum(b.has_crossing for b in blocks)} crossings).")
     return blocks
 
-
-    
-
 # -------------------------
 # TrackState: CTC backend facade
 # - Owns the current line's block list
@@ -88,20 +84,22 @@ def load_green_line_csv():
 # - Computes policy each tick (speeds/authority) and forwards to stub
 # -------------------------
 class TrackState:
+
     def __init__(self, line_name: str, line_tuples = None):
         self.line_name = line_name
-        self._lines: Dict[str, List[Block]] = {}            #list of block object 
-        self._by_key: Dict[str, Block] = {}                 #each block 
+        self._lines: Dict[str, List[Block]] = {}            # {line_name: [Block, ...]}
+        self._by_key: Dict[str, Block] = {}                 # {“GreenA1”: Block}
         self._stub: Optional[TrackControllerStub] = None    #sim peer 
 
-        self._last_snapshot: Dict[str, object] = {}
-        self._overrides: Dict[str, Dict[str, object]] = {}
-        self._oneshot_auth: Dict[str, int] = {}              # <-- NEW: on
+        self._last_snapshot: Dict[str, object] = {}         # latest snapshot from stub
+        self._overrides: Dict[str, Dict[str, object]] = {}  # manual overrides from UI
+        self._oneshot_auth: Dict[str, int] = {}             # temporary (1-tick) authorities
                 # ---- Route schedule (Excel-driven) ----
         self._route_schedule: List[Dict[str, object]] = []  # rows: {tid,t,start_block,branch,dest_block,spawned}
         self._schedule_clock_s: int = 0
-        self._dest_by_tid: Dict[str, str] = {}  # tid -> destination block key (e.g., "B10", "A1")
+        self._dest_by_tid: Dict[str, str] = {}              # maps train_id → destination block
 
+        # References to external subsystems 
         self.trackModel = None
         self.trainModel = None
         self.trackControllerHW = None
@@ -109,7 +107,7 @@ class TrackState:
         self.trainControllerHW = None
         self.trainControllerSW = None
 
-
+        #CTC-internal copies of infrastructure state:
         self.blocks = {}
         self.trains = {}
         self.line_name = line_name
@@ -118,6 +116,7 @@ class TrackState:
         self.crossings = {}
         self.active_trains = []
 
+        #If no topology is provided, automatically loads the Green Line CSV and then calls set_line().
         if not line_tuples:
             # Auto-load Green Line CSV if none provided
             if line_name.lower() == "green":
@@ -128,33 +127,42 @@ class TrackState:
 
         self.set_line(line_name, line_tuples)
 
-
+    #Connects your CTC backend to a line and initializes the stub.
     def set_line(self, name: str, tuples: List[Tuple]):
+
         self.line_name = name
         blocks: List[object] = []
 
+        # Register all blocks for this line
         for b in tuples:
             # Use the same Block object directly
             blocks.append(b)
             bid = getattr(b, "block_id", "")
             self.blocks[bid] = b  # store reference for lookup
 
+        # Store + build fast lookup
         self._lines[name] = blocks
         self._rebuild_index()
 
-
-
-       
+        # Create stub simulator (acts like Track Controller)
         self._stub = TrackControllerStub(name, tuples)
+
+         # Connect stub callbacks → apply_snapshot()
         self._stub.on_status(self.apply_snapshot)
-        self._stub.tick()
+        self._stub.on_broadcast(self.apply_snapshot)
+
+        print(f"[Backend DEBUG] Connected stub broadcast → apply_snapshot")
+
+        # Get initial snapshot to fill UI tables
+        self._stub.broadcast()
+
         print(f"[CTC Backend] TrackControllerStub connected for {name} line.")
 
-    #Access the current line's Block objects (for tables/map rendering)
+    #Return list of all Block objects for current line (used for UI tables).
     def get_blocks(self) -> List[Block]:
         return self._lines.get(self.line_name, [])
 
-    #Block lookup 
+    #Create key→Block lookup map (e.g. 'GreenA1' → Block).
     def _rebuild_index(self):
         self._by_key.clear()
         for b in self.get_blocks():
@@ -162,8 +170,6 @@ class TrackState:
             self._by_key[key] = b
 
     # ----- UI -> backend (forward to stub) -----
-    #Mark/unmark a block under maintainace closed or setting it back 
-
     def unlock_switches(self) -> None:
         if self._stub:
             self._stub.unlock_switches()
@@ -178,8 +184,6 @@ class TrackState:
         is_closed = (str(status).lower() == "closed")
         self._stub.set_block_maintenance(block_id, is_closed)
 
-    #Set the speed of the train 
-    #CTC's op to train controller via stub 
     def set_suggested_speed(self, tid: str, mps: float):
         if self._stub:
             self._stub.set_suggested_speed(tid, mps)
@@ -190,6 +194,7 @@ class TrackState:
         print(f"[CTC] set_suggested_authority: {tid} → {meters:.1f}m = {blocks} blocks")
         if self._stub:
             self._stub.set_suggested_authority(tid, blocks)
+
     def set_crossing_override(self, block_id: str, state: Optional[bool]) -> None:
             """
             state:
@@ -200,7 +205,6 @@ class TrackState:
             if self._stub:
                 self._stub.set_crossing_override(block_id, state)
    
-    
     #Move a switch if indicated by stub 
     def set_switch(self, switch_id: str, position: str):
         if self._stub:
@@ -211,15 +215,13 @@ class TrackState:
             self._stub.set_broken_rail(block_key, broken)
 
     #add train at a starting block ****
-    def add_train(self, train_id: str, start_block: str):
-        """Add a new train at a given block."""
+    def add_train(self, train_id: str, start_block: str, destination: str = ""):
+        """Add a new train at a given block with optional destination."""
         if self._stub:
-            print(f"[CTC Backend] Adding train {train_id} at block {start_block}")
-            self._stub.add_train(train_id, str(start_block))
-
+            print(f"[CTC Backend] Adding train {train_id} at block {start_block}, dest={destination}")
+            self._stub.add_train(train_id, str(start_block), desired_branch=destination)
         else:
             print("[CTC Backend] Warning: no stub connected.")
-
 
     #enable/disable stubs automatic line movement ***
     def set_auto_line(self, enabled: bool):
@@ -246,6 +248,11 @@ class TrackState:
         self._policy_tick()
 
         # ---------- Schedule: load/clear (route-based) ----------
+    
+    #Handles excel uploads 
+    """Converts rows into structured dicts with train_id, start_block, dest_block, etc.
+        Sorts by start time.
+        Resets the simulation clock for schedules."""
     def load_route_schedule(self, rows: List[Tuple[str, int, str, str]]) -> int:
         """
         rows: list of (train_id, start_time_s, origin, destination)
@@ -299,7 +306,7 @@ class TrackState:
     # Per-train manual override from UI. Converts meters→blocks and forwards to stub.
     #*****
     # CTC_backend.py  (inside TrackState)
-
+    #Stores temporary or persistent train overrides (manual speed, authority).
     def set_train_override(
         self,
         tid: str,
@@ -334,7 +341,11 @@ class TrackState:
             self._oneshot_auth[tid] = blocks
 
 
-    #snapshot appl 
+    #Receives a live snapshot from the stub (all block & train states)
+    #and updates the backend’s Block objects for the UI tables. 
+    """Updates occupancy (“free”, “occupied”, “closed”)
+        Syncs signal lights, switches, broken rails, and beacons
+        Updates crossing status for blocks that have crossings"""
     def apply_snapshot(self, snapshot: Dict[str, object]) -> None:
         if snapshot.get("line") != self.line_name:
             return
@@ -347,7 +358,15 @@ class TrackState:
             if not blk:
                 continue
             occ = str(pb.get("occupancy", "free"))
-            blk.status = "closed" if occ == "closed" else ("occupied" if occ == "occupied" else "free")
+            print(f"[Backend DEBUG] {key} occupancy={occ}")
+            if occ.lower() in ("occupied", "true", "yes", "1"):
+                blk.status = "occupied"
+            elif occ.lower() in ("closed"):
+                blk.status = "closed"
+            else:
+                blk.status = "free"
+            print(f"[Backend DEBUG] Block {key} → {blk.status}")
+
             blk.light = str(pb.get("signal", "") or "")
             sw = str(pb.get("switch", "") or "")
             if sw:
@@ -367,22 +386,25 @@ class TrackState:
                     blk.crossing_open = True
 
 
-
     #return list of trains from the last snapshot 
     def get_trains(self) -> List[Dict[str, object]]:
         return list(self._last_snapshot.get("trains", []))
-
-    #delete 
-    def _advance_one_step(self):
-        pass
 
     # One UI tick:
     # 1) push any overrides to stub
     # 2) tell stub to advance movement
     # 3) compute CTC policy using the fresh snapshot
     # 4) broadcast updated state to UI 
-    
 
+    """This runs every UI tick (e.g., once per second):
+        Advances the global clock
+        ***Syncs time to other modules (commented for now)
+        Spawns new trains if their scheduled start time has arrived
+        Computes and applies new speed/authority policy
+        Applies manual overrides
+        Advances the stub (tick())
+        Broadcasts updated snapshot → UI
+        This is the central event loop of your simulation."""
     def simulation_tick(self):
         # === Global Clock Update ===
         # Every simulation tick, the CTC backend advances the universal simulation clock.
@@ -475,6 +497,15 @@ class TrackState:
                 return self._dest_by_tid.get(tid)
         return None
 
+    """Implements the CTC’s automatic decision-making:
+        Looks at snapshot (occupancy, broken rails, signals)
+        Determines suggested speed:
+        Red/occupied/broken → 0 m/s
+        Yellow → 60% line speed
+        Green → full speed
+        Computes authority (m) by scanning ahead until an obstacle
+        Applies overrides if active
+        Sends both to stub for each train"""
     def _policy_tick(self):
         if not self._last_snapshot:
             print("[CTC backend]  No snapshot yet — skipping policy tick.")
@@ -551,6 +582,13 @@ class TrackState:
 
 
      # Compute the next block given current block and active switch positions
+    
+    """These handle track topology logic — determining where a train goes next and how far it can move safely.
+        _next_block: chooses the next block given current and switches
+        _lookahead_authority_m: walks forward through track list until end, obstacle, or destination, summing meters
+        _get_desired_branch_for_train: reads a train’s intended path (B or C)
+        _succ_in_chain: gets the next item in a linear chain like ["A1", "A2", ...]"""
+    
     def _next_block(self, cur: str, switches: Dict[str, str]) -> Optional[str]:
         if cur in A_CHAIN:
             if cur != "A5":
@@ -605,8 +643,6 @@ class TrackState:
         return "B"
     
     #REMOVED SCENARIO_LOAD
-
-    
    
     @staticmethod
     # Utility: successor inside a linear chain;

@@ -185,6 +185,10 @@ class TrackControllerStub:
     # ---------- registration ----------
     def on_status(self, callback: Callable[[Snapshot], None]) -> None:
         self._status_cb = callback
+    def on_broadcast(self, cb):
+        """Register callback to be invoked on every broadcast tick."""
+        self._broadcast_cb = cb
+
 
     # ---------- CTC commands (from backend policy) ----------
     def set_suggested_speed(self, train_id: str, mps: float) -> None:
@@ -241,7 +245,7 @@ class TrackControllerStub:
 
 
         # change your add_train to accept a branch and store it
-    def add_train(self, tid: str, start_block: str, desired_branch: str = "B"):
+    def add_train(self, tid: str, start_block: str, desired_branch: str = ""):
         start_block = str(start_block)
         if tid in self._trains or start_block not in self._occupancy or self._occupancy[start_block] != "free":
             print(f"[Stub] Train {tid} could not be added — occupancy key mismatch or already taken.")
@@ -250,12 +254,15 @@ class TrackControllerStub:
             "block": start_block,
             "speed_mps": 0.0,
             "authority_blocks": 0,
-            "desired_branch": desired_branch,
+            "desired_branch": desired_branch or "",
         }
         self._occupancy[start_block] = "occupied"
+        self._recompute_occupancy()
         print(f"[Stub] Added train {tid} at block {start_block}")
         self._emit("train_pos", train_id=tid, value={"block": start_block})
         self._recompute_signals()
+        print(f"[Stub DEBUG] Occupancy map: {self._occupancy}")
+
         self.broadcast()
 
 
@@ -334,11 +341,23 @@ class TrackControllerStub:
         self._tick = 0
         self.reset_infrastructure()
         self.reset_trains()
+        
     def broadcast(self) -> None:
         """Send a snapshot without advancing simulation."""
+        snapshot = self._make_snapshot()
         print(f"[Stub] broadcasting snapshot with trains={list(self._trains.keys())}")
-        if self._status_cb:
-            self._status_cb(self._make_snapshot())
+
+        # --- Call the broadcast callback first (primary path to backend) ---
+        if hasattr(self, "_broadcast_cb") and callable(self._broadcast_cb):
+            print("[Stub DEBUG] calling _broadcast_cb → apply_snapshot()")
+            self._broadcast_cb(snapshot)
+
+        # --- Also call status callback (legacy path) ---
+        if hasattr(self, "_status_cb") and callable(self._status_cb):
+            print("[Stub DEBUG] calling _status_cb (legacy)")
+            self._status_cb(snapshot)
+
+
     
     
     # ---------- simulation ----------
@@ -614,6 +633,8 @@ class TrackControllerStub:
                 "beacon": self._beacon.get(b, ""),
                 "broken_rail": bool(self._broken_rail.get(b, False)),
             })
+            #print("[Stub DEBUG snapshot block 0]", next((b for b in blocks_payload if b["key"] == "0"), None))
+
 
 
         # (Optional) include trains snapshot if your UI expects it
@@ -627,6 +648,7 @@ class TrackControllerStub:
                 "authority_blocks": int(info.get("authority_blocks", 0)),
                 "desired_branch": info.get("desired_branch", ""),
             })
+        print("[Stub DEBUG snapshot block 0]", next((b for b in blocks_payload if b["key"] == "0"), None))
 
         return {
             "line": self.line_name,

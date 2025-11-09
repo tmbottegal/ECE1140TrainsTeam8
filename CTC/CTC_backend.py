@@ -19,23 +19,239 @@ B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]
 C_CHAIN = ["C11", "C12", "C13", "C14", "C15"]
 EOL = {"B10", "C15"}
 
+LINE_DATA = {
+    
+    "Red Line":   [],
+    "Green Line": [
+        # ----- Section A -----
+    ("A", 1, "free", "", "", "", "", "", 8.0, 45),
+    ("A", 2, "free", "Pioneer", "Left", "", "", "", 8.0, 45),
+    ("A", 3, "free", "", "", "", "", "", 8.0, 45),
+
+    # ----- Section B -----
+    ("B", 4, "free", "", "", "", "", "", 8.0, 45),
+    ("B", 5, "free", "", "", "", "", "", 8.0, 45),
+    ("B", 6, "free", "", "", "", "", "", 8.0, 45),
+
+    # ----- Section C -----
+    ("C", 7, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 8, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 9, "free", "Edgebrook", "Left", "", "", "", 8.0, 45),
+    ("C", 10, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 11, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 12, "free", "", "", "SWITCH (12-13; 1-13)", "", "", 8.0, 45),
+
+    # ----- Section D -----
+    ("D", 13, "free", "", "", "", "", "", 7.7, 70),
+    ("D", 14, "free", "", "", "", "", "", 7.7, 70),
+    ("D", 15, "free", "", "", "", "", "", 7.7, 70),
+    ("D", 16, "free", "Station", "Left/Right", "", "", "", 7.7, 70),
+
+    # ----- Section E -----
+    ("E", 17, "free", "", "", "", "", "", 9.0, 60),
+    ("E", 18, "free", "", "", "", "", "", 9.0, 60),
+    ("E", 19, "free", "", "", "", "", "RAILWAY CROSSING", 9.0, 60),
+    ("E", 20, "free", "", "", "", "", "", 9.0, 60),
+
+    # ----- Section F -----
+    ("F", 21, "free", "", "", "", "", "", 15.4, 70),
+    ("F", 22, "free", "Whited", "Left/Right", "", "", "", 15.4, 70),
+    ("F", 23, "free", "", "", "", "", "", 15.4, 70),
+    ("F", 24, "free", "", "", "", "", "", 15.4, 70),
+    ("F", 25, "free", "", "", "", "", "", 10.3, 70),
+    ("F", 26, "free", "", "", "", "", "", 5.1, 70),
+    ("F", 27, "free", "", "", "", "", "", 6.0, 30),
+    ("F", 28, "free", "", "", "SWITCH (28-29; 150-28)", "", "", 6.0, 30),
+        # ----- Section G -----
+    ("G", 29, "free", "", "", "", "", "", 6.0, 30),
+    ("G", 30, "free", "", "", "", "", "", 6.0, 30),
+    ("G", 31, "free", "South Bank", "Left", "", "", "", 6.0, 30),
+    ("G", 32, "free", "", "", "", "", "", 6.0, 30),
+
+    # ----- Section H -----
+    ("H", 33, "free", "", "", "", "", "", 6.0, 30),
+    ("H", 34, "free", "", "", "", "", "", 6.0, 30),
+    ("H", 35, "free", "", "", "", "", "", 6.0, 30),
+
+    # ----- Section I -----
+    ("I", 36, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 37, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 38, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 39, "free", "Central", "Right", "", "", "", 6.0, 30),
+    ("I", 40, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 41, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 42, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 43, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 44, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 45, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 46, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 47, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 48, "free", "Inglewood", "Right", "", "", "", 6.0, 30),
+    ("I", 49, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 50, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 51, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 52, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 53, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 54, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 55, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 56, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 57, "free", "Overbrook", "Right", "", "", "", 6.0, 30),
+
+    # ----- Section J -----
+    ("J", 58, "free", "", "", "SWITCH TO YARD (57-yard)", "", "", 6.0, 30),
+    ("J", 59, "free", "", "", "", "", "", 6.0, 30),
+    ("J", 60, "free", "", "", "", "", "", 6.0, 30),
+    ("J", 61, "free", "", "", "", "", "", 6.0, 30),
+    ("J", 62, "free", "", "", "SWITCH FROM YARD (Yard-63)", "", "", 6.0, 30),
+
+    # ----- Section K -----
+    ("K", 63, "free", "", "", "", "", "", 5.1, 70),
+    ("K", 64, "free", "", "", "", "", "", 5.1, 70),
+    ("K", 65, "free", "Glenbury", "Right", "", "", "", 10.3, 70),
+    ("K", 66, "free", "", "", "", "", "", 10.3, 70),
+    ("K", 67, "free", "", "", "", "", "", 9.0, 40),
+    ("K", 68, "free", "", "", "", "", "", 9.0, 40),
+
+    # ----- Section L -----
+    ("L", 69, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 70, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 71, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 72, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 73, "free", "Dormont", "Right", "", "", "", 9.0, 40),
+
+        # ----- Section M -----
+    ("M", 74, "free", "", "", "", "", "", 9.0, 40),
+    ("M", 75, "free", "", "", "", "", "", 9.0, 40),
+    ("M", 76, "free", "", "", "SWITCH (76-77;77-101)", "", "", 9.0, 40),
+
+    # ----- Section N -----
+    ("N", 77, "free", "Mt Lebanon", "Left/Right", "", "", "", 15.4, 70),
+    ("N", 78, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 79, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 80, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 81, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 82, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 83, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 84, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 85, "free", "", "", "SWITCH (85-86; 100-85)", "", "", 15.4, 70),
+
+    # ----- Section O -----
+    ("O", 86, "free", "", "", "", "", "", 14.4, 25),
+    ("O", 87, "free", "", "", "", "", "", 12.5, 25),
+    ("O", 88, "free", "Poplar", "Left", "", "", "", 14.4, 25),
+
+    # ----- Section P -----
+    ("P", 89, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 90, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 91, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 92, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 93, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 94, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 95, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 96, "free", "Castle Shannon", "Left", "", "", "", 10.8, 25),
+    ("P", 97, "free", "", "", "", "", "", 10.8, 25),
+
+    # ----- Section Q -----
+    ("Q", 98, "free", "", "", "", "", "", 10.8, 25),
+    ("Q", 99, "free", "", "", "", "", "", 10.8, 25),
+    ("Q", 100, "free", "", "", "", "", "", 10.8, 25),
+
+    # ----- Section R -----
+    ("R", 101, "free", "", "", "", "", "", 4.8, 26),
+
+    # ----- Section S -----
+    ("S", 102, "free", "", "", "", "", "", 12.9, 28),
+    ("S", 103, "free", "", "", "", "", "", 12.9, 28),
+    ("S", 104, "free", "", "", "", "", "", 10.3, 28),
+
+        # ----- Section T -----
+    ("T", 105, "free", "Dormont", "Right", "", "", "", 12.9, 28),
+    ("T", 106, "free", "", "", "", "", "", 12.9, 28),
+    ("T", 107, "free", "", "", "", "", "", 11.6, 28),
+    ("T", 108, "free", "", "", "", "", "RAILWAY CROSSING", 12.9, 28),
+    ("T", 109, "free", "", "", "", "", "", 12.9, 28),
+
+    # ----- Section U -----
+    ("U", 110, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 111, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 112, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 113, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 114, "free", "Glenbury", "Right", "", "", "", 19.4, 30),
+    ("U", 115, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 116, "free", "", "", "", "", "", 12.0, 30),
+
+    # ----- Section V -----
+    ("V", 117, "free", "", "", "", "", "", 12.0, 15),
+    ("V", 118, "free", "", "", "", "", "", 12.0, 15),
+    ("V", 119, "free", "", "", "", "", "", 9.6, 15),
+    ("V", 120, "free", "", "", "", "", "", 12.0, 15),
+    ("V", 121, "free", "", "", "", "", "", 12.0, 15),
+
+    # ----- Section W -----
+    ("W", 122, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 123, "free", "Overbrook", "Right", "", "", "", 9.0, 20),
+    ("W", 124, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 125, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 126, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 127, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 128, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 129, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 130, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 131, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 132, "free", "Inglewood", "Left", "", "", "", 9.0, 20),
+    ("W", 133, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 134, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 135, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 136, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 137, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 138, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 139, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 140, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 141, "free", "Central", "Right", "", "", "", 9.0, 20),
+    ("W", 142, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 143, "free", "", "", "", "", "", 9.0, 20),
+
+    # ----- Section X -----
+    ("X", 144, "free", "", "", "", "", "", 9.0, 20),
+    ("X", 145, "free", "", "", "", "", "", 9.0, 20),
+    ("X", 146, "free", "", "", "", "", "", 9.0, 20),
+
+    # ----- Section Y -----
+    ("Y", 147, "free", "", "", "", "", "", 9.0, 20),
+    ("Y", 148, "free", "", "", "", "", "", 33.1, 20),
+    ("Y", 149, "free", "", "", "", "", "", 7.2, 20),
+
+    # ----- Section Z -----
+    ("Z", 150, "free", "", "", "", "", "", 6.3, 20),
+
+
+
+
+    ],
+}
+
+# Convenience alias for UI imports
+GREEN_LINE_DATA = LINE_DATA["Green Line"]
+
+
+
 #data model for block row in UI table 
 @dataclass
 class Block:
     line: str
+    section: str
     block_id: int
     status: str
     station: str
-    #change to bool 
-    signal: str
-    #change to bool 
+    station_side: str
     switch: str
     light: str
-    beacon:str 
-   
-    has_crossing: bool          # presence (from LINE_DATA)
-    broken_rail: bool = False
-    crossing_open: bool = True   # status (True=open, False=closed) default open
+    crossing: bool
+    speed_limit: float
+
+
+
+
 
 # -------------------------
 # TrackState: CTC backend facade
@@ -66,21 +282,23 @@ class TrackState:
         # tuples are: (line, block_id, status, station, signal, switch, light, crossing, maintenance/beacon)
         blocks: List[Block] = []
         for t in tuples:
-            line, bid, status, station, signal, sw, light, crossing, last = t
-            has_cross = str(crossing).strip().lower() == "true"   # <-- normalize to bool
-            # 'last' in your LINE_DATA is used to mark beacons ("Beacon" or ""), so map to Block.beacon
+            section, bid, status, station, station_side, sw, light, crossing, traverse_time, speed_limit = t
             blocks.append(Block(
-                line=line,
+                line=self.line_name,
+                section=section,
                 block_id=bid,
                 status=status,
                 station=station,
-                signal=signal,
+                station_side=station_side,
                 switch=sw,
                 light=light,
-                has_crossing=has_cross,
-                beacon=last,            # <- keep the static beacon marker from LINE_DATA
-                broken_rail=False       # <- live value comes from snapshots
+                crossing=bool(crossing),
+                speed_limit=float(speed_limit),
             ))
+
+
+
+
 
         self._lines[name] = blocks
         self._rebuild_index()
@@ -96,8 +314,9 @@ class TrackState:
     def _rebuild_index(self):
         self._by_key.clear()
         for b in self.get_blocks():
-            key = f"{b.line}{b.block_id}"
+            key = f"{b.section}{b.block_id}"
             self._by_key[key] = b
+
 
     # ----- UI -> backend (forward to stub) -----
     #Mark/unmark a block under maintainace closed or setting it back 

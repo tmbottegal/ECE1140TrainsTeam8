@@ -381,6 +381,12 @@ class TrackState:
     def add_train(self, train_id: str, start_block: str):
         if self._stub:
             self._stub.add_train(train_id, start_block)
+            self._stub.broadcast()        # send snapshot right away
+            self._last_snapshot = self._stub.get_snapshot()
+
+
+    def get_snapshot(self):
+        return self._snapshot
 
     #enable/disable stubs automatic line movement ***
     def set_auto_line(self, enabled: bool):

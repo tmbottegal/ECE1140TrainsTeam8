@@ -118,6 +118,8 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.infoBtn.clicked.connect(self._train_info)
         self.uploadBtn.clicked.connect(self._upload_schedule)
         self.maintBtn.clicked.connect(self._maintenance_inputs)
+        self.dispatchBtn.clicked.connect(self._dispatch_train)
+
 
         # Action area (below buttons)
         self.actionArea = QtWidgets.QStackedWidget()
@@ -519,26 +521,32 @@ class CTCWindow(QtWidgets.QMainWindow):
             self._reload_line(self.state.line_name)
 
     def _dispatch_train(self):
-        # Must be in manual mode
         if self.mode != "manual":
             QtWidgets.QMessageBox.warning(self, "Mode Error", "Switch to Manual Mode to dispatch a train.")
             return
 
-        # Ask for station + arrival time
-        station, ok1 = QtWidgets.QInputDialog.getItem(
+        # 1️⃣ Ask user for train info
+        train_id, ok_id = QtWidgets.QInputDialog.getText(
+            self, "Dispatch Train", "Enter Train ID (e.g., T1):"
+        )
+        if not ok_id or not train_id.strip():
+            return
+        train_id = train_id.strip().upper()
+
+        dest, ok_dest = QtWidgets.QInputDialog.getItem(
             self, "Dispatch Train", "Select destination station:",
-            ["Edgebrook", "Station B", "Station C"], 0, False
+            ["Edgebrook", "Pioneer", "Whited", "Central"], 0, False
         )
-        if not ok1:
+        if not ok_dest:
             return
 
-        arrival_str, ok2 = QtWidgets.QInputDialog.getText(
-            self, "Dispatch Train", f"Enter desired arrival time at {station} (HH:MM):"
+        arrival_str, ok_time = QtWidgets.QInputDialog.getText(
+            self, "Dispatch Train", f"Enter desired arrival time at {dest} (HH:MM):"
         )
-        if not ok2 or not arrival_str:
+        if not ok_time or not arrival_str.strip():
             return
 
-        # Convert arrival time into a datetime for calculation
+        # 2️⃣ Compute departure time (rough estimate)
         from datetime import datetime, timedelta
         try:
             arrival_time = datetime.strptime(arrival_str, "%H:%M")
@@ -546,21 +554,29 @@ class CTCWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Invalid Time", "Please enter time as HH:MM.")
             return
 
-        # Assume the train departs from YARD block and average speed from your backend (m/s)
-        avg_speed_mps = 10  # placeholder, you can use your track constants
-        distance_m = 1000   # distance YARD → station (placeholder, update for real Green Line)
+        avg_speed_mps = 10.0
+        distance_m = 1500.0  # TODO: Replace with real yard→dest distance later
         travel_time = timedelta(seconds=(distance_m / avg_speed_mps))
         departure_time = arrival_time - travel_time
 
+        # 3️⃣ Add to backend
+        self.state.add_train(train_id, "YARD")
+
+        # Compute initial authority (in meters, so TrackState converts to blocks)
+        initial_authority_m = 500.0
+        self.state.set_suggested_speed(train_id, avg_speed_mps)
+        self.state.set_suggested_authority(train_id, initial_authority_m)
+
         QtWidgets.QMessageBox.information(
-            self, "Dispatch Train",
-            f"Train will depart YARD at {departure_time.strftime('%H:%M')} "
-            f"to arrive at {station} by {arrival_time.strftime('%H:%M')}."
+            self, "Train Dispatched",
+            f"{train_id} dispatched from YARD → {dest}\n"
+            f"Depart: {departure_time.strftime('%H:%M')}\n"
+            f"Arrive: {arrival_time.strftime('%H:%M')}"
         )
 
-        # Add the train to backend
-        self.state.add_train("T1", "YARD")
-        self.state.set_train_destination("T1", station)
+        # 4️⃣ Refresh table
+        self._reload_line(self.state.line_name)
+        self._train_info()
 
     # ---------- Manual Override ---------- MUST REV 
     def _manual_override(self):

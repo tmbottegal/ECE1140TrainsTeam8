@@ -5,6 +5,7 @@ import math
 from universal.global_clock import clock
 from .track_controller_stub import TrackControllerStub
 from trackModel.track_model_backend import TrackNetwork
+from trackControllerSW.track_controller_backend import TrackControllerBackend
 
 #Global Policies 
 BLOCK_LEN_M: float = 50.0
@@ -12,6 +13,7 @@ LINE_SPEED_LIMIT_MPS: float = 13.9
 YELLOW_FACTOR: float = 0.60
 SAFETY_BLOCKS: int = 0
 CONTROL_SIGNALS = {"B6", "C11"}
+
 
 #Line topology 
 A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
@@ -285,6 +287,27 @@ class TrackState:
         self.mode = mode
         print(f"[CTC Backend] Mode set to {mode.upper()}")
     
+    def test_send_to_track_controller(self):
+        """
+        Temporary integration test — manually send a suggested speed and authority
+        from CTC to the real Track Controller backend (no train dispatch needed).
+        """
+        try:
+            # Example values (change as needed for your demo)
+            block_id = 5           # any valid Blue Line block (1–15)
+            suggested_speed = 25   # mph
+            suggested_auth = 200   # yards
+
+            if hasattr(self, "track_controller") and self.track_controller is not None:
+                self.track_controller.receive_ctc_suggestion(block_id, suggested_speed, suggested_auth)
+                print(f"[CTC] Sent test suggestion → Block {block_id}: {suggested_speed} mph, {suggested_auth} yd")
+            else:
+                print("[CTC] Track Controller not connected — could not send suggestion")
+
+        except Exception as e:
+            print(f"[CTC] Error while sending test suggestion: {e}")
+
+
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
 

@@ -12,28 +12,19 @@ from trackModel.track_model_backend import TrackNetwork
 
 # Define the modules to run
 modules = {
-    #"CTC": "CTC/CTC_frontend.py",
-    #"Track Model": "trackModel/track_model_frontend.py",
+    "CTC": "CTC/CTC_frontend.py",
+    "Track Model": "trackModel/track_model_frontend.py",
     "Track Controller SW": "trackControllerSW/track_controller_run.py",
     #"Track Controller HW": "trackControllerHW/track_controller_hw.py",
-    #"Train Model": "trainModel/train_model_ui.py",
-    #"Train Controller SW": "trainControllerSW/TrainControllerRun.py"
+    "Train Model": "trainModel/train_model_ui.py",
+    "Train Controller SW": "trainControllerSW/TrainControllerRun.py"
 }
 
 # Global shared network that modules can access
 shared_track_network = None
 
 def initialize_shared_network(line_files=None):
-    """
-    Create and initialize shared TrackNetwork(s).
-    
-    Args:
-        line_files: Optional list of track layout CSV files to preload.
-                   If None, creates an empty network.
-    
-    Returns:
-        TrackNetwork instance or dict of TrackNetwork instances by line name.
-    """
+
     global shared_track_network
     
     if line_files is None:
@@ -77,22 +68,10 @@ def main():
     print("=" * 60)
     print()
     
-    # Initialize shared TrackNetwork
-    print("Initializing shared TrackNetwork...")
-    
-    # Option 1: Empty network (modules will load layouts as needed)
+    print("Initializing shared TrackNetwork")
+
     shared_track_network = initialize_shared_network()
-    
-    # Option 2: Preload specific line(s)
-    # Uncomment and modify paths as needed:
-    # line_files = [
-    #     os.path.join(base_dir, "trackModel", "Blue_Line.csv"),
-    #     os.path.join(base_dir, "trackModel", "Red_Line.csv"),
-    #     os.path.join(base_dir, "trackModel", "Green_Line.csv"),
-    # ]
-    # shared_track_network = initialize_shared_network(line_files)
-    
-    # Make network available as a module that can be imported
+
     import types
     network_module = types.ModuleType('shared_track_network')
     network_module.network = shared_track_network
@@ -101,11 +80,6 @@ def main():
     
     print(f"Shared TrackNetwork initialized")
     print(f"Network object ID: {id(shared_track_network)}")
-    print()
-    print("NOTE: Modules can access the shared network by importing:")
-    print("  import shared_track_network")
-    print("  network = shared_track_network.get_network()")
-    print()
     
     processes = []
 
@@ -118,8 +92,6 @@ def main():
 
             print(f"Launching {name}...")
             
-            # Use subprocess.Popen to launch as separate process
-            # Set PYTHONPATH to include base directory
             env = os.environ.copy()
             env['PYTHONPATH'] = base_dir + os.pathsep + env.get('PYTHONPATH', '')
             
@@ -131,35 +103,17 @@ def main():
             processes.append((name, p))
             time.sleep(1)  # Delay between launches
 
-        print()
-        print("=" * 60)
         print("All modules launched successfully!")
-        print("Close this window or press Ctrl+C to stop all modules")
-        print("=" * 60)
-        print()
-        
-        # Keep main process running and monitor subprocesses
-        try:
-            while True:
-                time.sleep(1)
-                # Check if any process has died
-                for name, p in processes:
-                    if p.poll() is not None:
-                        print(f"⚠ {name} has stopped (exit code: {p.poll()})")
-        except KeyboardInterrupt:
-            pass
+
 
     except KeyboardInterrupt:
         pass
     finally:
-        print()
-        print("=" * 60)
-        print("Shutting down all modules...")
-        print("=" * 60)
+        print("Shutting down all modules")
         
         for name, p in processes:
             if p.poll() is None:  # Process still running
-                print(f"Stopping {name}...")
+                print(f"Stopping {name}")
                 p.terminate()
         
         # Give processes time to shut down gracefully
@@ -168,7 +122,7 @@ def main():
         # Force kill any remaining
         for name, p in processes:
             if p.poll() is None:
-                print(f"Force stopping {name}...")
+                print(f"Force stopping {name}")
                 p.kill()
         
         print("All modules stopped.")

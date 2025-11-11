@@ -8,19 +8,21 @@ from trackModel.track_model_backend import TrackNetwork
 from trackControllerSW.track_controller_backend import TrackControllerBackend
 
 #Global Policies 
+#Remove 
 BLOCK_LEN_M: float = 50.0
 LINE_SPEED_LIMIT_MPS: float = 13.9
 YELLOW_FACTOR: float = 0.60
 SAFETY_BLOCKS: int = 0
 CONTROL_SIGNALS = {"B6", "C11"}
 
-
 #Line topology 
+#Remove
 A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
 B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]
 C_CHAIN = ["C11", "C12", "C13", "C14", "C15"]
 EOL = {"B10", "C15"}
 
+#Green and Red line Data 
 LINE_DATA = {
     
     "Red Line":   [],
@@ -236,7 +238,6 @@ LINE_DATA = {
 GREEN_LINE_DATA = LINE_DATA["Green Line"]
 
 
-
 #data model for block row in UI table 
 @dataclass
 class Block:
@@ -253,13 +254,11 @@ class Block:
 
 
 
-
-
 # -------------------------
 # TrackState: CTC backend facade
 # - Owns the current line's block list
 # - Maintains a fast index by block key 
-# - Hosts the TrackControllerStub and applies its snapshots to UI data
+# - Hosts the TrackControllerStub and applies its snapshots to UI data *** 
 # - Computes policy each tick (speeds/authority) and forwards to stub
 # -------------------------
 class TrackState:
@@ -279,6 +278,9 @@ class TrackState:
 
         self.set_line(line_name, line_tuples)
 
+        #self.track_model = TrackNetwork("Green Line")
+        self.track_controller = TrackControllerBackend(self.track_model, "Green Line")
+
     def set_mode(self, mode: str):
         """Update CTC mode between 'manual' and 'auto'."""
         mode = mode.lower()
@@ -294,7 +296,7 @@ class TrackState:
         """
         try:
             # Example values (change as needed for your demo)
-            block_id = 5           # any valid Blue Line block (1–15)
+            block_id = 12           # any valid Blue Line block (1–15)
             suggested_speed = 25   # mph
             suggested_auth = 200   # yards
 
@@ -310,7 +312,6 @@ class TrackState:
 
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
-
         # tuples are: (line, block_id, status, station, signal, switch, light, crossing, maintenance/beacon)
         blocks: List[Block] = []
         for t in tuples:
@@ -327,10 +328,6 @@ class TrackState:
                 crossing=bool(crossing),
                 speed_limit=float(speed_limit),
             ))
-
-
-
-
 
         self._lines[name] = blocks
         self._rebuild_index()
@@ -379,6 +376,7 @@ class TrackState:
         print(f"[CTC] set_suggested_authority: {tid} → {meters:.1f}m = {blocks} blocks")
         if self._stub:
             self._stub.set_suggested_authority(tid, blocks)
+
     def set_crossing_override(self, block_id: str, state: Optional[bool]) -> None:
             """
             state:
@@ -389,8 +387,6 @@ class TrackState:
             if self._stub:
                 self._stub.set_crossing_override(block_id, state)
         
-
-    
     #Move a switch if indicated by stub 
     def set_switch(self, switch_id: str, position: str):
         if self._stub:
@@ -501,8 +497,6 @@ class TrackState:
                     # default to True if missing, to avoid confusing UI
                     blk.crossing_open = True
 
-
-
     #return list of trains from the last snapshot 
     def get_trains(self) -> List[Dict[str, object]]:
         return list(self._last_snapshot.get("trains", []))
@@ -593,6 +587,21 @@ class TrackState:
             # send to stub
             self.set_suggested_speed(tid, speed_mps)
             self.set_suggested_authority(tid, authority_m)
+
+            # also send to the real Track Controller backend (if attached)
+            if hasattr(self, "track_controller") and self.track_controller is not None:
+                try:
+                    # Find the block number (integer) from the train's current position
+                    # Example: "B6" → 6
+                    block_str = cur
+                    block_id = int(''.join(filter(str.isdigit, block_str)))
+                    speed_mph = round(speed_mps * 2.237, 1)   # convert m/s → mph
+                    auth_yd = round(authority_m * 1.094, 1)   # convert m → yd
+
+                    self.track_controller.receive_ctc_suggestion(block_id, speed_mph, auth_yd)
+                    print(f"[CTC→TC] Sent → block {block_id}: {speed_mph} mph, {auth_yd} yd")
+                except Exception as e:
+                    print(f"[CTC→TC] Error sending to TrackController: {e}")
 
 
      # Compute the next block given current block and active switch positions

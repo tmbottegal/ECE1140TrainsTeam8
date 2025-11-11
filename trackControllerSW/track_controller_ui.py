@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys,os,logging
 
-_pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..")) # it makes shit work
+_pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _pkg_root not in sys.path:
     sys.path.append(_pkg_root)
 
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from track_controller_backend import TrackControllerBackend
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
+
 class TrackControllerUI(QWidget):
     """Main application window for the Track Controller module."""
 
@@ -150,8 +151,8 @@ class TrackControllerUI(QWidget):
             # Blocks table
             line_block_map = {
                 "Blue Line": range(1, 16),
-                "Green Line": list(range(1, 63)) + list(range(122, 151)), # A through J, W through Z
-                "Red Line": range(1, 34), # A through first half of H
+                "Green Line": list(range(1, 63)) + list(range(122, 151)),
+                "Red Line": range(1, 34),
             }
             block_ids = line_block_map.get(self.backend.line_name, [])
             self.tablemain.setRowCount(len(block_ids))
@@ -200,7 +201,7 @@ class TrackControllerUI(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.tablemain.setItem(i, 6, item)
 
-            # Switches table
+            # Switches table - now displays int values but with text representation
             switches = self.backend.switches
             switch_map = self.backend.switch_map
             if not switches:
@@ -219,23 +220,31 @@ class TrackControllerUI(QWidget):
                     switch_map[3] = (76, 77, 101)
                     switch_map[4] = (85, 86, 100)
                 for sid in switch_map:
-                    switches[sid] = "N/A"
+                    switches[sid] = 0  # Default to 0 (Normal)
+            
             self.tableswitch.setRowCount(max(len(switches), 1))
             self.tableswitch.setColumnCount(3)
             self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Blocks", "Position"])
             self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            for i, (sid, pos) in enumerate(switches.items()):
+            
+            for i, (sid, pos_int) in enumerate(switches.items()):
                 self.tableswitch.setItem(i, 0, QTableWidgetItem(str(sid)))
                 blocks = switch_map.get(sid, ())
                 self.tableswitch.setItem(i, 1, QTableWidgetItem(str(blocks)))
-                item = QTableWidgetItem(pos)
+                
+                # Display as text but store int value
+                pos_text = "Normal" if pos_int == 0 else "Alternate"
+                item = QTableWidgetItem(pos_text)
+                # Store the int value as user data
+                item.setData(Qt.ItemDataRole.UserRole, pos_int)
                 self._apply_editable(item, editable=self.manual_mode_enabled)
                 self.tableswitch.setItem(i, 2, item)
+            
             if not switches:
                 for col in range(3):
                     self.tableswitch.setItem(0, col, QTableWidgetItem(""))
 
-            # Crossings table
+            # Crossings table - now displays bool values but with text representation
             crossings = self.backend.crossings
             crossing_blocks = self.backend.crossing_blocks
             if not crossings:
@@ -246,18 +255,26 @@ class TrackControllerUI(QWidget):
                 elif self.backend.line_name == "Green Line":
                     crossing_blocks[1] = 19
                 for cid in crossing_blocks:
-                    crossings[cid] = "N/A"
+                    crossings[cid] = False  # Default to False (Inactive)
+            
             self.tablecrossing.setRowCount(max(len(crossings), 1))
             self.tablecrossing.setColumnCount(3)
             self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
             self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            for i, (cid, status) in enumerate(crossings.items()):
+            
+            for i, (cid, status_bool) in enumerate(crossings.items()):
                 block = crossing_blocks.get(cid, "-")
                 self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
                 self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block)))
-                item = QTableWidgetItem(status)
+                
+                # Display as text but store bool value
+                status_text = "Active" if status_bool else "Inactive"
+                item = QTableWidgetItem(status_text)
+                # Store the bool value as user data
+                item.setData(Qt.ItemDataRole.UserRole, status_bool)
                 self._apply_editable(item, editable=self.manual_mode_enabled)
                 self.tablecrossing.setItem(i, 2, item)
+            
             if not crossings:
                 for col in range(3):
                     self.tablecrossing.setItem(0, col, QTableWidgetItem(""))
@@ -271,8 +288,7 @@ class TrackControllerUI(QWidget):
         table.setItem(row, col, item)
 
     def _apply_editable(self, item: QTableWidgetItem, editable: bool = False) -> None:
-        """Set item editable or not based on the boolean. We restrict UI edits
-        to switches and crossings only (per the requirement)."""
+        """Set item editable or not based on the boolean."""
         if editable:
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         else:
@@ -288,19 +304,14 @@ class TrackControllerUI(QWidget):
         elif sig == SignalState.SUPERGREEN:
             item.setBackground(Qt.GlobalColor.darkGreen)
 
-    # Click-to-cycle handlers
     def _on_block_clicked(self, row: int, col: int) -> None:
         if not self.manual_mode_enabled:
             return
         if col in (3, 6):
-            QMessageBox.information(self, "Maintenance Mode", "Occupancy and signal state cannot be edited from UI in maintenance mode. Use PLC upload for signal/command changes.")
+            QMessageBox.information(self, "Maintenance Mode", 
+                "Occupancy and signal state cannot be edited from UI in maintenance mode. "
+                "Use PLC upload for signal/command changes.")
             return
-        try:
-            # no other interactable block columns for UI edits
-            return
-        except Exception as exc:
-            QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
-            self.refresh_tables()
 
     def _on_switch_clicked(self, row: int, col: int) -> None:
         if not self.manual_mode_enabled:
@@ -308,8 +319,9 @@ class TrackControllerUI(QWidget):
         try:
             if col == 2:
                 sid = int(self.tableswitch.item(row, 0).text())
-                current = self.backend.switches.get(sid, "Normal")
-                next_pos = "Alternate" if current == "Normal" else "Normal"
+                current = self.backend.switches.get(sid, 0)  # Get int value
+                # Toggle: 0 -> 1, 1 -> 0
+                next_pos = 1 if current == 0 else 0
                 self.backend.safe_set_switch(sid, next_pos)
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
@@ -321,11 +333,10 @@ class TrackControllerUI(QWidget):
         try:
             if col == 2:
                 cid = int(self.tablecrossing.item(row, 0).text())
-                current = self.backend.crossings.get(cid, "Inactive")
-                next_status = "Inactive" if current == "Active" else "Active"
+                current = self.backend.crossings.get(cid, False)  # Get bool value
+                # Toggle: False -> True, True -> False
+                next_status = not current
                 self.backend.safe_set_crossing(cid, next_status)
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
             self.refresh_tables()
-
-# add clock clock ui location

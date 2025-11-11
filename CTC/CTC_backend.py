@@ -2,10 +2,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 import math
-
-from track_controller_stub import TrackControllerStub
+from universal.global_clock import clock
+from .track_controller_stub import TrackControllerStub
+from trackModel.track_model_backend import TrackNetwork
+from trackControllerSW.track_controller_backend import TrackControllerBackend
 
 #Global Policies 
+#Remove 
 BLOCK_LEN_M: float = 50.0
 LINE_SPEED_LIMIT_MPS: float = 13.9
 YELLOW_FACTOR: float = 0.60
@@ -13,39 +16,258 @@ SAFETY_BLOCKS: int = 0
 CONTROL_SIGNALS = {"B6", "C11"}
 
 #Line topology 
+#Remove
 A_CHAIN = ["A1", "A2", "A3", "A4", "A5"]
 B_CHAIN = ["B6", "B7", "B8", "B9", "B10"]
 C_CHAIN = ["C11", "C12", "C13", "C14", "C15"]
 EOL = {"B10", "C15"}
 
+#Green and Red line Data 
+LINE_DATA = {
+    
+    "Red Line":   [],
+    "Green Line": [
+        # ----- Section A -----
+    ("A", 1, "free", "", "", "", "", "", 8.0, 45),
+    ("A", 2, "free", "Pioneer", "Left", "", "", "", 8.0, 45),
+    ("A", 3, "free", "", "", "", "", "", 8.0, 45),
+
+    # ----- Section B -----
+    ("B", 4, "free", "", "", "", "", "", 8.0, 45),
+    ("B", 5, "free", "", "", "", "", "", 8.0, 45),
+    ("B", 6, "free", "", "", "", "", "", 8.0, 45),
+
+    # ----- Section C -----
+    ("C", 7, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 8, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 9, "free", "Edgebrook", "Left", "", "", "", 8.0, 45),
+    ("C", 10, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 11, "free", "", "", "", "", "", 8.0, 45),
+    ("C", 12, "free", "", "", "SWITCH (12-13; 1-13)", "", "", 8.0, 45),
+
+    # ----- Section D -----
+    ("D", 13, "free", "", "", "", "", "", 7.7, 70),
+    ("D", 14, "free", "", "", "", "", "", 7.7, 70),
+    ("D", 15, "free", "", "", "", "", "", 7.7, 70),
+    ("D", 16, "free", "Station", "Left/Right", "", "", "", 7.7, 70),
+
+    # ----- Section E -----
+    ("E", 17, "free", "", "", "", "", "", 9.0, 60),
+    ("E", 18, "free", "", "", "", "", "", 9.0, 60),
+    ("E", 19, "free", "", "", "", "", "RAILWAY CROSSING", 9.0, 60),
+    ("E", 20, "free", "", "", "", "", "", 9.0, 60),
+
+    # ----- Section F -----
+    ("F", 21, "free", "", "", "", "", "", 15.4, 70),
+    ("F", 22, "free", "Whited", "Left/Right", "", "", "", 15.4, 70),
+    ("F", 23, "free", "", "", "", "", "", 15.4, 70),
+    ("F", 24, "free", "", "", "", "", "", 15.4, 70),
+    ("F", 25, "free", "", "", "", "", "", 10.3, 70),
+    ("F", 26, "free", "", "", "", "", "", 5.1, 70),
+    ("F", 27, "free", "", "", "", "", "", 6.0, 30),
+    ("F", 28, "free", "", "", "SWITCH (28-29; 150-28)", "", "", 6.0, 30),
+        # ----- Section G -----
+    ("G", 29, "free", "", "", "", "", "", 6.0, 30),
+    ("G", 30, "free", "", "", "", "", "", 6.0, 30),
+    ("G", 31, "free", "South Bank", "Left", "", "", "", 6.0, 30),
+    ("G", 32, "free", "", "", "", "", "", 6.0, 30),
+
+    # ----- Section H -----
+    ("H", 33, "free", "", "", "", "", "", 6.0, 30),
+    ("H", 34, "free", "", "", "", "", "", 6.0, 30),
+    ("H", 35, "free", "", "", "", "", "", 6.0, 30),
+
+    # ----- Section I -----
+    ("I", 36, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 37, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 38, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 39, "free", "Central", "Right", "", "", "", 6.0, 30),
+    ("I", 40, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 41, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 42, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 43, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 44, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 45, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 46, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 47, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 48, "free", "Inglewood", "Right", "", "", "", 6.0, 30),
+    ("I", 49, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 50, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 51, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 52, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 53, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 54, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 55, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 56, "free", "", "", "", "", "", 6.0, 30),
+    ("I", 57, "free", "Overbrook", "Right", "", "", "", 6.0, 30),
+
+    # ----- Section J -----
+    ("J", 58, "free", "", "", "SWITCH TO YARD (57-yard)", "", "", 6.0, 30),
+    ("J", 59, "free", "", "", "", "", "", 6.0, 30),
+    ("J", 60, "free", "", "", "", "", "", 6.0, 30),
+    ("J", 61, "free", "", "", "", "", "", 6.0, 30),
+    ("J", 62, "free", "", "", "SWITCH FROM YARD (Yard-63)", "", "", 6.0, 30),
+
+    # ----- Section K -----
+    ("K", 63, "free", "", "", "", "", "", 5.1, 70),
+    ("K", 64, "free", "", "", "", "", "", 5.1, 70),
+    ("K", 65, "free", "Glenbury", "Right", "", "", "", 10.3, 70),
+    ("K", 66, "free", "", "", "", "", "", 10.3, 70),
+    ("K", 67, "free", "", "", "", "", "", 9.0, 40),
+    ("K", 68, "free", "", "", "", "", "", 9.0, 40),
+
+    # ----- Section L -----
+    ("L", 69, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 70, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 71, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 72, "free", "", "", "", "", "", 9.0, 40),
+    ("L", 73, "free", "Dormont", "Right", "", "", "", 9.0, 40),
+
+        # ----- Section M -----
+    ("M", 74, "free", "", "", "", "", "", 9.0, 40),
+    ("M", 75, "free", "", "", "", "", "", 9.0, 40),
+    ("M", 76, "free", "", "", "SWITCH (76-77;77-101)", "", "", 9.0, 40),
+
+    # ----- Section N -----
+    ("N", 77, "free", "Mt Lebanon", "Left/Right", "", "", "", 15.4, 70),
+    ("N", 78, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 79, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 80, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 81, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 82, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 83, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 84, "free", "", "", "", "", "", 15.4, 70),
+    ("N", 85, "free", "", "", "SWITCH (85-86; 100-85)", "", "", 15.4, 70),
+
+    # ----- Section O -----
+    ("O", 86, "free", "", "", "", "", "", 14.4, 25),
+    ("O", 87, "free", "", "", "", "", "", 12.5, 25),
+    ("O", 88, "free", "Poplar", "Left", "", "", "", 14.4, 25),
+
+    # ----- Section P -----
+    ("P", 89, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 90, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 91, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 92, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 93, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 94, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 95, "free", "", "", "", "", "", 10.8, 25),
+    ("P", 96, "free", "Castle Shannon", "Left", "", "", "", 10.8, 25),
+    ("P", 97, "free", "", "", "", "", "", 10.8, 25),
+
+    # ----- Section Q -----
+    ("Q", 98, "free", "", "", "", "", "", 10.8, 25),
+    ("Q", 99, "free", "", "", "", "", "", 10.8, 25),
+    ("Q", 100, "free", "", "", "", "", "", 10.8, 25),
+
+    # ----- Section R -----
+    ("R", 101, "free", "", "", "", "", "", 4.8, 26),
+
+    # ----- Section S -----
+    ("S", 102, "free", "", "", "", "", "", 12.9, 28),
+    ("S", 103, "free", "", "", "", "", "", 12.9, 28),
+    ("S", 104, "free", "", "", "", "", "", 10.3, 28),
+
+        # ----- Section T -----
+    ("T", 105, "free", "Dormont", "Right", "", "", "", 12.9, 28),
+    ("T", 106, "free", "", "", "", "", "", 12.9, 28),
+    ("T", 107, "free", "", "", "", "", "", 11.6, 28),
+    ("T", 108, "free", "", "", "", "", "RAILWAY CROSSING", 12.9, 28),
+    ("T", 109, "free", "", "", "", "", "", 12.9, 28),
+
+    # ----- Section U -----
+    ("U", 110, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 111, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 112, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 113, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 114, "free", "Glenbury", "Right", "", "", "", 19.4, 30),
+    ("U", 115, "free", "", "", "", "", "", 12.0, 30),
+    ("U", 116, "free", "", "", "", "", "", 12.0, 30),
+
+    # ----- Section V -----
+    ("V", 117, "free", "", "", "", "", "", 12.0, 15),
+    ("V", 118, "free", "", "", "", "", "", 12.0, 15),
+    ("V", 119, "free", "", "", "", "", "", 9.6, 15),
+    ("V", 120, "free", "", "", "", "", "", 12.0, 15),
+    ("V", 121, "free", "", "", "", "", "", 12.0, 15),
+
+    # ----- Section W -----
+    ("W", 122, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 123, "free", "Overbrook", "Right", "", "", "", 9.0, 20),
+    ("W", 124, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 125, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 126, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 127, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 128, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 129, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 130, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 131, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 132, "free", "Inglewood", "Left", "", "", "", 9.0, 20),
+    ("W", 133, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 134, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 135, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 136, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 137, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 138, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 139, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 140, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 141, "free", "Central", "Right", "", "", "", 9.0, 20),
+    ("W", 142, "free", "", "", "", "", "", 9.0, 20),
+    ("W", 143, "free", "", "", "", "", "", 9.0, 20),
+
+    # ----- Section X -----
+    ("X", 144, "free", "", "", "", "", "", 9.0, 20),
+    ("X", 145, "free", "", "", "", "", "", 9.0, 20),
+    ("X", 146, "free", "", "", "", "", "", 9.0, 20),
+
+    # ----- Section Y -----
+    ("Y", 147, "free", "", "", "", "", "", 9.0, 20),
+    ("Y", 148, "free", "", "", "", "", "", 33.1, 20),
+    ("Y", 149, "free", "", "", "", "", "", 7.2, 20),
+
+    # ----- Section Z -----
+    ("Z", 150, "free", "", "", "", "", "", 6.3, 20),
+
+
+
+
+    ],
+}
+
+# Convenience alias for UI imports
+GREEN_LINE_DATA = LINE_DATA["Green Line"]
+
+
 #data model for block row in UI table 
 @dataclass
 class Block:
     line: str
+    section: str
     block_id: int
     status: str
     station: str
-    #change to bool 
-    signal: str
-    #change to bool 
+    station_side: str
     switch: str
     light: str
-    beacon:str 
-   
-    has_crossing: bool          # presence (from LINE_DATA)
-    broken_rail: bool = False
-    crossing_open: bool = True   # status (True=open, False=closed) default open
+    crossing: bool
+    speed_limit: float
+
+
 
 # -------------------------
 # TrackState: CTC backend facade
 # - Owns the current line's block list
 # - Maintains a fast index by block key 
-# - Hosts the TrackControllerStub and applies its snapshots to UI data
+# - Hosts the TrackControllerStub and applies its snapshots to UI data *** 
 # - Computes policy each tick (speeds/authority) and forwards to stub
 # -------------------------
 class TrackState:
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
+        self.track_model = TrackNetwork()
+        self.mode = "auto"  # default mode
+        clock.register_listener(self.track_model.set_time)
+        #will add for other modules later 
         self._lines: Dict[str, List[Block]] = {}            #list of block object 
         self._by_key: Dict[str, Block] = {}                 #each block 
         self._stub: Optional[TrackControllerStub] = None    #sim peer 
@@ -53,34 +275,79 @@ class TrackState:
         self._last_snapshot: Dict[str, object] = {}
         self._overrides: Dict[str, Dict[str, object]] = {}
         self._oneshot_auth: Dict[str, int] = {}              # <-- NEW: on
-                # ---- Route schedule (Excel-driven) ----
-        self._route_schedule: List[Dict[str, object]] = []  # rows: {tid,t,start_block,branch,dest_block,spawned}
-        self._schedule_clock_s: int = 0
-        self._dest_by_tid: Dict[str, str] = {}  # tid -> destination block key (e.g., "B10", "A1")
-
 
         self.set_line(line_name, line_tuples)
 
+        #self.track_model = TrackNetwork("Green Line")
+        self.track_controller = TrackControllerBackend(self.track_model, "Green Line")
+
+    def set_mode(self, mode: str):
+        """Update CTC mode between 'manual' and 'auto'."""
+        mode = mode.lower()
+        if mode not in ("manual", "auto"):
+            raise ValueError(f"Invalid mode '{mode}'")
+        self.mode = mode
+        print(f"[CTC Backend] Mode set to {mode.upper()}")
+    
+    def test_send_to_track_controller(self):
+        """
+        Temporary integration test — manually send a suggested speed and authority
+        from CTC to the real Track Controller backend (no train dispatch needed).
+        """
+        try:
+            # Example values (change as needed for your demo)
+            block_id = 12           # any valid Blue Line block (1–15)
+            suggested_speed = 25   # mph
+            suggested_auth = 200   # yards
+
+            if hasattr(self, "track_controller") and self.track_controller is not None:
+                self.track_controller.receive_ctc_suggestion(block_id, suggested_speed, suggested_auth)
+                print(f"[CTC] Sent test suggestion → Block {block_id}: {suggested_speed} mph, {suggested_auth} yd")
+            else:
+                print("[CTC] Track Controller not connected — could not send suggestion")
+
+        except Exception as e:
+            print(f"[CTC] Error while sending test suggestion: {e}")
+
+    
+    def dispatch_train(self, train_id: str, start_block: int, suggested_speed: int, suggested_auth: int):
+        """
+        Manual dispatch entry point for the UI:
+        - Adds a train locally to the stub (so UI shows it)
+        - Sends suggested speed/authority to the Track Controller backend
+        """
+        # 1️⃣ Add to stub simulation (optional but keeps UI in sync)
+        if self._stub:
+            block_key = f"A{start_block}" if isinstance(start_block, int) else str(start_block)
+            self._stub.add_train(train_id, block_key)
+            self._stub.broadcast()
+            print(f"[CTC] Added {train_id} to stub at {block_key}")
+
+        # 2️⃣ Send initial suggestion to real Track Controller
+        if hasattr(self, "track_controller") and self.track_controller is not None:
+            self.track_controller.receive_ctc_suggestion(start_block, suggested_speed, suggested_auth)
+            print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed} mph, {suggested_auth} yd")
+        else:
+            print("[CTC] Track Controller not connected — could not send suggestion.")
+
+
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name
-
         # tuples are: (line, block_id, status, station, signal, switch, light, crossing, maintenance/beacon)
         blocks: List[Block] = []
         for t in tuples:
-            line, bid, status, station, signal, sw, light, crossing, last = t
-            has_cross = str(crossing).strip().lower() == "true"   # <-- normalize to bool
-            # 'last' in your LINE_DATA is used to mark beacons ("Beacon" or ""), so map to Block.beacon
+            section, bid, status, station, station_side, sw, light, crossing, traverse_time, speed_limit = t
             blocks.append(Block(
-                line=line,
+                line=self.line_name,
+                section=section,
                 block_id=bid,
                 status=status,
                 station=station,
-                signal=signal,
+                station_side=station_side,
                 switch=sw,
                 light=light,
-                has_crossing=has_cross,
-                beacon=last,            # <- keep the static beacon marker from LINE_DATA
-                broken_rail=False       # <- live value comes from snapshots
+                crossing=bool(crossing),
+                speed_limit=float(speed_limit),
             ))
 
         self._lines[name] = blocks
@@ -97,8 +364,9 @@ class TrackState:
     def _rebuild_index(self):
         self._by_key.clear()
         for b in self.get_blocks():
-            key = f"{b.line}{b.block_id}"
+            key = f"{b.section}{b.block_id}"
             self._by_key[key] = b
+
 
     # ----- UI -> backend (forward to stub) -----
     #Mark/unmark a block under maintainace closed or setting it back 
@@ -129,6 +397,7 @@ class TrackState:
         print(f"[CTC] set_suggested_authority: {tid} → {meters:.1f}m = {blocks} blocks")
         if self._stub:
             self._stub.set_suggested_authority(tid, blocks)
+
     def set_crossing_override(self, block_id: str, state: Optional[bool]) -> None:
             """
             state:
@@ -139,8 +408,6 @@ class TrackState:
             if self._stub:
                 self._stub.set_crossing_override(block_id, state)
         
-
-    
     #Move a switch if indicated by stub 
     def set_switch(self, switch_id: str, position: str):
         if self._stub:
@@ -154,6 +421,12 @@ class TrackState:
     def add_train(self, train_id: str, start_block: str):
         if self._stub:
             self._stub.add_train(train_id, start_block)
+            self._stub.broadcast()        # send snapshot right away
+            self._last_snapshot = self._stub.get_snapshot()
+
+
+    def get_snapshot(self):
+        return self._snapshot
 
     #enable/disable stubs automatic line movement ***
     def set_auto_line(self, enabled: bool):
@@ -173,62 +446,7 @@ class TrackState:
     def reset_all(self):
         if self._stub:
             self._stub.reset_all()
-        # clear schedule/clock/destinations
-        self._route_schedule = []
-        self._schedule_clock_s = 0
-        self._dest_by_tid.clear()
         self._policy_tick()
-
-        # ---------- Schedule: load/clear (route-based) ----------
-    def load_route_schedule(self, rows: List[Tuple[str, int, str, str]]) -> int:
-        """
-        rows: list of (train_id, start_time_s, origin, destination)
-              origin: "YARD" or "A" (both map to A1 on this demo line)
-              destination: "A", "B", or "YARD"  (A/YARD -> A1, B -> B10)
-        """
-        def origin_to_start_block(origin: str) -> str:
-            o = (origin or "").strip().upper()
-            return "A1"  # both YARD and A spawn at A1 on this demo line
-
-        def dest_to_block(dest: str) -> Tuple[str, str]:
-            d = (dest or "").strip().upper()
-            if d == "B":
-                return "B10", "B"   # Station B → branch B
-            if d == "C":
-                return "C15", "C"   # Station C → branch C
-            # A or YARD → A1 (same physical spot on demo), no travel needed
-            return "A1", "B"        # branch value doesn’t matter; authority will cap at A1
-
-        parsed: List[Dict[str, object]] = []
-        for tid, t_s, origin, dest in rows:
-            tid = str(tid).strip()
-            if not tid:
-                continue
-            try:
-                t_val = int(t_s)
-            except Exception:
-                continue
-            start_block = origin_to_start_block(origin)
-            dest_block, branch = dest_to_block(dest)
-            parsed.append({
-                "tid": tid,
-                "t": t_val,
-                "start_block": start_block,
-                "branch": branch,         # used to set desired_branch (B)
-                "dest_block": dest_block, # authority cap target
-                "spawned": False,
-            })
-        self._route_schedule = sorted(parsed, key=lambda r: int(r["t"]))
-        self._schedule_clock_s = 0
-        # destinations mapping will be set when each train actually spawns
-        return len(self._route_schedule)
-
-    def clear_route_schedule(self) -> None:
-        self._route_schedule = []
-        self._schedule_clock_s = 0
-        self._dest_by_tid.clear()
-
-
 
     # Per-train manual override from UI. Converts meters→blocks and forwards to stub.
     #*****
@@ -300,8 +518,6 @@ class TrackState:
                     # default to True if missing, to avoid confusing UI
                     blk.crossing_open = True
 
-
-
     #return list of trains from the last snapshot 
     def get_trains(self) -> List[Dict[str, object]]:
         return list(self._last_snapshot.get("trains", []))
@@ -319,30 +535,9 @@ class TrackState:
         if not self._stub:
             return
 
-        # ---- Route schedule clock & spawns (runs only when UI timer calls us) ----
-        # advance the relative schedule clock by 1 second per tick
-        self._schedule_clock_s += 1
+        clock.tick()
 
-        # spawn any due trains (not yet spawned and start_time <= clock)
-        if self._route_schedule:
-            for row in self._route_schedule:
-                if row.get("spawned"):
-                    continue
-                if int(row["t"]) <= self._schedule_clock_s:
-                    tid        = str(row["tid"])
-                    start_blk  = str(row["start_block"])
-                    branch     = str(row["branch"])       # e.g., "B"
-                    dest_block = str(row["dest_block"])   # e.g., "B10" or "A1"
-
-                    # create the train with branch intent; stub will set desired_branch
-                    self._stub.add_train(tid, start_blk, branch)
-
-                    # remember destination so policy can cap authority in _policy_tick()
-                    self._dest_by_tid[tid] = dest_block
-
-                    row["spawned"] = True
-
-        # 1) Compute policy using the last snapshot (uses _dest_by_tid to cap authority)
+        # 1) Compute policy using the last snapshot
         self._policy_tick()
 
         # 2) Prepare the one-tick override payload to the stub
@@ -370,14 +565,6 @@ class TrackState:
         self._stub.broadcast()
 
     #deciding suggested speed and suggested authority 
-    def _get_destination_block_for_train_on(self, cur_block: str) -> Optional[str]:
-        # Find the train occupying cur_block, then return its destination block (if any)
-        for t in self._last_snapshot.get("trains", []):
-            if str(t.get("block", "")) == str(cur_block):
-                tid = str(t.get("train_id", ""))
-                return self._dest_by_tid.get(tid)
-        return None
-
     def _policy_tick(self):
         if not self._last_snapshot:
             print("[CTC backend]  No snapshot yet — skipping policy tick.")
@@ -411,7 +598,6 @@ class TrackState:
                     speed_mps = LINE_SPEED_LIMIT_MPS
 
             # --- authority lookahead ---
-            dest_blk = self._get_destination_block_for_train_on(cur)
             authority_m = self._lookahead_authority_m(cur, switches, occ_map, broken_map)
 
             # --- apply ONLY sticky speed override here ---
@@ -422,6 +608,21 @@ class TrackState:
             # send to stub
             self.set_suggested_speed(tid, speed_mps)
             self.set_suggested_authority(tid, authority_m)
+
+            # also send to the real Track Controller backend (if attached)
+            if hasattr(self, "track_controller") and self.track_controller is not None:
+                try:
+                    # Find the block number (integer) from the train's current position
+                    # Example: "B6" → 6
+                    block_str = cur
+                    block_id = int(''.join(filter(str.isdigit, block_str)))
+                    speed_mph = round(speed_mps * 2.237, 1)   # convert m/s → mph
+                    auth_yd = round(authority_m * 1.094, 1)   # convert m → yd
+
+                    self.track_controller.receive_ctc_suggestion(block_id, speed_mph, auth_yd)
+                    print(f"[CTC→TC] Sent → block {block_id}: {speed_mph} mph, {auth_yd} yd")
+                except Exception as e:
+                    print(f"[CTC→TC] Error sending to TrackController: {e}")
 
 
      # Compute the next block given current block and active switch positions
@@ -438,14 +639,8 @@ class TrackState:
         return None
 
     # Look ahead from 'cur' until EOL or first blockage, summing safe distance
-    def _lookahead_authority_m(
-        self,
-        cur: str,
-        switches: Dict[str, str],
-        occ_map: Dict[str, str],
-        broken_map: Dict[str, bool],
-        dest_block: Optional[str] = None
-    ) -> float:
+    def _lookahead_authority_m(self, cur: str, switches: Dict[str, str],
+                               occ_map: Dict[str, str], broken_map: Dict[str, bool]) -> float:
         path: List[str] = []
         nxt = cur
         while True:
@@ -453,24 +648,17 @@ class TrackState:
             if nxt is None:
                 break
             path.append(nxt)
-            # stop path if destination is reached
-            if dest_block and nxt == dest_block:
-                break
             if nxt in EOL:
                 break
-
         if SAFETY_BLOCKS > 0 and len(path) > 0:
             path = path[:-SAFETY_BLOCKS] if len(path) > SAFETY_BLOCKS else []
-
         total_m = 0.0
         for b in path:
-            if occ_map.get(b, "free") in ("closed", "occupied"):
-                break
-            if broken_map.get(b, False):
-                break
+            if occ_map.get(b, "free") in ("closed", "occupied"): break
+            if broken_map.get(b, False): break
             total_m += BLOCK_LEN_M
+        # If immediately blocked ahead, grant a 1-block hold so UI isn’t blank
         return total_m
-
 
     def _get_desired_branch_for_train(self, cur_block: str) -> str:
         for t in self._last_snapshot.get("trains", []):
@@ -483,7 +671,9 @@ class TrackState:
         if not self._stub:
             return "no-stub"
         name = (name or "").strip()
-        
+        if name == "Manual Sandbox":
+            self._stub.seed_manual_sandbox()
+            return "Manual Sandbox loaded"
         if name == "Meet-and-Branch":
             self._stub.seed_meet_and_branch()
             return "Meet-and-Branch loaded"
@@ -498,7 +688,7 @@ class TrackState:
             return "Crossing Gate Demo loaded"
         # fallback
         self._stub.seed_manual_sandbox()
-        return "Meet-and-Branch loaded"
+        return "Manual Sandbox loaded"
 
 
     @staticmethod

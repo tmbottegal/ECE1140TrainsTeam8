@@ -1,6 +1,7 @@
 # CTC_tb_ui.py
 from PyQt6 import QtWidgets, QtCore, QtGui
 from .CTC_backend import TrackState
+from .CTC_backend import GREEN_LINE_DATA
 from universal.global_clock import clock
 
 
@@ -10,23 +11,7 @@ MPS_TO_MPH  = 2.23693629
 SCENARIOS = ["Manual Sandbox", "Meet-and-Branch", "Maintenance Detour", "Broken Rail", "Crossing Gate Demo"]
 
 LINE_DATA = {
-    "Blue Line": [
-        ("A", 1,  "free", "YARD",      "Open", "","",      "",      ""),
-        ("A", 2,  "free", "",          "Open", "","",      "",      ""),
-        ("A", 3,  "free", "",          "Open", "","",      "True",  ""),  # crossing
-        ("A", 4,  "free", "",          "Open", "","",      "",      ""),
-        ("A", 5,  "free", "",          "Open", "SW1","",   "",      ""),  # switch to 6 or 11
-        ("B", 6,  "free", "",          "Open", "SW1","GREEN","",     ""),
-        ("B", 7,  "free", "",          "Open", "","",      "",      ""),
-        ("B", 8,  "free", "",          "Open", "","",      "",      ""),
-        ("B", 9,  "free", "",          "Open", "","",      "",      "Beacon"),
-        ("B", 10, "free", "Station B", "Open", "","",      "",      ""),
-        ("C", 11, "free", "",          "Open", "SW1","GREEN","",     ""),
-        ("C", 12, "free", "",          "Open", "","",      "",      ""),
-        ("C", 13, "free", "",          "Open", "","",      "",      ""),
-        ("C", 14, "free", "",          "Open", "","",      "",      "Beacon"),
-        ("C", 15, "free", "Station C", "Open", "","",      "",      ""),
-    ],
+    
     "Red Line":   [],
     "Green Line": [],
 }
@@ -39,8 +24,37 @@ class CTCWindow(QtWidgets.QMainWindow):
         cw = QtWidgets.QWidget(self)
         self.setCentralWidget(cw)
 
+                # === Mode toggle toolbar (Manual / Auto) ===
+        self.mode = "auto"  # default
+
+        toolbar = QtWidgets.QToolBar("Mode Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setStyleSheet("QToolBar { spacing: 10px; }")
+
+        self.mode_label = QtWidgets.QLabel("Mode:")
+        self.mode_label.setStyleSheet("font-weight: bold; font-size: 14pt;")
+
+        self.mode_toggle_button = QtWidgets.QPushButton("Auto Mode")
+        self.mode_toggle_button.setCheckable(True)
+        self.mode_toggle_button.setChecked(False)
+        self.mode_toggle_button.setStyleSheet("background-color: lightblue; font-weight: bold;")
+
+        self.mode_toggle_button.toggled.connect(self.toggle_mode)
+
+        toolbar.addWidget(self.mode_label)
+        toolbar.addWidget(self.mode_toggle_button)
+        toolbar.addSeparator()
+
+        # add the toolbar to the top of the main window
+        self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, toolbar)
+
+
+            
+
+
+
         # === Backend state ===
-        self.state = TrackState("Blue Line", LINE_DATA["Blue Line"])
+        self.state = TrackState("Green Line", GREEN_LINE_DATA)
         self._trainInfoPage = None
         self._manualPage = None
 
@@ -55,20 +69,21 @@ class CTCWindow(QtWidgets.QMainWindow):
         selectorRow = QtWidgets.QHBoxLayout()
         selectorRow.addWidget(QtWidgets.QLabel("Select Line:"))
         self.lineSelector = QtWidgets.QComboBox()
-        self.lineSelector.addItems(["Blue Line", "Red Line", "Green Line"])
-        self.lineSelector.setCurrentText("Blue Line")
+        self.lineSelector.addItems([ "Red Line", "Green Line"])
+        self.lineSelector.setCurrentText("Green Line")
         self.lineSelector.currentTextChanged.connect(self._reload_line)
         selectorRow.addWidget(self.lineSelector)
         selectorRow.addStretch(1)
         occLayout.addLayout(selectorRow)
 
         # Track table
-        self.mapTable = QtWidgets.QTableWidget(0, 10)
+        self.mapTable = QtWidgets.QTableWidget(0, 9)
         self.mapTable.setHorizontalHeaderLabels([
-            "Section", "Block", "Occupancy", "Station",
-            "Status", "Switch", "Traffic Light",
-            "Crossing", "Broken Rail", "Beacon"
+            "Section", "Block", "Status", "Station",
+            "Station Side", "Switch", "Signal Light",
+            "Crossing", "Speed Limit"
         ])
+
         self.mapTable.verticalHeader().setVisible(False)
         self.mapTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.mapTable.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
@@ -77,12 +92,8 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mapTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
 
         # seed initial table rows from LINE_DATA + latest snapshot merge
-        self._reload_line("Blue Line")
+        self._reload_line("Green Line")
         occLayout.addWidget(self.mapTable)
-
-        
-
-       
 
 
         # Buttons under the table
@@ -90,10 +101,12 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.infoBtn   = QtWidgets.QPushButton("Train Information")
         self.uploadBtn = QtWidgets.QPushButton("Upload Schedule")
         self.maintBtn  = QtWidgets.QPushButton("Maintenance / Inputs")
+        self.dispatchBtn = QtWidgets.QPushButton("Dispatch Train")
         for b in (self.manualBtn, self.infoBtn, self.uploadBtn, self.maintBtn):
             b.setMinimumHeight(40)
             b.setStyleSheet("font-size:14px; font-weight:bold;")
         btnRow = QtWidgets.QHBoxLayout()
+        btnRow.addWidget(self.dispatchBtn)
         btnRow.addWidget(self.manualBtn)
         btnRow.addWidget(self.infoBtn)
         btnRow.addWidget(self.uploadBtn)
@@ -105,6 +118,8 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.infoBtn.clicked.connect(self._train_info)
         self.uploadBtn.clicked.connect(self._upload_schedule)
         self.maintBtn.clicked.connect(self._maintenance_inputs)
+        self.dispatchBtn.clicked.connect(self._dispatch_train)
+
 
         # Action area (below buttons)
         self.actionArea = QtWidgets.QStackedWidget()
@@ -327,6 +342,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line(self.state.line_name)
         self._update_switch_readout()
 
+    #Will remove
     def _scenario_load(self):
         name = self.scenarioCombo.currentText()
         msg = self.state.scenario_load(name)  # backend wrapper calls stub.seed_*
@@ -365,6 +381,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.state.stub_tick()
             self._reload_line(self.state.line_name)
 
+    #Will remove 
     def _scenario_reset(self):
         self.state.reset_all()
         self._reload_line(self.state.line_name)
@@ -414,10 +431,17 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mapTable.setRowCount(len(blocks))
         for r, b in enumerate(blocks):
             rowdata = [
-                b.line, b.block_id, b.status, b.station,
-                b.signal, b.switch, b.light,
-                (str(b.crossing_open) if getattr(b, "has_crossing", False) else ""), str(getattr(b, "broken_rail", False)), b.beacon
-            ]
+            b.section,                     # Section letter (A–Z)
+            b.block_id,                    # Block number
+            b.status,                      # "free" / "occupied" / "closed"
+            b.station,                     # Station name (if any)
+            b.station_side,                # Left / Right / Both
+            b.switch,                      # Switch ID or empty
+            b.light,                       # Signal light color
+            ("Yes" if b.crossing else ""),  # Whether crossing exists
+            f"{b.speed_limit:.0f} km/h"    # Speed limit display
+        ]
+
             for c, value in enumerate(rowdata):
                 item = QtWidgets.QTableWidgetItem(str(value))
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -465,6 +489,25 @@ class CTCWindow(QtWidgets.QMainWindow):
         blk = self.mapTable.item(row, 1).text()
         return row, f"{sec}{blk}"
 
+    def toggle_mode(self, enabled: bool):
+        if enabled:
+            self.mode = "manual"
+            self.mode_toggle_button.setText("Manual Mode (Active)")
+            self.mode_toggle_button.setStyleSheet("background-color: lightgreen; font-weight: bold;")
+        else:
+            self.mode = "auto"
+            self.mode_toggle_button.setText("Auto Mode (Active)")
+            self.mode_toggle_button.setStyleSheet("background-color: lightblue; font-weight: bold;")
+
+        # Notify the backend
+        if hasattr(self, "state"):
+            self.state.set_mode(self.mode)
+
+        # update dispatch button availability
+        if hasattr(self, "dispatchBtn"):
+            self.dispatchBtn.setEnabled(self.mode == "manual")
+        print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
+
     # ---------- actions (Occupancy tab) ----------
     def _maintenance_inputs(self):
         row, block_id = self._get_selected_block()
@@ -478,6 +521,64 @@ class CTCWindow(QtWidgets.QMainWindow):
             status = "closed" if "Closed" in choice else "free"
             self.state.set_status(block_id, status)
             self._reload_line(self.state.line_name)
+
+    def _dispatch_train(self):
+        if self.mode != "manual":
+            QtWidgets.QMessageBox.warning(self, "Mode Error", "Switch to Manual Mode to dispatch a train.")
+            return
+
+        # 1️⃣ Ask user for train info
+        train_id, ok_id = QtWidgets.QInputDialog.getText(
+            self, "Dispatch Train", "Enter Train ID (e.g., T1):"
+        )
+        if not ok_id or not train_id.strip():
+            return
+        train_id = train_id.strip().upper()
+
+        dest, ok_dest = QtWidgets.QInputDialog.getItem(
+            self, "Dispatch Train", "Select destination station:",
+            ["Edgebrook", "Pioneer", "Whited", "Central"], 0, False
+        )
+        if not ok_dest:
+            return
+
+        arrival_str, ok_time = QtWidgets.QInputDialog.getText(
+            self, "Dispatch Train", f"Enter desired arrival time at {dest} (HH:MM):"
+        )
+        if not ok_time or not arrival_str.strip():
+            return
+
+        # 2️⃣ Compute departure time (rough estimate)
+        from datetime import datetime, timedelta
+        try:
+            arrival_time = datetime.strptime(arrival_str, "%H:%M")
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self, "Invalid Time", "Please enter time as HH:MM.")
+            return
+
+        avg_speed_mps = 10.0
+        distance_m = 1500.0  # TODO: Replace with real yard→dest distance later
+        travel_time = timedelta(seconds=(distance_m / avg_speed_mps))
+        departure_time = arrival_time - travel_time
+
+       # Convert UI selections to Track Controller units
+        start_block = 12             # temporary default until you have yard mapping
+        suggested_speed = 25         # mph for controller
+        suggested_auth = 200         # yards for controller
+
+        self.state.dispatch_train(train_id, start_block, suggested_speed, suggested_auth)
+
+
+        QtWidgets.QMessageBox.information(
+            self, "Train Dispatched",
+            f"{train_id} dispatched from YARD → {dest}\n"
+            f"Depart: {departure_time.strftime('%H:%M')}\n"
+            f"Arrive: {arrival_time.strftime('%H:%M')}"
+        )
+
+        # 4️⃣ Refresh table
+        self._reload_line(self.state.line_name)
+        self._train_info()
 
     # ---------- Manual Override ---------- MUST REV 
     def _manual_override(self):

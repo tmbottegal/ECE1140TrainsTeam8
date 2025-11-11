@@ -11,6 +11,9 @@ from universal.universal import (
     ConversionFunctions
 )
 
+from track_model_frontend import NetworkStatusUI
+from PyQt6.QtWidgets import QApplication
+
 from track_model_backend import (
     TrackNetwork, 
     TrackSegment, 
@@ -24,6 +27,9 @@ from track_model_backend import (
 from typing import List, Dict, Optional
 
 if __name__ == "__main__":
+    app = QApplication([])
     network = TrackNetwork()
-    network.load_track_layout("trackModel/green_line.csv")
-    print(network.get_network_status())
+    network.load_track_layout('trackModel/green_line.csv')
+    window = NetworkStatusUI(network)
+    window.show()
+    app.exec()

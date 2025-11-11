@@ -21,34 +21,39 @@ CONTROL_SIGNALS = {"B6", "C11"}
     # Computes 3-aspect signals using a simple two-block look-ahead
     
 class TrackControllerStub:
-
     def __init__(self, line_name: str, line_tuples: List[Tuple]):
         self.line_name = line_name
-
-        # Metadata from layout
-        self._order: List[str] = []
-        self._station: Dict[str, str] = {}
-        self._track_status: Dict[str, str] = {}
-        self._switch_of_block: Dict[str, str] = {}
-        self._has_crossing: Dict[str, bool] = {}
-        self._beacon: Dict[str, str] = {}
-        self._overrides: Dict[str, Dict[str, object]] = {}  # 🧠 NEW
-        self._scenario_broken_active: bool = False
+        self.blocks = {}
+        self._order = []
+        self._station = {}
+        self._track_status = {}
+        self._switch_of_block = {}
+        self._has_crossing = {}
+        self._beacon = {}
+        self._scenario_broken_active = False        # prevents AttributeError
         self._crossing_forced: Dict[str, Optional[bool]] = {}
-        self._crossing_auto: bool = False   # disable proximity-based crossing by default
-
-        
+        self._crossing_auto: bool = True
+        self._overrides: Dict[str, Dict[str, object]] = {}
 
 
         for t in line_tuples:
-            sec, bid, status, station, track_status, sw, light, crossing, maintenance = t
+            sec, bid, status, station, station_side, sw, light, crossing, traverse_time, speed_limit = t
             key = f"{sec}{bid}"
-            self._order.append(key)
-            self._station[key] = station or ""
-            self._track_status[key] = track_status or "Open"
-            self._switch_of_block[key] = sw or ""
-            self._has_crossing[key] = (str(crossing).strip().lower() == "true")
-            self._beacon[key] = maintenance or ""
+            self.blocks[key] = {
+                "section": sec,
+                "block_id": bid,
+                "occupancy": status,
+                "station": station,
+                "station_side": station_side,
+                "switch": sw,
+                "light": light,
+                "crossing": bool(crossing),
+                "traverse_time": traverse_time,
+                "speed_limit": speed_limit,
+            }
+
+
+    
 
         # --- Explicit topology (A → B or A → C only) ---
         self._a_chain = ["A1", "A2", "A3", "A4", "A5"]

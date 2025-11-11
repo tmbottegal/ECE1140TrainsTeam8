@@ -22,15 +22,19 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 
-#TODO: #92 remove broadcasting tab
-#TODO: #60 add support for multiple TrackNetwork (red line and green line)
+#TODO: #109 allow main UI to load an already created TrackNetwork object from main.py
 class NetworkStatusUI(QWidget):
-    def __init__(self):
+    def __init__(self, network=None):
         super().__init__()
-        self.track_network = TrackNetwork()
+        self.track_network = network if network is not None else TrackNetwork()
         self.updating_temperature = False  # Flag to prevent recursive updates
         self.init_ui()
-        self.load_track_layout()  # Load CSV on startup
+        if not network:
+            self.load_track_layout() # Load CSV on startup
+        else:
+            self.status_display.append("Loading track layout from given TrackNetwork argument...\n")
+            self.refresh_status()  # Load existing network status
+            self.status_display.append("Track layout loaded successfully!\n")
         
     def init_ui(self):
         self.setWindowTitle("Track Model - Network Status")
@@ -54,9 +58,6 @@ class NetworkStatusUI(QWidget):
         # Create Track Info widget with controls
         self.track_info_widget = self.create_track_info_widget()
         
-        self.command_table = QTableWidget()
-        self.command_table.setFont(QFont("Arial", 10))
-        
         self.failure_table = QTableWidget()
         self.failure_table.setFont(QFont("Arial", 10))
         
@@ -68,9 +69,6 @@ class NetworkStatusUI(QWidget):
         self.tab_widget.addTab(self.station_table, "Station Info")
         self.tab_widget.addTab(self.track_info_widget, "Network Info")
         self.tab_widget.addTab(self.failure_table, "Failure Log")
-        self.tab_widget.addTab(self.command_table, "Command Info")
-
-
         
         layout.addWidget(self.tab_widget)
         
@@ -94,10 +92,20 @@ class NetworkStatusUI(QWidget):
         layout.setStretchFactor(self.tab_widget, 4)  # 4 parts for tables
         layout.setStretchFactor(status_widget, 1)   # 1 part for status
         
+        # Bottom layout with refresh button and time display
+        bottom_layout = QHBoxLayout()
+        
         # Refresh button
         refresh_btn = QPushButton("Refresh Status")
         refresh_btn.clicked.connect(self.refresh_status)
-        layout.addWidget(refresh_btn)
+        bottom_layout.addWidget(refresh_btn, 1)  # stretch factor 1
+        
+        # Time display
+        self.time_label = QLabel("Time: --/--/-- --:--:--")
+        self.time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        bottom_layout.addWidget(self.time_label, 0)  # stretch factor 0
+        
+        layout.addLayout(bottom_layout)
         
         self.setLayout(layout)
         
@@ -180,7 +188,7 @@ class NetworkStatusUI(QWidget):
         """Load the track layout from CSV file (called once on startup)"""
         try:
             # Load track layout with proper path
-            csv_path = os.path.join(os.path.dirname(__file__), "blue_line.csv")
+            csv_path = os.path.join(os.path.dirname(__file__), "red_line.csv")
             self.status_display.append(
                 f"Loading track layout from {csv_path}...")
             self.track_network.load_track_layout(csv_path)
@@ -219,6 +227,16 @@ class NetworkStatusUI(QWidget):
         
         # Assuming network_status is a dictionary
         if isinstance(network_status, dict):
+            # Update time display if available
+            if 'time' in network_status:
+                time_obj = network_status['time']
+                # Format as MM/DD/YY HH:MM:SS
+                formatted_time = time_obj.strftime("%m/%d/%y %H:%M:%S")
+                self.time_label.setText(f"Time: {formatted_time}")
+            else:
+                # Fallback if time not available in network status
+                self.time_label.setText("Time: --/--/-- --:--")
+            
             # Populate segments table
             if 'segments' in network_status:
                 self.populate_segments_table(network_status['segments'])
@@ -254,10 +272,6 @@ class NetworkStatusUI(QWidget):
             if 'segments' in network_status:
                 self.populate_current_failures_table(network_status['segments'])
             
-            # Populate command info table
-            if 'active_commands' in network_status:
-                self.populate_command_table(network_status['active_commands']) #TODO #92 remove
-            
             # Populate failure log table
             if 'failure_log' in network_status:
                 self.populate_failure_table(network_status['failure_log'])
@@ -278,7 +292,6 @@ class NetworkStatusUI(QWidget):
         self.segment_table.clear()
         self.track_info_table.clear()
         self.current_failures_table.clear()
-        self.command_table.clear()
         self.failure_table.clear()
         self.station_table.clear()
     
@@ -779,101 +792,6 @@ class NetworkStatusUI(QWidget):
         """Custom print function for terminal output"""
         message = ' '.join(str(arg) for arg in args)
         self.status_display.append(message)
-    
-    def populate_command_table(self, commands_data):
-        """Populate the command info table"""
-        if not commands_data:
-            return
-            
-        if isinstance(commands_data, dict):
-            # Check if values are TrainCommand objects
-            first_value = next(iter(commands_data.values())) if commands_data else None
-            if first_value and hasattr(first_value, 'train_id'):
-                # Handle TrainCommand objects
-                self.command_table.setRowCount(len(commands_data))
-                self.command_table.setColumnCount(4)
-                self.command_table.setHorizontalHeaderLabels(["Command ID", "Train ID", "Commanded Speed", "Authority"])
-                
-                for row, (cmd_id, cmd_obj) in enumerate(commands_data.items()):
-                    self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_id)))
-                    self.command_table.setItem(row, 1, QTableWidgetItem(str(cmd_obj.train_id)))
-                    
-                    # Convert commanded speed from m/s to mph
-                    if isinstance(cmd_obj.commanded_speed, (int, float)):
-                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
-                        speed_display = f"{mph_value:.1f} mph"
-                    else:
-                        speed_display = str(cmd_obj.commanded_speed)
-                    self.command_table.setItem(row, 2, QTableWidgetItem(speed_display))
-                    
-                    # Convert authority from m to yds
-                    if isinstance(cmd_obj.authority, (int, float)):
-                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
-                        authority_display = f"{yards_value:.2f} yds"
-                    else:
-                        authority_display = str(cmd_obj.authority)
-                    self.command_table.setItem(row, 3, QTableWidgetItem(authority_display))
-            else:
-                # Handle nested dictionaries or simple key-value pairs
-                has_nested_dicts = any(isinstance(v, dict) for v in commands_data.values())
-                if has_nested_dicts:
-                    self.populate_dict_as_table(self.command_table, commands_data, "Command ID", "Properties")
-                else:
-                    # Simple key-value pairs
-                    self.command_table.setRowCount(len(commands_data))
-                    self.command_table.setColumnCount(2)
-                    self.command_table.setHorizontalHeaderLabels(["Command ID", "Value"])
-                    
-                    for row, (key, value) in enumerate(commands_data.items()):
-                        self.command_table.setItem(row, 0, QTableWidgetItem(str(key)))
-                        self.command_table.setItem(row, 1, QTableWidgetItem(str(value)))
-                        
-        elif isinstance(commands_data, list):
-            # Check if list contains TrainCommand objects
-            if commands_data and hasattr(commands_data[0], 'train_id'):
-                # Handle list of TrainCommand objects
-                self.command_table.setRowCount(len(commands_data))
-                self.command_table.setColumnCount(3)
-                self.command_table.setHorizontalHeaderLabels(["Train ID", "Commanded Speed", "Authority"])
-                
-                for row, cmd_obj in enumerate(commands_data):
-                    self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_obj.train_id)))
-                    
-                    # Convert commanded speed from m/s to mph
-                    if isinstance(cmd_obj.commanded_speed, (int, float)):
-                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
-                        speed_display = f"{mph_value:.1f} mph"
-                    else:
-                        speed_display = str(cmd_obj.commanded_speed)
-                    self.command_table.setItem(row, 1, QTableWidgetItem(speed_display))
-                    
-                    # Convert authority from m to yds
-                    if isinstance(cmd_obj.authority, (int, float)):
-                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
-                        authority_display = f"{yards_value:.2f} yds"
-                    else:
-                        authority_display = str(cmd_obj.authority)
-                    self.command_table.setItem(row, 2, QTableWidgetItem(authority_display))
-            elif commands_data and isinstance(commands_data[0], dict):
-                # Convert list to dict format for better table display
-                dict_data = {f"Command_{i}": cmd for i, cmd in enumerate(commands_data)}
-                self.populate_dict_as_table(self.command_table, dict_data, "Command ID", "Properties")
-            else:
-                # Simple list display
-                self.command_table.setRowCount(len(commands_data))
-                self.command_table.setColumnCount(1)
-                self.command_table.setHorizontalHeaderLabels(["Commands"])
-                
-                for row, cmd in enumerate(commands_data):
-                    self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd)))
-        else:
-            # Fallback for other data types
-            self.command_table.setRowCount(1)
-            self.command_table.setColumnCount(1)
-            self.command_table.setHorizontalHeaderLabels(["Commands"])
-            self.command_table.setItem(0, 0, QTableWidgetItem(str(commands_data)))
-            
-        self.command_table.resizeColumnsToContents()
     
     def populate_failure_table(self, failure_data):
         """Populate the failure log table"""

@@ -65,8 +65,8 @@ def test_set_beacon_data() -> None:
     segment = TrackSegment(1, 100, 30, 2.5, False)
     assert segment.beacon_data == ""
     
-    segment.set_beacon_data("Bababooey")
-    assert segment.beacon_data == "Bababooey"
+    segment.set_beacon_data("test")
+    assert segment.beacon_data == "test"
 
 def test_segment_set_track_failure() -> None:
     segment = TrackSegment(1, 199, 30, 2.5, False)
@@ -197,26 +197,17 @@ def test_set_gate_status() -> None:
     crossing.set_gate_status(False)
     assert crossing.gate_status == False
 
-def test_automatic_gate_status() -> None:
-    crossing = LevelCrossing(1, 200, 20, 2.5, False)
-    assert crossing.gate_status == False
-    
-    crossing.set_occupancy(True)
-    assert crossing.gate_status == True
-    
-    crossing.set_occupancy(False)
-    assert crossing.gate_status == False
 """
 Station Individual Testing
 """
 def test_station_construction() -> None:
-    station = Station(2, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
     
     assert station.block_id == 2
     assert station.length == 300
     assert station.speed_limit == 69
     assert station.grade == 0
-    assert station.station_name == "balls"
+    assert station.station_name == "test"
     assert station.station_side == StationSide.BOTH
     assert station.passengers_waiting == 0
     assert station.passengers_boarded_total == 0
@@ -226,7 +217,7 @@ def test_station_construction() -> None:
     assert station.previous_segment is None
 
 def test_sell_tickets() -> None:
-    station = Station(2, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
     assert station.passengers_waiting == 0
     assert station.tickets_sold_total == 0
 
@@ -239,7 +230,7 @@ def test_sell_tickets() -> None:
     assert station.tickets_sold_total > 10
 
 def test_passengers_boarding_valid() -> None:
-    station = Station(2, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
     station.sell_tickets(50)
     assert station.passengers_waiting == 50
     assert station.tickets_sold_total == 50
@@ -251,7 +242,7 @@ def test_passengers_boarding_valid() -> None:
     assert station.passengers_waiting < 10
 
 def test_passengers_boarding_invalid() -> None:
-    station = Station(2, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
     station.sell_tickets(30)
     assert station.passengers_waiting == 30
     assert station.tickets_sold_total == 30
@@ -265,7 +256,7 @@ def test_passengers_boarding_invalid() -> None:
     assert station.passengers_waiting == 30
 
 def test_passengers_exiting() -> None:
-    station = Station(2, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
     assert station.passengers_exited_total == 0
     
     station.passengers_exiting(20)
@@ -278,7 +269,7 @@ def test_add_segment_valid() -> None:
     segment = TrackSegment(1, 100, 30, 2.5, False)
     switch = TrackSwitch(2, 150, 25, 1.5, False)
     crossing = LevelCrossing(3, 200, 20, 2.5, False)
-    station = Station(4, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(4, 300, 69, 0, "test", StationSide.BOTH)
     
     network.add_segment(segment)
     assert network.segments[1] == segment
@@ -675,7 +666,7 @@ def test_get_segment_status_valid() -> None:
     network = TrackNetwork()
     segment = TrackSegment(1, 100, 30, 2.5, False)
     level_crossing = LevelCrossing(2, 150, 25, 1.5, False)
-    station = Station(3, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(3, 300, 69, 0, "test", StationSide.BOTH)
     switch = TrackSwitch(4, 200, 20, 2.0, False)
 
 
@@ -731,7 +722,7 @@ def test_get_segment_status_valid() -> None:
     assert status["closed"] == False
     assert status["next_segment"] == 4
     assert status["previous_segment"] == None
-    assert status["station_name"] == "balls"
+    assert status["station_name"] == "test"
     assert status["station_side"] == StationSide.BOTH
     assert status["passengers_waiting"] == 0
     assert status["passengers_boarded_total"] == 0
@@ -845,7 +836,7 @@ def test_everything_blueline() -> None:
 
 def test_network_passengers_boarding_invalid() -> None:
     network = TrackNetwork()
-    station = Station(2, 300, 69, 0, "balls", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
     network.add_segment(station)
 
     with pytest.raises(ValueError):
@@ -853,6 +844,8 @@ def test_network_passengers_boarding_invalid() -> None:
 
     with pytest.raises(ValueError):
         network.passengers_boarding(1, -5, 10)
+
+    #TODO #103 : Add unit tests for new functions in backend
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

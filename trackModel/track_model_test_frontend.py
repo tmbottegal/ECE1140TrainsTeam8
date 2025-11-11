@@ -33,15 +33,19 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
-#TODO: #92 remove broadcasting tab and integrate commands into segment tab
 #TODO: #60 add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
-    def __init__(self):
+    def __init__(self, network=None):
         super().__init__()
-        self.track_network = TrackNetwork()
+        self.track_network = network if network is not None else TrackNetwork()
         self.updating_temperature = False  # Flag to prevent recursive updates
         self.init_ui()
-        self.load_track_layout()  # Load CSV on startup
+        if not network:
+            self.load_track_layout() # Load CSV on startup
+        else:
+            self.status_display.append("Loading track layout from given TrackNetwork argument...\n")
+            self.refresh_status()  # Load existing network status
+            self.status_display.append("Track layout loaded successfully!\n")
         
     def init_ui(self):
         self.setWindowTitle("Track Model - Test Network Status")
@@ -68,9 +72,6 @@ class NetworkStatusUI(QWidget):
         # Create Track Info widget with controls
         self.track_info_widget = self.create_track_info_widget()
         
-        # Create Command Info widget with broadcast controls
-        self.command_info_widget = self.create_command_info_widget()
-        
         self.failure_table = QTableWidget()
         self.failure_table.setFont(QFont("Arial", 10))
         
@@ -86,10 +87,7 @@ class NetworkStatusUI(QWidget):
         self.tab_widget.addTab(self.station_info_widget, "Station Info")
         self.tab_widget.addTab(self.track_info_widget, "Network Info")
         self.tab_widget.addTab(self.failure_table, "Failure Log")
-        self.tab_widget.addTab(self.command_info_widget, "Command Info") #TODO #92 remove
 
-
-        
         layout.addWidget(self.tab_widget)
         
         # Terminal section (compact layout)
@@ -133,10 +131,22 @@ class NetworkStatusUI(QWidget):
         layout.setStretchFactor(self.tab_widget, 4)  # 4 parts for tables
         layout.setStretchFactor(terminal_widget, 1)   # 1 part for terminal
         
-        # Refresh button
+        # Bottom section with time display and refresh button
+        bottom_layout = QHBoxLayout()
+        
+        # Refresh button (takes up most of the space)
         refresh_btn = QPushButton("Refresh Status")
         refresh_btn.clicked.connect(self.refresh_status)
-        layout.addWidget(refresh_btn)
+        bottom_layout.addWidget(refresh_btn, 1)  # Give it stretch factor of 1
+        
+        # Time display (only takes space it needs on the right)
+        self.time_label = QLabel("Time: --/--/-- --:--")
+        self.time_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        self.time_label.setAlignment(Qt.AlignmentFlag.AlignRight)  # Right-align the text
+        self.time_label.setMinimumWidth(150)  # Set minimum width for time display
+        bottom_layout.addWidget(self.time_label, 0)  # Give it stretch factor of 0
+        
+        layout.addLayout(bottom_layout)
         
         self.setLayout(layout)
         
@@ -215,65 +225,6 @@ class NetworkStatusUI(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_command_info_widget(self):  #TODO #92 remove
-        """Create the Command Info tab with table and broadcast command 
-        controls."""
-        widget = QWidget()
-        layout = QHBoxLayout()
-        
-        # Left side - Command table (stretchable)
-        self.command_table = QTableWidget()
-        self.command_table.setFont(QFont("Arial", 10))
-        layout.addWidget(self.command_table, 1)  # Takes most of the space
-        
-        # Right side - Broadcast Train Command controls
-        controls_layout = QVBoxLayout()
-        controls_widget = QWidget()
-        controls_widget.setLayout(controls_layout)
-        controls_widget.setMaximumWidth(250)
-        
-        # Title for controls
-        controls_title = QLabel("Broadcast Train Command")
-        controls_title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        controls_layout.addWidget(controls_title)
-        
-        # Train ID input
-        train_id_label = QLabel("Train ID:")
-        controls_layout.addWidget(train_id_label)
-        
-        self.train_id_input = QLineEdit()
-        self.train_id_input.setPlaceholderText("Enter train ID (e.g., 1)")
-        controls_layout.addWidget(self.train_id_input)
-        
-        # Commanded Speed input
-        speed_label = QLabel("Commanded Speed (mph):")
-        controls_layout.addWidget(speed_label)
-        
-        self.commanded_speed_input = QLineEdit()
-        self.commanded_speed_input.setPlaceholderText("Enter speed (e.g., 25)")
-        controls_layout.addWidget(self.commanded_speed_input)
-        
-        # Authority input
-        authority_label = QLabel("Authority (yards):")
-        controls_layout.addWidget(authority_label)
-        
-        self.authority_input = QLineEdit()
-        self.authority_input.setPlaceholderText("Enter authority (e.g., 100)")
-        controls_layout.addWidget(self.authority_input)
-        
-        # Apply button
-        apply_command_btn = QPushButton("Broadcast Command")
-        apply_command_btn.clicked.connect(self.broadcast_train_command)
-        controls_layout.addWidget(apply_command_btn)
-        
-        # Add spacing to push controls to top
-        controls_layout.addStretch()
-        
-        layout.addWidget(controls_widget, 0)  # Fixed size
-        
-        widget.setLayout(layout)
-        return widget
-    
     def create_segment_info_widget(self):
         """Create the Segment Info tab with table and segment editing 
         controls."""
@@ -329,6 +280,22 @@ class NetworkStatusUI(QWidget):
         self.signal_state_dropdown.addItems(
             ["RED", "YELLOW", "GREEN", "SUPERGREEN"])
         controls_layout.addWidget(self.signal_state_dropdown)
+        
+        # Commanded Speed input
+        speed_label = QLabel("Commanded Speed (mph):")
+        controls_layout.addWidget(speed_label)
+        
+        self.commanded_speed_input = QLineEdit()
+        self.commanded_speed_input.setPlaceholderText("Enter speed in mph")
+        controls_layout.addWidget(self.commanded_speed_input)
+        
+        # Authority input
+        authority_label = QLabel("Authority (yards):")
+        controls_layout.addWidget(authority_label)
+        
+        self.authority_input = QLineEdit()
+        self.authority_input.setPlaceholderText("Enter authority in yards")
+        controls_layout.addWidget(self.authority_input)
         
         # Apply button
         apply_segment_btn = QPushButton("Apply Changes")
@@ -464,18 +431,14 @@ class NetworkStatusUI(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def broadcast_train_command(self):   # TODO #92 modify to only have new TrainCommand
+    def broadcast_train_command(self): 
         """Broadcast a train command with the specified parameters"""
         try:
             # Get input values
-            train_id_str = self.train_id_input.text().strip()
             speed_str = self.commanded_speed_input.text().strip()
             authority_str = self.authority_input.text().strip()
             
             # Validate inputs
-            if not train_id_str:
-                self.status_display.append("Error: Train ID is required")
-                return
             if not speed_str:
                 self.status_display.append("Error: Commanded Speed is required")
                 return
@@ -484,14 +447,6 @@ class NetworkStatusUI(QWidget):
                 return
             
             # Convert to appropriate types
-            try:
-                train_id = int(train_id_str)
-            except ValueError:
-                self.status_display.append(
-                    f"Error: Train ID must be an integer, got '{train_id_str}'"
-                )
-                return
-                
             try:
                 commanded_speed_mph = int(speed_str)
             except ValueError:
@@ -518,13 +473,24 @@ class NetworkStatusUI(QWidget):
                 authority_yards
             )
             
+            # Determine block_id from selected segment dropdowns (edit or general)
+            selected_segment = self.edit_segment_dropdown.currentText() or self.segment_dropdown.currentText()
+            if not selected_segment:
+                self.status_display.append("Error: No segment selected for broadcasting train command")
+                return
+            try:
+                block_id = int(selected_segment)
+            except (ValueError, TypeError):
+                self.status_display.append(f"Error: Invalid segment id '{selected_segment}'")
+                return
+
             # Call the backend method with speed in m/s and authority in meters
             self.track_network.broadcast_train_command(
-                train_id, commanded_speed_mps, authority_meters
+                block_id, commanded_speed_mps, authority_meters
             )
 
             self.status_display.append(
-                f"Broadcast train command: Train ID={train_id}, "
+                f"Broadcast train command: Block ID={block_id}, "
                 f"Speed={commanded_speed_mph} mph ({commanded_speed_mps:.2f} m/s), "
                 f"Authority={authority_yards} yards ({authority_meters:.2f} m)"
             )
@@ -553,6 +519,8 @@ class NetworkStatusUI(QWidget):
             
         except Exception as e:
             self.status_display.append(f"Error loading track layout: {str(e)}")
+            # Set default time display if loading fails
+            self.time_label.setText("Time: --/--/-- --:--:--")
     
     def refresh_status(self):
         """Refresh the network status display (without reloading CSV)"""
@@ -585,6 +553,13 @@ class NetworkStatusUI(QWidget):
         
         # Assuming network_status is a dictionary
         if isinstance(network_status, dict):
+            # Update time display if available
+            if 'time' in network_status:
+                time_obj = network_status['time']
+                # Format as MM/DD/YY HH:MM
+                formatted_time = time_obj.strftime("%m/%d/%y %H:%M:%S")
+                self.time_label.setText(f"Time: {formatted_time}")
+            
             # Populate segments table
             if 'segments' in network_status:
                 self.populate_segments_table(network_status['segments'])
@@ -624,10 +599,6 @@ class NetworkStatusUI(QWidget):
             if 'segments' in network_status:
                 self.populate_current_failures_table(network_status['segments'])
             
-            # Populate command info table
-            if 'active_commands' in network_status:
-                self.populate_command_table(network_status['active_commands']) #TODO #92 remove
-            
             # Populate failure log table
             if 'failure_log' in network_status:
                 self.populate_failure_table(network_status['failure_log'])
@@ -649,7 +620,6 @@ class NetworkStatusUI(QWidget):
         self.segment_table.clear()
         self.track_info_table.clear()
         self.current_failures_table.clear()
-        self.command_table.clear()
         self.failure_table.clear()
         self.station_table.clear()
     
@@ -1133,6 +1103,23 @@ class NetworkStatusUI(QWidget):
                             self.signal_state_dropdown.setCurrentIndex(i)
                             break
                     
+                    # Update commanded speed and authority from active command if present
+                    active_command = segment_data.get('active_command', None)
+                    if active_command and isinstance(active_command, dict):
+                        # Convert speed from m/s to mph for display
+                        speed_mps = active_command.get('commanded_speed', 0)
+                        speed_mph = ConversionFunctions.mps_to_mph(speed_mps)
+                        self.commanded_speed_input.setText(str(int(speed_mph)))
+                        
+                        # Convert authority from meters to yards for display
+                        authority_meters = active_command.get('authority', 0)
+                        authority_yards = ConversionFunctions.meters_to_yards(authority_meters)
+                        self.authority_input.setText(str(int(authority_yards)))
+                    else:
+                        # Clear fields if no active command
+                        self.commanded_speed_input.clear()
+                        self.authority_input.clear()
+                    
         except Exception as e:
             self.status_display.append(f"Error updating segment controls: {str(e)}")
     
@@ -1184,6 +1171,53 @@ class NetworkStatusUI(QWidget):
             # Set signal state
             self.track_network.set_signal_state(segment_id, signal_state)
             changes_made.append(f"signal_state={signal_state_text}")
+            
+            # Handle train command if speed and authority are provided
+            speed_str = self.commanded_speed_input.text().strip()
+            authority_str = self.authority_input.text().strip()
+            
+            if speed_str or authority_str:
+                # Validate that both fields are provided if one is provided
+                if not speed_str:
+                    self.status_display.append("Error: Commanded Speed is required when Authority is provided")
+                    return
+                if not authority_str:
+                    self.status_display.append("Error: Authority is required when Commanded Speed is provided")
+                    return
+                
+                # Convert and validate inputs
+                try:
+                    commanded_speed_mph = int(speed_str)
+                    if commanded_speed_mph < 0:
+                        self.status_display.append("Error: Commanded Speed must be non-negative")
+                        return
+                except ValueError:
+                    self.status_display.append(f"Error: Commanded Speed must be an integer, got '{speed_str}'")
+                    return
+                
+                try:
+                    authority_yards = int(authority_str)
+                    if authority_yards < 0:
+                        self.status_display.append("Error: Authority must be non-negative")
+                        return
+                except ValueError:
+                    self.status_display.append(f"Error: Authority must be an integer, got '{authority_str}'")
+                    return
+                
+                # Convert units for internal system
+                commanded_speed_mps = ConversionFunctions.mph_to_mps(commanded_speed_mph)
+                authority_meters = ConversionFunctions.yards_to_meters(authority_yards)
+                
+                # Broadcast train command
+                self.track_network.broadcast_train_command(
+                    segment_id, commanded_speed_mps, authority_meters
+                )
+                
+                changes_made.append(f"train_command(speed={commanded_speed_mph}mph, authority={authority_yards}yards)")
+                
+                # Clear the input fields after successful command broadcast
+                self.commanded_speed_input.clear()
+                self.authority_input.clear()
             
             # Report success
             self.status_display.append(f"Applied changes to segment {segment_id}: {', '.join(changes_made)}")
@@ -1445,101 +1479,6 @@ class NetworkStatusUI(QWidget):
         """Custom print function for terminal output"""
         message = ' '.join(str(arg) for arg in args)
         self.status_display.append(message)
-    
-    def populate_command_table(self, commands_data):
-        """Populate the command info table"""
-        if not commands_data:
-            return
-            
-        if isinstance(commands_data, dict):
-            # Check if values are TrainCommand objects
-            first_value = next(iter(commands_data.values())) if commands_data else None
-            if first_value and hasattr(first_value, 'train_id'):
-                # Handle TrainCommand objects
-                self.command_table.setRowCount(len(commands_data))
-                self.command_table.setColumnCount(4)
-                self.command_table.setHorizontalHeaderLabels(["Command ID", "Train ID", "Commanded Speed", "Authority"])
-                
-                for row, (cmd_id, cmd_obj) in enumerate(commands_data.items()):
-                    self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_id)))
-                    self.command_table.setItem(row, 1, QTableWidgetItem(str(cmd_obj.train_id)))
-                    
-                    # Convert commanded speed from m/s to mph
-                    if isinstance(cmd_obj.commanded_speed, (int, float)):
-                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
-                        speed_display = f"{mph_value:.1f} mph"
-                    else:
-                        speed_display = str(cmd_obj.commanded_speed)
-                    self.command_table.setItem(row, 2, QTableWidgetItem(speed_display))
-                    
-                    # Convert authority from m to yds
-                    if isinstance(cmd_obj.authority, (int, float)):
-                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
-                        authority_display = f"{yards_value:.2f} yds"
-                    else:
-                        authority_display = str(cmd_obj.authority)
-                    self.command_table.setItem(row, 3, QTableWidgetItem(authority_display))
-            else:
-                # Handle nested dictionaries or simple key-value pairs
-                has_nested_dicts = any(isinstance(v, dict) for v in commands_data.values())
-                if has_nested_dicts:
-                    self.populate_dict_as_table(self.command_table, commands_data, "Command ID", "Properties")
-                else:
-                    # Simple key-value pairs
-                    self.command_table.setRowCount(len(commands_data))
-                    self.command_table.setColumnCount(2)
-                    self.command_table.setHorizontalHeaderLabels(["Command ID", "Value"])
-                    
-                    for row, (key, value) in enumerate(commands_data.items()):
-                        self.command_table.setItem(row, 0, QTableWidgetItem(str(key)))
-                        self.command_table.setItem(row, 1, QTableWidgetItem(str(value)))
-                        
-        elif isinstance(commands_data, list):
-            # Check if list contains TrainCommand objects
-            if commands_data and hasattr(commands_data[0], 'train_id'):
-                # Handle list of TrainCommand objects
-                self.command_table.setRowCount(len(commands_data))
-                self.command_table.setColumnCount(3)
-                self.command_table.setHorizontalHeaderLabels(["Train ID", "Commanded Speed", "Authority"])
-                
-                for row, cmd_obj in enumerate(commands_data):
-                    self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd_obj.train_id)))
-                    
-                    # Convert commanded speed from m/s to mph
-                    if isinstance(cmd_obj.commanded_speed, (int, float)):
-                        mph_value = ConversionFunctions.mps_to_mph(cmd_obj.commanded_speed)
-                        speed_display = f"{mph_value:.1f} mph"
-                    else:
-                        speed_display = str(cmd_obj.commanded_speed)
-                    self.command_table.setItem(row, 1, QTableWidgetItem(speed_display))
-                    
-                    # Convert authority from m to yds
-                    if isinstance(cmd_obj.authority, (int, float)):
-                        yards_value = ConversionFunctions.meters_to_yards(cmd_obj.authority)
-                        authority_display = f"{yards_value:.2f} yds"
-                    else:
-                        authority_display = str(cmd_obj.authority)
-                    self.command_table.setItem(row, 2, QTableWidgetItem(authority_display))
-            elif commands_data and isinstance(commands_data[0], dict):
-                # Convert list to dict format for better table display
-                dict_data = {f"Command_{i}": cmd for i, cmd in enumerate(commands_data)}
-                self.populate_dict_as_table(self.command_table, dict_data, "Command ID", "Properties")
-            else:
-                # Simple list display
-                self.command_table.setRowCount(len(commands_data))
-                self.command_table.setColumnCount(1)
-                self.command_table.setHorizontalHeaderLabels(["Commands"])
-                
-                for row, cmd in enumerate(commands_data):
-                    self.command_table.setItem(row, 0, QTableWidgetItem(str(cmd)))
-        else:
-            # Fallback for other data types
-            self.command_table.setRowCount(1)
-            self.command_table.setColumnCount(1)
-            self.command_table.setHorizontalHeaderLabels(["Commands"])
-            self.command_table.setItem(0, 0, QTableWidgetItem(str(commands_data)))
-            
-        self.command_table.resizeColumnsToContents()
     
     def populate_failure_table(self, failure_data):
         """Populate the failure log table"""

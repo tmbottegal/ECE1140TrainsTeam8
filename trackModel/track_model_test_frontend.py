@@ -33,7 +33,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
-#TODO: #60 add support for multiple TrackNetwork (red line and green line)
 class NetworkStatusUI(QWidget):
     def __init__(self, network=None):
         super().__init__()
@@ -41,9 +40,9 @@ class NetworkStatusUI(QWidget):
         self.updating_temperature = False  # Flag to prevent recursive updates
         self.init_ui()
         if not network:
-            self.load_track_layout() # Load CSV on startup
+            self.load_track_layout() # Load CSV on startup if not provided TrackNetwork
         else:
-            self.status_display.append("Loading track layout from given TrackNetwork argument...\n")
+            self.status_display.append(f"Loading track layout from given TrackNetwork argument \"{network.line_name}\"...\n")
             self.refresh_status()  # Load existing network status
             self.status_display.append("Track layout loaded successfully!\n")
         

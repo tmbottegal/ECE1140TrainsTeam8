@@ -309,6 +309,27 @@ class TrackState:
         except Exception as e:
             print(f"[CTC] Error while sending test suggestion: {e}")
 
+    
+    def dispatch_train(self, train_id: str, start_block: int, suggested_speed: int, suggested_auth: int):
+        """
+        Manual dispatch entry point for the UI:
+        - Adds a train locally to the stub (so UI shows it)
+        - Sends suggested speed/authority to the Track Controller backend
+        """
+        # 1️⃣ Add to stub simulation (optional but keeps UI in sync)
+        if self._stub:
+            block_key = f"A{start_block}" if isinstance(start_block, int) else str(start_block)
+            self._stub.add_train(train_id, block_key)
+            self._stub.broadcast()
+            print(f"[CTC] Added {train_id} to stub at {block_key}")
+
+        # 2️⃣ Send initial suggestion to real Track Controller
+        if hasattr(self, "track_controller") and self.track_controller is not None:
+            self.track_controller.receive_ctc_suggestion(start_block, suggested_speed, suggested_auth)
+            print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed} mph, {suggested_auth} yd")
+        else:
+            print("[CTC] Track Controller not connected — could not send suggestion.")
+
 
     def set_line(self, name: str, tuples: List[Tuple]):
         self.line_name = name

@@ -342,6 +342,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._reload_line(self.state.line_name)
         self._update_switch_readout()
 
+    #Will remove
     def _scenario_load(self):
         name = self.scenarioCombo.currentText()
         msg = self.state.scenario_load(name)  # backend wrapper calls stub.seed_*
@@ -380,6 +381,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.state.stub_tick()
             self._reload_line(self.state.line_name)
 
+    #Will remove 
     def _scenario_reset(self):
         self.state.reset_all()
         self._reload_line(self.state.line_name)
@@ -559,13 +561,13 @@ class CTCWindow(QtWidgets.QMainWindow):
         travel_time = timedelta(seconds=(distance_m / avg_speed_mps))
         departure_time = arrival_time - travel_time
 
-        # 3️⃣ Add to backend
-        self.state.add_train(train_id, "YARD")
+       # Convert UI selections to Track Controller units
+        start_block = 12             # temporary default until you have yard mapping
+        suggested_speed = 25         # mph for controller
+        suggested_auth = 200         # yards for controller
 
-        # Compute initial authority (in meters, so TrackState converts to blocks)
-        initial_authority_m = 500.0
-        self.state.set_suggested_speed(train_id, avg_speed_mps)
-        self.state.set_suggested_authority(train_id, initial_authority_m)
+        self.state.dispatch_train(train_id, start_block, suggested_speed, suggested_auth)
+
 
         QtWidgets.QMessageBox.information(
             self, "Train Dispatched",

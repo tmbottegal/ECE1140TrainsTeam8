@@ -30,8 +30,21 @@ def main():
     state.track_controller.receive_ctc_suggestion(block_id, suggested_speed, suggested_auth)
 
     print("\n[VERIFY] Backend received:")
-    print("  Speeds:", controller._suggested_speed_mph)
-    print("  Authorities:", controller._suggested_auth_yd)
+    # Adapt to real backend's variable names
+    if hasattr(controller, "_suggested_speed_mps"):
+        print("  Speeds (m/s):", controller._suggested_speed_mps)
+    elif hasattr(controller, "_suggested_speed_mph"):
+        print("  Speeds (mph):", controller._suggested_speed_mph)
+    else:
+        print("  Speeds: (no attribute found)")
+
+    if hasattr(controller, "_suggested_auth_yd"):
+        print("  Authorities (yd):", controller._suggested_auth_yd)
+    elif hasattr(controller, "_suggested_auth_m"):
+        print("  Authorities (m):", controller._suggested_auth_m)
+    else:
+        print("  Authorities: (no attribute found)")
+
 
 
 if __name__ == "__main__":

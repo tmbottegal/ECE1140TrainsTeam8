@@ -6,17 +6,18 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog,
-    QHeaderView, QMessageBox, QSplitter, QSizePolicy, QApplication, QAbstractItemView
+    QHeaderView, QMessageBox, QSplitter, QSizePolicy, QApplication, QAbstractItemView,
+    QLineEdit,
 )
 
-from TrackControllerHWBackend import (
+from trackControllerHW.track_controller_hw_backend import (
     HardwareTrackControllerBackend,
     TrackModelAdapter,
     SignalState,
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # change to WARNING to reduce log spam
+logger.setLevel(logging.DEBUG)  # set to WARNING to reduce log output
 if not logger.handlers:
     h = logging.StreamHandler(sys.stdout)
     h.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
@@ -31,6 +32,7 @@ class TrackControllerHWUI(QWidget):
         self.maintenance_enabled = False
         self.current_plc_path = "None"
 
+        # Let backends notify us when state changes
         for c in self.controllers.values():
             try:
                 c.add_listener(self.refresh_all)
@@ -40,10 +42,12 @@ class TrackControllerHWUI(QWidget):
         self._build_ui()
         self._wire_signals()
 
+        # Heartbeat refresh
         self._hb_timer = QTimer(self)
         self._hb_timer.timeout.connect(self.refresh_all)
         self._hb_timer.start(1000)
 
+        # Disable Browse until Maintenance
         try:
             self.btn_plc.setEnabled(False)
         except Exception:
@@ -72,15 +76,14 @@ class TrackControllerHWUI(QWidget):
         self.line_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         side_layout.addWidget(self.line_picker)
 
-        # Space between Line dropdown and Maintenance button (tweak this number)
+        # Space between Line dropdown and Maintenance button (tweak this value if desired)
         side_layout.addSpacing(14)
 
         self.btn_maint = QPushButton("Maintenance Mode")
         self.btn_maint.setCheckable(True)
         side_layout.addWidget(self.btn_maint)
 
-        self.lbl_status = QLabel("Status: —")
-        side_layout.addWidget(self.lbl_status)
+        # (Removed the Status label since it's redundant)
         side_layout.addStretch(1)
 
         # ---- Main content ----
@@ -89,14 +92,31 @@ class TrackControllerHWUI(QWidget):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(8)
 
-        plc_bar = QHBoxLayout()
-        self.btn_plc = QPushButton("Upload PLC…")
-        self.plc_path = QLabel("File: None")
-        plc_bar.addWidget(self.btn_plc)
-        plc_bar.addStretch(1)
-        plc_bar.addWidget(self.plc_path)
-        content_layout.addLayout(plc_bar)
+        # --- Clean PLC "search bar + Browse" row ---
+        plc_row = QHBoxLayout()
 
+        plc_label = QLabel("Upload PLC File:")
+        plc_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        self.plc_edit = QLineEdit()
+        self.plc_edit.setPlaceholderText("No file selected")
+        self.plc_edit.setReadOnly(True)
+        self.plc_edit.setMinimumWidth(420)
+        self.plc_edit.setStyleSheet(
+            "QLineEdit { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }"
+        )
+
+        self.btn_plc = QPushButton("Browse")
+        self.btn_plc.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_plc.setFixedWidth(90)
+
+        plc_row.addWidget(plc_label)
+        plc_row.addWidget(self.plc_edit, 1)
+        plc_row.addWidget(self.btn_plc)
+
+        content_layout.addLayout(plc_row)
+
+        # Tabs
         self.tabs = QTabWidget()
         content_layout.addWidget(self.tabs)
 
@@ -153,7 +173,6 @@ class TrackControllerHWUI(QWidget):
     def _on_line_changed(self, name: str) -> None:
         try:
             self.backend = self.controllers[name]
-            self.lbl_status.setText(f"Status: {name}")
         except Exception as exc:
             QMessageBox.warning(self, "Switch Line Failed", str(exc))
         finally:
@@ -176,11 +195,16 @@ class TrackControllerHWUI(QWidget):
 
     def _on_upload_plc(self) -> None:
         try:
-            path, _ = QFileDialog.getOpenFileName(self, "Open PLC File", "", "PLC Files (*.txt *.plc *.py)")
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select PLC File",
+                "",
+                "PLC Files (*.txt *.plc *.py);;All Files (*)",
+            )
             if not path:
                 return
             self.current_plc_path = path
-            self.plc_path.setText(f"File: {path}")
+            self.plc_edit.setText(path)     # show in the search bar
             self.backend.upload_plc(path)
             self.refresh_all()
         except Exception as exc:
@@ -236,7 +260,7 @@ class TrackControllerHWUI(QWidget):
         ids = self.backend.get_line_block_ids()
         logger.debug(f"Refreshing blocks for {self.backend.line_name}; ids={len(ids)}")
         if not ids:
-            # fallback so you still see a table if something is off
+            # Fallback ranges so you still see a table if something is off
             if self.backend.line_name == "Blue Line":
                 ids = list(range(1, 16))
             elif self.backend.line_name == "Red Line":
@@ -381,8 +405,7 @@ class TrackControllerHWUI(QWidget):
                 return
             b = int(block_item.text())
 
-            # Commanded Speed column
-            if col == 4:
+            if col == 4:  # Commanded Speed
                 item = self.tbl_blocks.item(row, col)
                 if not item:
                     return
@@ -390,8 +413,7 @@ class TrackControllerHWUI(QWidget):
                 spd = 0 if raw in ("", "N/A") else int(raw)
                 self.backend.set_commanded_speed(b, spd)
 
-            # Commanded Authority column
-            elif col == 5:
+            elif col == 5:  # Commanded Authority
                 item = self.tbl_blocks.item(row, col)
                 if not item:
                     return
@@ -399,8 +421,7 @@ class TrackControllerHWUI(QWidget):
                 auth = 0 if raw in ("", "N/A") else int(raw)
                 self.backend.set_commanded_authority(b, auth)
 
-            # Signal column
-            elif col == 6:
+            elif col == 6:  # Signal
                 item = self.tbl_blocks.item(row, col)
                 if not item:
                     return
@@ -463,7 +484,6 @@ if __name__ == "__main__":
     app.aboutToQuit.connect(ui._hb_timer.stop)
     app.aboutToQuit.connect(lambda: [b.stop_live_link() for b in controllers.values()])
 
-    # --- clean exit on Ctrl+C, no traceback ---
     try:
         rc = app.exec()
     except KeyboardInterrupt:

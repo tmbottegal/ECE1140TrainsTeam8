@@ -1,4 +1,3 @@
-# TrackControllerHWBackend.py
 from __future__ import annotations
 import time, threading, logging
 from typing import Dict, Tuple, Any, Callable, List, Optional
@@ -7,7 +6,7 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-# -------------------- Public enums & adapters (UI expects these) --------------------
+# -------------------- Public enums & adapters (UI imports these) --------------------
 class SignalState(str, Enum):
     RED = "Red"
     YELLOW = "Yellow"
@@ -68,34 +67,27 @@ class HardwareTrackControllerBackend:
       - simple PLC upload no-op (so UI never crashes)
     """
     def __init__(self, track_model: TrackModelAdapter, line_name: str = "Blue Line") -> None:
-        # External handles
         self.track_model = track_model
         self.line_name = line_name
 
-        # Event/listener system for the UI
         self._listeners: List[Callable[[], None]] = []
 
-        # State exposed to UI
         self.switches: Dict[int, str] = {}            # switch_id -> "Normal"/"Alternate"
         self.switch_map: Dict[int, Tuple[int, ...]] = {}  # switch_id -> (root, straight, diverging)
         self.crossings: Dict[int, str] = {}           # crossing_id -> "Active"/"Inactive"
         self.crossing_blocks: Dict[int, int] = {}     # crossing_id -> block_id
 
-        # Per-block telemetry/state caches
         self._known_occupancy: Dict[int, bool] = {}
         self._known_signal: Dict[int, SignalState] = {}
-
-        # Per-block movement authority/speed (suggested/commanded)
         self._suggested_speed_mph: Dict[int, int] = {}
         self._suggested_auth_yd: Dict[int, int] = {}
         self._commanded_speed_mph: Dict[int, int] = {}
         self._commanded_auth_yd: Dict[int, int] = {}
 
-        # Modes/threads
         self.maintenance_mode: bool = False
         self._live_thread_running = False
 
-        # Cache my line blocks now for speed
+        # Our block range
         self._line_blocks = list(HW_LINE_BLOCK_MAP.get(self.line_name, []))
 
         # Guard blocks just outside our ownership (blind-spot mitigation)
@@ -123,7 +115,6 @@ class HardwareTrackControllerBackend:
 
     # ---------- Live link & polling ----------
     def start_live_link(self, poll_interval: float = 1.0) -> None:
-        """Start background polling that mirrors the Track Model into this backend."""
         if self._live_thread_running:
             return
         self._live_thread_running = True
@@ -151,16 +142,11 @@ class HardwareTrackControllerBackend:
         logger.info("Live link stopped for %s", self.line_name)
 
     def _poll_track_model(self) -> None:
-        """Mirror occupancy & signals from the track model, notify UI on change."""
         for b, seg in self.track_model.segments.items():
-            # Occupancy
             occ = bool(getattr(seg, "occupied", False))
             if self._known_occupancy.get(b) != occ:
                 self._known_occupancy[b] = occ
-                # emit an 'update' without needing attribute type here
                 self._notify_listeners()
-
-            # Signals
             sig = getattr(seg, "signal_state", "N/A")
             if sig != "N/A" and self._known_signal.get(b) != sig:
                 self._known_signal[b] = sig
@@ -238,25 +224,15 @@ class HardwareTrackControllerBackend:
         self._notify_listeners()
 
     def upload_plc(self, path: str) -> None:
-        """Standalone no-op so the UI 'Upload PLC' never crashes."""
+        """Standalone no-op so the UI 'Browse' action never crashes."""
         logger.info("upload_plc: accepted %s (no-op in unified HW backend)", path)
 
     # ---------- Data exposure for UI ----------
     def get_line_block_ids(self) -> List[int]:
-        # Always reflect HW ownership
         return list(HW_LINE_BLOCK_MAP.get(self.line_name, []))
 
     @property
     def blocks(self) -> Dict[int, Dict[str, object]]:
-        """
-        Structure the UI expects for each owned block:
-          occupied: bool | "N/A"
-          suggested_speed: int
-          suggested_auth: int
-          commanded_speed: int | "N/A"
-          commanded_auth: int | "N/A"
-          signal: SignalState | "N/A"
-        """
         d: Dict[int, Dict[str, object]] = {}
         for b in self.get_line_block_ids():
             if b not in self.track_model.segments:
@@ -293,6 +269,5 @@ class HardwareTrackControllerBackend:
             },
         }
 
-# Convenience for tests (same signature your code already uses)
 def build_backend_for_sim(track_model: TrackModelAdapter, line_name: str = "Blue Line") -> HardwareTrackControllerBackend:
     return HardwareTrackControllerBackend(track_model, line_name=line_name)

@@ -1,10 +1,5 @@
 from __future__ import annotations
 import sys,os,logging
-
-_pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _pkg_root not in sys.path:
-    sys.path.append(_pkg_root)
-
 from typing import TYPE_CHECKING, Dict, NoReturn
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -25,6 +20,10 @@ from PyQt6.QtWidgets import (
     QHeaderView,
 )
 
+_pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _pkg_root not in sys.path:
+    sys.path.append(_pkg_root)
+
 from universal.universal import SignalState
 from track_controller_backend import TrackControllerBackend
 from trackModel.track_model_backend import TrackNetwork as TrackModelNetwork
@@ -40,14 +39,12 @@ logger = logging.getLogger(__name__)
 
 class TrackControllerUI(QWidget):
     """Main application window for the Track Controller module."""
-
     def __init__(self, controllers: Dict[str, "TrackControllerBackend"], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controllers = controllers
         self.backend = next(iter(self.controllers.values()))
         self.manual_mode_enabled = False
-        self.current_plc_file = None  # Track current PLC file
-
+        self.current_plc_file = None
         try:
             for c in self.controllers.values():
                 c.add_listener(self.refresh_tables)
@@ -84,8 +81,7 @@ class TrackControllerUI(QWidget):
         self.track_picker.currentTextChanged.connect(self.switch_line)
         top_row.addWidget(self.track_picker)
         layout.addLayout(top_row)
-
-        # Scroll area for tables
+        #scroll area for tables
         self.table_hud = QScrollArea()
         self.table_hud.setWidgetResizable(True)
         self.container = QWidget()
@@ -95,8 +91,7 @@ class TrackControllerUI(QWidget):
         self._add_table("Crossings", "tablecrossing")
         self.table_hud.setWidget(self.container)
         layout.addWidget(self.table_hud)
-
-        # Bottom controls
+        #bottom controls
         bottom_row = QHBoxLayout()
         self.plc_button = QPushButton("PLC File Upload")
         bigboi = self.plc_button.sizeHint()
@@ -111,6 +106,17 @@ class TrackControllerUI(QWidget):
         self.filename_box.setFixedHeight(bigboi.height() * 2)
         bottom_row.addWidget(self.filename_box)
         bottom_row.addStretch()
+        #clock
+        self.clock_label = QLabel("Time: 2000-01-01 00:00:00")
+        font_clock = QFont()
+        font_clock.setPointSize(14)
+        font_clock.setBold(True)
+        self.clock_label.setFont(font_clock)
+        self.clock_label.setFixedHeight(bigboi.height() * 2)
+        self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000000; }")
+        bottom_row.addWidget(self.clock_label)
+        #maintenace button
         self.manual_button = QPushButton("Maintenance Mode")
         self.manual_button.setCheckable(True)
         self.manual_button.setFixedHeight(bigboi.height() * 2)
@@ -257,34 +263,14 @@ class TrackControllerUI(QWidget):
                 self.tablemain.setItem(i, 6, item)
 
             switches = self.backend.switches
-            switch_map = self.backend.switch_map
-            if not switches:
-                if self.backend.line_name == "Blue Line":
-                    switch_map[1] = (5, 6, 11)
-                elif self.backend.line_name == "Red Line":
-                    switch_map[1] = (15, 16, 1)
-                    switch_map[2] = (27, 28, 76)
-                    switch_map[3] = (32, 33, 72)
-                    switch_map[4] = (38, 39, 71)
-                    switch_map[5] = (43, 44, 67)
-                    switch_map[6] = (52, 53, 66)
-                elif self.backend.line_name == "Green Line":
-                    switch_map[1] = (12, 13, 1)
-                    switch_map[2] = (28, 29, 150)
-                    switch_map[3] = (76, 77, 101)
-                    switch_map[4] = (85, 86, 100)
-                for sid in switch_map:
-                    switches[sid] = 0
             
             self.tableswitch.setRowCount(max(len(switches), 1))
-            self.tableswitch.setColumnCount(3)
-            self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Blocks", "Position"])
+            self.tableswitch.setColumnCount(2)
+            self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Blocks"])
             self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             
             for i, (sid, pos_int) in enumerate(switches.items()):
                 self.tableswitch.setItem(i, 0, QTableWidgetItem(str(sid)))
-                blocks = switch_map.get(sid, ())
-                self.tableswitch.setItem(i, 1, QTableWidgetItem(str(blocks)))
                 
                 pos_text = "Normal" if pos_int == 0 else "Alternate"
                 item = QTableWidgetItem(pos_text)
@@ -294,7 +280,7 @@ class TrackControllerUI(QWidget):
                 self.tableswitch.setItem(i, 2, item)
             
             if not switches:
-                for col in range(3):
+                for col in range(2):
                     self.tableswitch.setItem(0, col, QTableWidgetItem(""))
 
             crossings = self.backend.crossings
@@ -393,34 +379,3 @@ class TrackControllerUI(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
             self.refresh_tables()
-
-
-def main() -> NoReturn:
-    """Main entry point for the Track Controller application."""
-    app = QApplication(sys.argv)
-    
-    # Initialize track model and controllers
-    track_model_network = TrackModelNetwork()
-    controllers = {
-        "Green Line": TrackControllerBackend(track_model_network, line_name="Green Line"),
-        "Red Line": TrackControllerBackend(track_model_network, line_name="Red Line"),
-        "Blue Line": TrackControllerBackend(track_model_network, line_name="Blue Line"),
-    }
-
-    # Start live links for all controllers
-    for backend in controllers.values():
-        backend.start_live_link(poll_interval=1.0)
-
-    # Create and show UI
-    ui = TrackControllerUI(controllers)
-    ui.refresh_tables()
-    ui.resize(1800, 1100)
-    ui.setWindowTitle("Track Controller Module")
-    ui.show()
-    
-    logger.info("Track Controller UI launched successfully.")
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()

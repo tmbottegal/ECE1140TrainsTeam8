@@ -2,6 +2,7 @@ from __future__ import annotations
 import sys, os, logging, importlib.util, threading, time
 from typing import Callable, Dict, List, Tuple, Any
 from dataclasses import dataclass
+from datetime import datetime
 from collections import deque
 
 _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -53,6 +54,7 @@ class TrackControllerBackend:
         self.crossings: Dict[int, bool] = {}
         self.crossing_blocks: Dict[int, int] = {}
         self._listeners: List[Callable[[], None]] = []
+        self.time = datetime(2000,1,1,0,0,0)
         self.maintenance_mode: bool = False
         self._known_occupancy: Dict[int, bool] = {}
         self._known_signal: Dict[int, SignalState] = {}
@@ -272,7 +274,7 @@ class TrackControllerBackend:
             self.track_model.broadcast_train_command(
                 block_id, int(speed_mps), int(auth_m))
             
-            logger.info("✓ Sent to Track Model: block %d, speed=%d m/s, auth=%d m", 
+            logger.info("Sent to Track Model: block %d, speed=%d m/s, auth=%d m", 
                     block_id, int(speed_mps), int(auth_m))
             
         except Exception as e:
@@ -859,3 +861,13 @@ class TrackControllerBackend:
         
         self._notify_listeners()
         self._send_status_to_ctc()
+
+    def set_time(self, new_time: datetime) -> None:
+        self.time = new_time
+        logger.info("%s: Time updated to %s", self.line_name, self.time.strftime("%Y-%m-%d %H:%M:%S"))
+        self._notify_listeners()
+
+    def manual_set_time(self, year: int, month: int, day: int, hour: int, minute: int, second: int) -> None:
+        self.time = datetime(year, month, day, hour, minute, second)
+        logger.info("%s: Time manually set to %s", self.line_name, self.time.strftime("%Y-%m-%d %H:%M:%S"))
+        self._notify_listeners()

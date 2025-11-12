@@ -1,6 +1,26 @@
 from __future__ import annotations
-import sys, logging
+import sys, os, logging
 from typing import Dict
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(HERE)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+try:
+    # Prefer local (same folder) when run directly
+    from track_controller_hw_backend import (
+        HardwareTrackControllerBackend,
+        TrackModelAdapter,
+        SignalState,
+    )
+except ModuleNotFoundError:
+    # Fallback when run as a module from the repo root
+    from trackControllerHW.track_controller_hw_backend import (
+        HardwareTrackControllerBackend,
+        TrackModelAdapter,
+        SignalState,
+    )
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
@@ -8,12 +28,6 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog,
     QHeaderView, QMessageBox, QSplitter, QSizePolicy, QApplication, QAbstractItemView,
     QLineEdit,
-)
-
-from trackControllerHW.track_controller_hw_backend import (
-    HardwareTrackControllerBackend,
-    TrackModelAdapter,
-    SignalState,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +90,7 @@ class TrackControllerHWUI(QWidget):
         self.line_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         side_layout.addWidget(self.line_picker)
 
-        # Space between Line dropdown and Maintenance button (tweak this value if desired)
+        # Space between Line dropdown and Maintenance button (tweak if desired)
         side_layout.addSpacing(14)
 
         self.btn_maint = QPushButton("Maintenance Mode")
@@ -120,7 +134,7 @@ class TrackControllerHWUI(QWidget):
         self.tabs = QTabWidget()
         content_layout.addWidget(self.tabs)
 
-        # -------- Blocks table (separate suggested/commanded columns; removed "—" col) --------
+        # -------- Blocks table (separate suggested/commanded columns; no "—" col) --------
         self.tbl_blocks = QTableWidget()
         self.tbl_blocks.setColumnCount(7)
         self.tbl_blocks.setHorizontalHeaderLabels([
@@ -251,7 +265,6 @@ class TrackControllerHWUI(QWidget):
             self._refresh_switches()
             self._refresh_crossings()
         except KeyboardInterrupt:
-            # Ctrl+C landed mid-slot; swallow so we can quit cleanly.
             return
         except Exception:
             logger.exception("Refresh failed")

@@ -11,8 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tra
 
 
 # CTC import
-from CTC.CTC_backend import Block 
-from CTC.CTC_backend import TrackState 
+from CTC.CTC_backend import TrackState,Block 
 from CTC.CTC_ui import CTCWindow 
 
 # Wayside Controller SW import
@@ -73,7 +72,7 @@ if __name__ == "__main__":
     TrackModelUI.show()
     TrackControllerUi.setWindowTitle("Wayside SW Module")
     TrackControllerUi.show()
-
+    TrackControllerUi.refresh_tables()
     # === CTC Backend + UI ===
     ctc_state = TrackState("Green Line")
     # Replace its internal controller with the already-created one

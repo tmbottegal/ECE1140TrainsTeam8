@@ -154,21 +154,12 @@ class TrackControllerUI(QWidget):
         self.refresh_tables()
 
     def _on_plc_upload(self) -> None:
-        """Handle PLC file upload button click."""
+
         if not self.manual_mode_enabled:
-            QMessageBox.warning(
-                self, 
-                "Maintenance Mode Required",
-                "You must enable Maintenance Mode before uploading a PLC file."
-            )
+            QMessageBox.warning(self, "Maintenance Mode Required","You must enable Maintenance Mode before uploading a PLC file.")
             return
 
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open PLC File",
-            "",
-            "PLC Files (*.txt *.plc *.py)"
-        )
+        file_path, _ = QFileDialog.getOpenFileName(self,"Open PLC File","","PLC Files (*.txt *.plc *.py)")
         if not file_path:
             logger.info("PLC file selection cancelled.")
             return 
@@ -263,58 +254,61 @@ class TrackControllerUI(QWidget):
                 self.tablemain.setItem(i, 6, item)
 
             switches = self.backend.switches
-            
-            self.tableswitch.setRowCount(max(len(switches), 1))
-            self.tableswitch.setColumnCount(2)
-            self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Blocks"])
-            self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            
-            for i, (sid, pos_int) in enumerate(switches.items()):
-                self.tableswitch.setItem(i, 0, QTableWidgetItem(str(sid)))
-                
-                pos_text = "Normal" if pos_int == 0 else "Alternate"
-                item = QTableWidgetItem(pos_text)
-
-                item.setData(Qt.ItemDataRole.UserRole, pos_int)
-                self._apply_editable(item, editable=self.manual_mode_enabled)
-                self.tableswitch.setItem(i, 2, item)
-            
-            if not switches:
-                for col in range(2):
-                    self.tableswitch.setItem(0, col, QTableWidgetItem(""))
+            switch_map = self.backend.switch_map
+            if switches:
+                self.tableswitch.setRowCount(len(switches))
+                self.tableswitch.setColumnCount(3)
+                self.tableswitch.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
+                self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+                self.tableswitch.verticalHeader().setVisible(False)
+                for i, (sid, pos_int) in enumerate(switches.items()):
+                    self.tableswitch.setItem(i, 0, QTableWidgetItem(str(sid)))
+                    pos_text = "Normal" if pos_int == 0 else "Alternate"
+                    item = QTableWidgetItem(pos_text)
+                    item.setData(Qt.ItemDataRole.UserRole, pos_int)
+                    self._apply_editable(item, editable=self.manual_mode_enabled)
+                    self.tableswitch.setItem(i, 1, item)
+                    blocks = switch_map.get(sid, ())
+                    blocks_text = ", ".join(str(b) for b in blocks) if blocks else "N/A"
+                    blocks_item = QTableWidgetItem(blocks_text)
+                    blocks_item.setFlags(blocks_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.tableswitch.setItem(i, 2, blocks_item)
+            else:
+                self.tableswitch.setRowCount(1)
+                self.tableswitch.setColumnCount(3)
+                self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Position", "Connected Blocks"])
+                self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+                self.tableswitch.verticalHeader().setVisible(False)
+                for col in range(3):
+                    self.tableswitch.setItem(0, col, QTableWidgetItem("No switches"))
 
             crossings = self.backend.crossings
             crossing_blocks = self.backend.crossing_blocks
-            if not crossings:
-                if self.backend.line_name == "Blue Line":
-                    crossing_blocks[1] = 3
-                elif self.backend.line_name == "Red Line":
-                    crossing_blocks[1] = 11
-                elif self.backend.line_name == "Green Line":
-                    crossing_blocks[1] = 19
-                for cid in crossing_blocks:
-                    crossings[cid] = False 
             
-            self.tablecrossing.setRowCount(max(len(crossings), 1))
-            self.tablecrossing.setColumnCount(3)
-            self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
-            self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            
-            for i, (cid, status_bool) in enumerate(crossings.items()):
-                block = crossing_blocks.get(cid, "-")
-                self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
-                self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block)))
+            if crossings:
+                self.tablecrossing.setRowCount(len(crossings))
+                self.tablecrossing.setColumnCount(3)
+                self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
+                self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+                self.tablecrossing.verticalHeader().setVisible(False)
                 
-                status_text = "Active" if status_bool else "Inactive"
-                item = QTableWidgetItem(status_text)
-
-                item.setData(Qt.ItemDataRole.UserRole, status_bool)
-                self._apply_editable(item, editable=self.manual_mode_enabled)
-                self.tablecrossing.setItem(i, 2, item)
-            
-            if not crossings:
+                for i, (cid, status_bool) in enumerate(crossings.items()):
+                    block = crossing_blocks.get(cid, "N/A")
+                    self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
+                    self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block)))
+                    status_text = "Active" if status_bool else "Inactive"
+                    item = QTableWidgetItem(status_text)
+                    item.setData(Qt.ItemDataRole.UserRole, status_bool)
+                    self._apply_editable(item, editable=self.manual_mode_enabled)
+                    self.tablecrossing.setItem(i, 2, item)
+            else:
+                self.tablecrossing.setRowCount(1)
+                self.tablecrossing.setColumnCount(3)
+                self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
+                self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+                self.tablecrossing.verticalHeader().setVisible(False)
                 for col in range(3):
-                    self.tablecrossing.setItem(0, col, QTableWidgetItem(""))
+                    self.tablecrossing.setItem(0, col, QTableWidgetItem("No crossings"))
 
             self.tablemain.cellClicked.connect(self._on_block_clicked)
             self.tableswitch.cellClicked.connect(self._on_switch_clicked)
@@ -348,19 +342,16 @@ class TrackControllerUI(QWidget):
         if not self.manual_mode_enabled:
             return
         if col in (3, 6):
-            QMessageBox.information(self, "Maintenance Mode", 
-                "Occupancy and signal state cannot be edited from UI in maintenance mode. "
-                "Use PLC upload for signal/command changes.")
+            QMessageBox.information(self, "Maintenance Mode", "Occupancy and signal state cannot be edited from UI in maintenance mode")
             return
 
     def _on_switch_clicked(self, row: int, col: int) -> None:
         if not self.manual_mode_enabled:
             return
         try:
-            if col == 2:
+            if col == 1:
                 sid = int(self.tableswitch.item(row, 0).text())
-                current = self.backend.switches.get(sid, 0)  # Get int value
-                # Toggle: 0 -> 1, 1 -> 0
+                current = self.backend.switches.get(sid, 0)
                 next_pos = 1 if current == 0 else 0
                 self.backend.safe_set_switch(sid, next_pos)
         except Exception as exc:

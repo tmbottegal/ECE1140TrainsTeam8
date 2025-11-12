@@ -155,24 +155,6 @@ class TrackControllerBackend:
                            self.line_name, status.block_id)
 
     def _initialize_infrastructure(self) -> None:
-        if self.line_name == "Blue Line":
-            self.switch_map[1] = (5, 6, 11)
-            self.crossing_blocks[1] = 3
-        elif self.line_name == "Red Line":
-            self.switch_map[1] = (15, 16, 1)
-            self.switch_map[2] = (27, 28, 76)
-            self.switch_map[3] = (32, 33, 72)
-            self.switch_map[4] = (38, 39, 71)
-            self.switch_map[5] = (43, 44, 67)
-            self.switch_map[6] = (52, 53, 66)
-            self.crossing_blocks[1] = 11
-        elif self.line_name == "Green Line":
-            self.switch_map[1] = (12, 13, 1)
-            self.switch_map[2] = (28, 29, 150)
-            self.switch_map[3] = (76, 77, 101)
-            self.switch_map[4] = (85, 86, 100)
-            self.crossing_blocks[1] = 19
-
         for sid in self.switch_map:
             self.switches[sid] = 0
         for cid in self.crossing_blocks:
@@ -820,7 +802,7 @@ class TrackControllerBackend:
         
         try:
             self.track_model.set_switch_position(switch_id, pos_int)
-            logger.info("✓ Sent to Track Model: Switch %d -> %d", switch_id, pos_int)
+            logger.info("Sent to Track Model: Switch %d -> %d", switch_id, pos_int)
         except Exception as e:
             logger.warning("Failed to set switch %d in Track Model: %s", switch_id, e)
         

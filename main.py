@@ -20,8 +20,8 @@ from trackControllerSW.track_controller_backend import TrackControllerBackend
 from trackControllerSW.track_controller_ui import TrackControllerUI
 
 # Wayside Controller HW import
-from trackControllerHW.track_controller_hw_backend import TrackControllerBackend
-from trackControllerHW.track_controller_hw_ui import TrackControllerUI
+from trackControllerHW.track_controller_hw_ui import TrackControllerHWUI, _build_networks
+from trackControllerHW.track_controller_hw_backend import build_backend_for_sim
 
 # Track Model import
 from trackModel.track_model_backend import TrackNetwork
@@ -52,6 +52,22 @@ if __name__ == "__main__":
     for ctrl in controllers.values(): 
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
+    
+    #wayside hw
+    nets_hw = _build_networks()
+    hw_controllers = {
+        "Blue Line": build_backend_for_sim(nets_hw["Blue Line"], "Blue Line"),
+        "Red Line":  build_backend_for_sim(nets_hw["Red Line"],  "Red Line"),
+        "Green Line": build_backend_for_sim(nets_hw["Green Line"], "Green Line"),
+    }
+
+    for ctrl in hw_controllers.values():
+        ctrl.start_live_link(1.0)
+
+    hw_ui = TrackControllerHWUI(hw_controllers)
+    hw_ui.setWindowTitle("Wayside Controller – Hardware UI")
+    hw_ui.show()
+    
     TrackModelUI = NetworkStatusUI(network)
     TrackControllerUi = TrackControllerUI(controllers)
     TrackModelUI.show()

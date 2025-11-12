@@ -15,15 +15,18 @@ from CTC.CTC_backend import Block
 from CTC.CTC_backend import TrackState 
 from CTC.CTC_ui import CTCWindow 
 
-
 # Wayside Controller SW import
 from trackControllerSW.track_controller_backend import TrackControllerBackend
 from trackControllerSW.track_controller_ui import TrackControllerUI
+
 # Wayside Controller HW import
+from trackControllerHW.track_controller_hw_backend import TrackControllerBackend
+from trackControllerHW.track_controller_hw_ui import TrackControllerUI
 
 # Track Model import
 from trackModel.track_model_backend import TrackNetwork
 from trackModel.track_model_frontend import NetworkStatusUI
+
 # Train Model import
 
 # Train Controller import

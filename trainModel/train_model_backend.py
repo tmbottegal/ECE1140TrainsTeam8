@@ -521,24 +521,24 @@ class Train:
         """call once after bind_to_track(..) so this Train advances each global tick"""
         self._last_clock_time = None
 
-    def _on_clock(now):
-        # first call just initializes
-        if self._last_clock_time is None:
+        def _on_clock(now):
+            # first call just initializes
+            if self._last_clock_time is None:
+                self._last_clock_time = now
+                return
+            dt = (now - self._last_clock_time).total_seconds()
             self._last_clock_time = now
-            return
-        dt = (now - self._last_clock_time).total_seconds()
-        self._last_clock_time = now
 
-        # substep like the backend does, so crossings are smooth
-        remaining = max(0.0, float(dt))
-        while remaining > 1e-6:
-            step = min(self.tm.DT_MAX, remaining)
-            self.tick(step)  # tick moves along the track & updates occupancy
-            remaining -= step
+            # substep like the backend does, so crossings are smooth
+            remaining = max(0.0, float(dt))
+            while remaining > 1e-6:
+                step = min(self.tm.DT_MAX, remaining)
+                self.tick(step)  # tick moves along the track & updates occupancy
+                remaining -= step
 
-    from universal.global_clock import clock
-    clock.register_listener(_on_clock)
-    self._clock_cb = _on_clock  # keep a handle if you want to detach later
+        from universal.global_clock import clock
+        clock.register_listener(_on_clock)
+        self._clock_cb = _on_clock  # keep a handle if you want to detach later
 
     # helpers for UI
     def report_state(self) -> dict:

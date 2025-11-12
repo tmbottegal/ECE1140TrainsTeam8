@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tra
 
 
 # CTC import
+from CTC.CTC_backend import Block 
+from CTC.CTC_backend import TrackState 
 
 # Wayside Controller SW import
 from trackControllerSW.track_controller_backend import TrackControllerBackend

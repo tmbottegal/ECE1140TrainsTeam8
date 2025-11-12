@@ -297,7 +297,6 @@ class Block:
     def set_crossing_status(self, active: bool):
         self.crossing = bool(active)
 
-
 # ------------------------------------------------------------
 # TrackState — the CTC backend interface
 # ------------------------------------------------------------

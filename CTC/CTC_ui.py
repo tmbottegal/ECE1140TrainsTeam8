@@ -1,14 +1,23 @@
+# ============================================================
+# Centralized Traffic Controller (CTC) UI
+# ------------------------------------------------------------
+#   Syncs directly with new TrackState backend
+#    Updates train & block tables every tick
+#    Handles manual dispatch (manual mode only)
+#    Shows simulation clock driven by global clock
+#    Ready for integration with TrackControllerBackend + TrackModel
+# ============================================================
+
 from PyQt6 import QtWidgets, QtCore, QtGui
 from .CTC_backend import TrackState, GREEN_LINE_DATA
 from universal.global_clock import clock
 
-# Keep UI-side constants in sync with backend for display
 BLOCK_LEN_M = 50.0
 MPS_TO_MPH = 2.23693629
 
 LINE_DATA = {
     "Red Line": [],
-    "Green Line": [],
+    "Green Line": GREEN_LINE_DATA,  # 💡 now pulls from backend’s live Green Line
 }
 
 
@@ -16,13 +25,13 @@ class CTCWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Centralized Traffic Controller")
+        self.resize(1100, 650)
 
         cw = QtWidgets.QWidget(self)
         self.setCentralWidget(cw)
 
         # === Mode toggle toolbar (Manual / Auto) ===
-        self.mode = "auto"  # default
-
+        self.mode = "auto"
         toolbar = QtWidgets.QToolBar("Mode Toolbar")
         toolbar.setMovable(False)
         toolbar.setStyleSheet("QToolBar { spacing: 10px; }")
@@ -53,7 +62,6 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.occupancyTab = QtWidgets.QWidget()
         occLayout = QtWidgets.QVBoxLayout(self.occupancyTab)
 
-        # Line selector
         selectorRow = QtWidgets.QHBoxLayout()
         selectorRow.addWidget(QtWidgets.QLabel("Select Line:"))
         self.lineSelector = QtWidgets.QComboBox()
@@ -64,7 +72,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         selectorRow.addStretch(1)
         occLayout.addLayout(selectorRow)
 
-        # Track table
+        # === Track table ===
         self.mapTable = QtWidgets.QTableWidget(0, 9)
         self.mapTable.setHorizontalHeaderLabels([
             "Section", "Block", "Status", "Station", "Station Side",
@@ -76,11 +84,10 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mapTable.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.mapTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.mapTable.setMinimumHeight(220)
-
         self._reload_line("Green Line")
         occLayout.addWidget(self.mapTable)
 
-        # Buttons under the table
+        # === Bottom buttons ===
         self.manualBtn = QtWidgets.QPushButton("Manual Override")
         self.infoBtn = QtWidgets.QPushButton("Train Information")
         self.uploadBtn = QtWidgets.QPushButton("Upload Schedule")
@@ -98,26 +105,26 @@ class CTCWindow(QtWidgets.QMainWindow):
         btnRow.addWidget(self.maintBtn)
         occLayout.addLayout(btnRow)
 
-        # Connect buttons
+        # === Connect buttons ===
         self.manualBtn.clicked.connect(self._manual_override)
         self.infoBtn.clicked.connect(self._train_info)
         self.uploadBtn.clicked.connect(self._upload_schedule)
         self.maintBtn.clicked.connect(self._maintenance_inputs)
         self.dispatchBtn.clicked.connect(self._dispatch_train)
 
-        # Action area (below buttons)
+        # === Action area (below buttons) ===
         self.actionArea = QtWidgets.QStackedWidget()
         self.blankPage = QtWidgets.QWidget()
         self.actionArea.addWidget(self.blankPage)
         self.actionArea.setCurrentWidget(self.blankPage)
         occLayout.addWidget(self.actionArea)
 
-        # === ISSUES TAB (placeholder) ===
+        # === Issues tab (placeholder) ===
         self.issuesTab = QtWidgets.QWidget()
         issuesLayout = QtWidgets.QVBoxLayout(self.issuesTab)
         issuesLayout.addWidget(QtWidgets.QLabel("Issues tab — reserved for diagnostics/logs."))
 
-        # === Assemble tabs ===
+        # === Tabs ===
         self.tabs.addTab(self.occupancyTab, "Occupancy")
         self.tabs.addTab(self.issuesTab, "Issues")
 
@@ -128,10 +135,10 @@ class CTCWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.clockLabel)
         layout.addWidget(self.tabs, stretch=2)
 
-        # === Simulation Timer (CTC controls global clock) ===
+        # === Simulation timer (drives all modules) ===
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._tick)
-        self.timer.start(1000)  # 1s per tick
+        self.timer.start(1000)  # 1s per simulated tick
 
     # ---------------------------------------------------------
     # Mode Toggle
@@ -151,9 +158,10 @@ class CTCWindow(QtWidgets.QMainWindow):
         print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
 
     # ---------------------------------------------------------
-    # Line + Table Reload
+    # Reload line table from backend
     # ---------------------------------------------------------
     def _reload_line(self, line_name: str):
+        """Refresh occupancy + signals from backend."""
         if line_name != self.state.line_name:
             self.state.set_line(line_name, LINE_DATA[line_name])
         blocks = self.state.get_blocks()
@@ -168,14 +176,14 @@ class CTCWindow(QtWidgets.QMainWindow):
             for c, value in enumerate(rowdata):
                 item = QtWidgets.QTableWidgetItem(str(value))
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                if c == 2:  # status color
+                if c == 2:
                     if b.status == "occupied":
                         item.setBackground(QtGui.QColor("red"))
                         item.setForeground(QtGui.QColor("white"))
                     elif b.status == "closed":
                         item.setBackground(QtGui.QColor("gray"))
                         item.setForeground(QtGui.QColor("white"))
-                if c == 6:  # signal color
+                if c == 6:
                     light = str(value).upper()
                     if light == "RED":
                         item.setBackground(QtGui.QColor("#b00020"))
@@ -188,7 +196,6 @@ class CTCWindow(QtWidgets.QMainWindow):
                         item.setForeground(QtGui.QColor("white"))
                 self.mapTable.setItem(r, c, item)
 
-        # Auto-refresh subpages
         if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
             self._populate_train_info_table()
 
@@ -208,7 +215,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         train_id = train_id.strip().upper()
 
         start_block, ok_block = QtWidgets.QInputDialog.getInt(
-            self, "Starting Block", "Enter starting block number:", 1, 1, 50
+            self, "Starting Block", "Enter starting block number:", 1, 1, 150
         )
         if not ok_block:
             return
@@ -233,12 +240,11 @@ class CTCWindow(QtWidgets.QMainWindow):
             f"Speed: {speed} mph\nAuthority: {auth} yd"
         )
 
-        # Open Train Info tab immediately
         self._train_info()
         self._reload_line(self.state.line_name)
 
     # ---------------------------------------------------------
-    # Train Info Tab
+    # Train Info Page
     # ---------------------------------------------------------
     def _train_info(self):
         page = QtWidgets.QWidget()
@@ -259,10 +265,9 @@ class CTCWindow(QtWidgets.QMainWindow):
         self._populate_train_info_table()
 
     def _populate_train_info_table(self):
-        net_status = self.state.get_network_status()
         trains = self.state.get_trains()
-
         self.trainInfoTable.setRowCount(len(trains))
+
         for r, t in enumerate(trains):
             tid = t.get("train_id", "")
             block = t.get("block", "")
@@ -302,12 +307,24 @@ class CTCWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "Upload Schedule", "Schedule upload not yet implemented.")
 
     # ---------------------------------------------------------
-    # Global Tick — drives entire simulation
+    # Global Tick — drives simulation + UI
     # ---------------------------------------------------------
     def _tick(self):
-        self.state.tick_all_modules()
-        self._reload_line(self.state.line_name)
-        self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
+        """Main simulation tick (runs every second)."""
+        try:
+            # 1️⃣ Advance simulation time (CTC controls all modules)
+            self.state.tick_all_modules()
+
+            # 2️⃣ Refresh occupancy & train info
+            self._reload_line(self.state.line_name)
+            if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
+                self._populate_train_info_table()
+
+            # 3️⃣ Update the simulation clock display
+            self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
+
+        except Exception as e:
+            print(f"[CTC UI] Tick error: {e}")
 
 
 # -------------------------------------------------------------
@@ -316,6 +333,5 @@ class CTCWindow(QtWidgets.QMainWindow):
 if __name__ == "__main__":
     app = QtWidgets.QApplication([])
     win = CTCWindow()
-    win.resize(1100, 650)
     win.show()
     app.exec()

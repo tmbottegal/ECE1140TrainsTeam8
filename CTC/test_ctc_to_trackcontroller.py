@@ -6,6 +6,7 @@ CTC TrackState sends suggested speed & authority to TrackControllerBackend
 from trackModel.track_model_backend import TrackNetwork
 from trackControllerSW.track_controller_backend import TrackControllerBackend
 from CTC.CTC_backend import TrackState
+import datetime, time
 
 
 def main():
@@ -44,6 +45,52 @@ def main():
         print("  Authorities (m):", controller._suggested_auth_m)
     else:
         print("  Authorities: (no attribute found)")
+
+def test_dynamic_suggestions():
+    print("[TEST] Starting dynamic CTC→TC loop demo...\n")
+
+    # 1️⃣ Setup
+    from trackModel.track_model_backend import TrackNetwork
+    from trackControllerSW.track_controller_backend import TrackControllerBackend
+    from CTC.CTC_backend import TrackState
+
+    track_model = TrackNetwork()
+    controller = TrackControllerBackend(track_model, "Green Line")
+    ctc = TrackState("Green Line", [])
+
+    ctc.track_controller = controller
+
+    # 2️⃣ Initial suggestion
+    block_id = 12
+    speed_mph = 25
+    authority_yd = 200
+
+    print(f"[CTC] Dispatching initial suggestion → Block {block_id}: {speed_mph} mph, {authority_yd} yd")
+    controller.receive_ctc_suggestion(block_id, speed_mph, authority_yd)
+
+    # 3️⃣ Time loop: simulate movement and updates
+    for tick in range(5):
+        time.sleep(1.0)  # wait 1 second between updates
+
+        # Decrease authority (simulate approaching destination)
+        authority_yd = max(0, authority_yd - 40)
+        # Decrease speed slightly each tick
+        speed_mph = max(0, speed_mph - 3)
+
+        print(f"\n[CTC→TC] Tick {tick+1}: sending update → Block {block_id}: {speed_mph} mph, {authority_yd} yd")
+        controller.receive_ctc_suggestion(block_id, speed_mph, authority_yd)
+
+        # Optional: print TC’s internal state after each update
+        if hasattr(controller, "_suggested_speed_mps"):
+            print("  TC Speeds (m/s):", controller._suggested_speed_mps)
+        elif hasattr(controller, "_suggested_speed_mph"):
+            print("  TC Speeds (mph):", controller._suggested_speed_mph)
+        if hasattr(controller, "_suggested_auth_yd"):
+            print("  TC Authorities (yd):", controller._suggested_auth_yd)
+        elif hasattr(controller, "_suggested_auth_m"):
+            print("  TC Authorities (m):", controller._suggested_auth_m)
+
+    print("\n[TEST COMPLETE] Dynamic suggestion test finished.")
 
 
 

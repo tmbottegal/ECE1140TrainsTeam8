@@ -5,11 +5,13 @@ _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _pkg_root not in sys.path:
     sys.path.append(_pkg_root)
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, NoReturn
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,10 +26,17 @@ from PyQt6.QtWidgets import (
 )
 
 from universal.universal import SignalState
+from track_controller_backend import TrackControllerBackend
+from trackModel.track_model_backend import TrackNetwork as TrackModelNetwork
+
 if TYPE_CHECKING:
     from track_controller_backend import TrackControllerBackend
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 class TrackControllerUI(QWidget):
     """Main application window for the Track Controller module."""
@@ -37,6 +46,7 @@ class TrackControllerUI(QWidget):
         self.controllers = controllers
         self.backend = next(iter(self.controllers.values()))
         self.manual_mode_enabled = False
+        self.current_plc_file = None  # Track current PLC file
 
         try:
             for c in self.controllers.values():
@@ -48,6 +58,7 @@ class TrackControllerUI(QWidget):
         self.tablemain.cellClicked.connect(self._on_block_clicked)
         self.tableswitch.cellClicked.connect(self._on_switch_clicked)
         self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
+        self.plc_button.clicked.connect(self._on_plc_upload)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -136,19 +147,67 @@ class TrackControllerUI(QWidget):
             logger.exception("Failed to set maintenance mode on controllers")
         self.refresh_tables()
 
+    def _on_plc_upload(self) -> None:
+        """Handle PLC file upload button click."""
+        if not self.manual_mode_enabled:
+            QMessageBox.warning(
+                self, 
+                "Maintenance Mode Required",
+                "You must enable Maintenance Mode before uploading a PLC file."
+            )
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open PLC File",
+            "",
+            "PLC Files (*.txt *.plc *.py)"
+        )
+        if not file_path:
+            logger.info("PLC file selection cancelled.")
+            return 
+        
+        try:
+            self.backend.upload_plc(file_path)
+            logger.info("After PLC upload - commanded speeds: %s", self.backend._commanded_speed_mps)
+            logger.info("After PLC upload - commanded auth: %s", self.backend._commanded_auth_m)
+            filename = os.path.basename(file_path)
+            self.current_plc_file = file_path
+            self.filename_box.setText(f"File: {filename}")
+            self.refresh_tables()
+            logger.info("PLC file %s uploaded for %s", file_path, self.backend.line_name)
+
+        except PermissionError as e:
+            QMessageBox.warning(
+                self,
+                "Permission Error",
+                str(e)
+            )
+            logger.warning("PLC upload failed - permission error: %s", e)
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "PLC Upload Failed",
+                f"Failed to upload PLC file:\n{str(e)}"
+            )
+            logger.exception("PLC upload failed: %s", file_path)
+
     def refresh_tables(self) -> None:
         try:
             try:
                 self.tablemain.itemChanged.disconnect()
+            except Exception:
+                pass
+            try:
                 self.tableswitch.itemChanged.disconnect()
+            except Exception:
+                pass
+            try:
                 self.tablecrossing.itemChanged.disconnect()
-                self.tablemain.cellClicked.disconnect()
-                self.tableswitch.cellClicked.disconnect()
-                self.tablecrossing.cellClicked.disconnect()
             except Exception:
                 pass
 
-            # Blocks table
             line_block_map = {
                 "Blue Line": range(1, 16),
                 "Green Line": list(range(1, 63)) + list(range(122, 151)),
@@ -169,11 +228,9 @@ class TrackControllerUI(QWidget):
                 self.tablemain.setItem(i, 0, QTableWidgetItem(str(block)))
                 data = blocks_data.get(block, {})
 
-                # suggested values
                 self._set_table_item(self.tablemain, i, 1, str(data.get("suggested_speed", "N/A")), editable=False)
                 self._set_table_item(self.tablemain, i, 2, str(data.get("suggested_auth", "N/A")), editable=False)
 
-                # occupancy
                 occ_val = data.get("occupied")
                 if occ_val == "N/A":
                     occ_text = "N/A"
@@ -181,13 +238,11 @@ class TrackControllerUI(QWidget):
                     occ_text = "Yes" if occ_val else "No"
                 self._set_table_item(self.tablemain, i, 3, occ_text, editable=False)
 
-                # commanded speed/auth
                 cmd_speed = data.get("commanded_speed")
                 cmd_auth = data.get("commanded_auth")
                 self._set_table_item(self.tablemain, i, 4, str(cmd_speed), editable=False)
                 self._set_table_item(self.tablemain, i, 5, str(cmd_auth), editable=False)
 
-                # signal state
                 sig = data.get("signal")
                 if isinstance(sig, SignalState):
                     sig_text = sig.name.title()
@@ -201,7 +256,6 @@ class TrackControllerUI(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.tablemain.setItem(i, 6, item)
 
-            # Switches table - now displays int values but with text representation
             switches = self.backend.switches
             switch_map = self.backend.switch_map
             if not switches:
@@ -220,7 +274,7 @@ class TrackControllerUI(QWidget):
                     switch_map[3] = (76, 77, 101)
                     switch_map[4] = (85, 86, 100)
                 for sid in switch_map:
-                    switches[sid] = 0  # Default to 0 (Normal)
+                    switches[sid] = 0
             
             self.tableswitch.setRowCount(max(len(switches), 1))
             self.tableswitch.setColumnCount(3)
@@ -232,10 +286,9 @@ class TrackControllerUI(QWidget):
                 blocks = switch_map.get(sid, ())
                 self.tableswitch.setItem(i, 1, QTableWidgetItem(str(blocks)))
                 
-                # Display as text but store int value
                 pos_text = "Normal" if pos_int == 0 else "Alternate"
                 item = QTableWidgetItem(pos_text)
-                # Store the int value as user data
+
                 item.setData(Qt.ItemDataRole.UserRole, pos_int)
                 self._apply_editable(item, editable=self.manual_mode_enabled)
                 self.tableswitch.setItem(i, 2, item)
@@ -244,7 +297,6 @@ class TrackControllerUI(QWidget):
                 for col in range(3):
                     self.tableswitch.setItem(0, col, QTableWidgetItem(""))
 
-            # Crossings table - now displays bool values but with text representation
             crossings = self.backend.crossings
             crossing_blocks = self.backend.crossing_blocks
             if not crossings:
@@ -255,7 +307,7 @@ class TrackControllerUI(QWidget):
                 elif self.backend.line_name == "Green Line":
                     crossing_blocks[1] = 19
                 for cid in crossing_blocks:
-                    crossings[cid] = False  # Default to False (Inactive)
+                    crossings[cid] = False 
             
             self.tablecrossing.setRowCount(max(len(crossings), 1))
             self.tablecrossing.setColumnCount(3)
@@ -267,10 +319,9 @@ class TrackControllerUI(QWidget):
                 self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
                 self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block)))
                 
-                # Display as text but store bool value
                 status_text = "Active" if status_bool else "Inactive"
                 item = QTableWidgetItem(status_text)
-                # Store the bool value as user data
+
                 item.setData(Qt.ItemDataRole.UserRole, status_bool)
                 self._apply_editable(item, editable=self.manual_mode_enabled)
                 self.tablecrossing.setItem(i, 2, item)
@@ -278,6 +329,10 @@ class TrackControllerUI(QWidget):
             if not crossings:
                 for col in range(3):
                     self.tablecrossing.setItem(0, col, QTableWidgetItem(""))
+
+            self.tablemain.cellClicked.connect(self._on_block_clicked)
+            self.tableswitch.cellClicked.connect(self._on_switch_clicked)
+            self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
 
         except Exception:
             logger.exception("Failed to refresh tables.")
@@ -288,7 +343,6 @@ class TrackControllerUI(QWidget):
         table.setItem(row, col, item)
 
     def _apply_editable(self, item: QTableWidgetItem, editable: bool = False) -> None:
-        """Set item editable or not based on the boolean."""
         if editable:
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         else:
@@ -333,10 +387,40 @@ class TrackControllerUI(QWidget):
         try:
             if col == 2:
                 cid = int(self.tablecrossing.item(row, 0).text())
-                current = self.backend.crossings.get(cid, False)  # Get bool value
-                # Toggle: False -> True, True -> False
+                current = self.backend.crossings.get(cid, False)
                 next_status = not current
                 self.backend.safe_set_crossing(cid, next_status)
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
             self.refresh_tables()
+
+
+def main() -> NoReturn:
+    """Main entry point for the Track Controller application."""
+    app = QApplication(sys.argv)
+    
+    # Initialize track model and controllers
+    track_model_network = TrackModelNetwork()
+    controllers = {
+        "Green Line": TrackControllerBackend(track_model_network, line_name="Green Line"),
+        "Red Line": TrackControllerBackend(track_model_network, line_name="Red Line"),
+        "Blue Line": TrackControllerBackend(track_model_network, line_name="Blue Line"),
+    }
+
+    # Start live links for all controllers
+    for backend in controllers.values():
+        backend.start_live_link(poll_interval=1.0)
+
+    # Create and show UI
+    ui = TrackControllerUI(controllers)
+    ui.refresh_tables()
+    ui.resize(1800, 1100)
+    ui.setWindowTitle("Track Controller Module")
+    ui.show()
+    
+    logger.info("Track Controller UI launched successfully.")
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

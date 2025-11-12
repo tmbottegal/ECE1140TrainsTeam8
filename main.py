@@ -13,7 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uni
 
 # CTC import
 
-# Wayside Controller import
+# Wayside Controller SW import
+from trackControllerSW.track_controller_ui import TrackControllerUI
+# Wayside Controller HW import
 
 # Track Model import
 from trackModel.track_model_backend import TrackNetwork

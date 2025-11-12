@@ -1,5 +1,5 @@
 """
-Example PLC file for Red Line
+Example PLC file for Green Line
 """
 
 # Switches - int values (0 = normal, 1 = alternate)

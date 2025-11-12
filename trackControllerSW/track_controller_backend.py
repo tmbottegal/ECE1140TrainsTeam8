@@ -10,10 +10,7 @@ if _pkg_root not in sys.path:
 
 from universal.universal import SignalState, TrainCommand, ConversionFunctions
 from trackModel.track_model_backend import (
-    TrackNetwork as TrackModelNetwork,
-    TrackSegment,
-    TrackSwitch,
-    LevelCrossing,
+    TrackNetwork as TrackModelNetwork, TrackSegment, LevelCrossing,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,87 +33,57 @@ class TrackModelMessage:
 
 @dataclass
 class WaysideStatusUpdate:
-    """Status update sent to CTC."""
     block_id: int
     occupied: bool
     signal_state: SignalState
-    switch_position: int | None = None  # Changed to int (0=Normal, 1=Alternate)
-    crossing_status: bool | None = None  # Changed to bool (True=closed, False=open)
+    switch_position: int | None = None
+    crossing_status: bool | None = None
 
 class TrackControllerBackend:
 
     def __init__(self, track_model: TrackModelNetwork, line_name: str = "Blue Line") -> None:
         self.track_model = track_model
         self.line_name = line_name
-        
-        # CTC suggestions in CTC units (m/s and meters)
         self._suggested_speed_mps: Dict[int, float] = {}
         self._suggested_auth_m: Dict[int, float] = {}
-        
-        # Commanded values in Track Model units (m/s and meters)
         self._commanded_speed_mps: Dict[int, int] = {}
         self._commanded_auth_m: Dict[int, int] = {}
-        
-        # Infrastructure - now using Track Model data types
-        self.switches: Dict[int, int] = {}  # Changed to int (0 or 1)
+        self.switches: Dict[int, int] = {}
         self.switch_map: Dict[int, Tuple[int, ...]] = {}
-        self.crossings: Dict[int, bool] = {}  # Changed to bool (True=closed, False=open)
+        self.crossings: Dict[int, bool] = {}
         self.crossing_blocks: Dict[int, int] = {}
-        
         self._listeners: List[Callable[[], None]] = []
-        
-        # Maintenance mode
         self.maintenance_mode: bool = False
-        
-        # State tracking - using Track Model data types
         self._known_occupancy: Dict[int, bool] = {}
         self._known_signal: Dict[int, SignalState] = {}
         self._known_commanded_speed: Dict[int, int] = {}  # m/s
-        self._known_commanded_auth: Dict[int, int] = {}    # meters
-        
-        # Track Model message queue
+        self._known_commanded_auth: Dict[int, int] = {}   # meters
         self.incoming_messages: deque[TrackModelMessage] = deque()
         self._live_thread_running: bool = False
-        
-        # CTC Integration
         self.ctc_backend = None
         self._ctc_update_enabled: bool = True
-        
         self._initialize_infrastructure()
         self._initial_sync()
     
     def set_ctc_backend(self, ctc_backend: Any) -> None:
-        """Set reference to CTC backend for bidirectional communication."""
         self.ctc_backend = ctc_backend
         logger.info("%s: CTC backend connected", self.line_name)
     
     def enable_ctc_updates(self, enabled: bool = True) -> None:
-        """Enable or disable automatic updates to CTC."""
         self._ctc_update_enabled = enabled
         logger.info("%s: CTC updates %s", self.line_name, 
                    "enabled" if enabled else "disabled")
     
-    def receive_ctc_suggestion(self, block: int, suggested_speed_mps: float, 
-                              suggested_auth_m: float) -> None:
-        """Receive suggestions from CTC in CTC units (m/s and meters)."""
+    def receive_ctc_suggestion(self, block: int, suggested_speed_mps: float, suggested_auth_m: float) -> None:
         if block not in self._line_block_ids():
-            logger.warning("CTC suggestion for invalid block %d on %s", 
-                         block, self.line_name)
+            logger.warning("CTC suggestion for invalid block %d on %s", block, self.line_name)
             return
-        
-        # Store suggestions in original CTC units
         self._suggested_speed_mps[block] = suggested_speed_mps
         self._suggested_auth_m[block] = suggested_auth_m
-        
-        logger.info(
-            "%s: CTC suggestion for block %d: %.2f m/s, %.2f m",
-            self.line_name, block, suggested_speed_mps, suggested_auth_m
-        )
-        
+        logger.info("%s: CTC suggestion for block %d: %.2f m/s, %.2f m", self.line_name, block, suggested_speed_mps, suggested_auth_m)
         self._notify_listeners()
     
     def _send_status_to_ctc(self) -> None:
-        """Send current wayside status to CTC."""
         if not self._ctc_update_enabled or self.ctc_backend is None:
             return
         
@@ -131,12 +98,12 @@ class TrackControllerBackend:
             
             switch_pos = None
             if block_id in self.switches:
-                switch_pos = self.switches[block_id]  # Now int (0 or 1)
+                switch_pos = self.switches[block_id]
             
             crossing_status = None
             for cid, cblock in self.crossing_blocks.items():
                 if cblock == block_id:
-                    crossing_status = self.crossings.get(cid)  # Now bool
+                    crossing_status = self.crossings.get(cid)
                     break
             
             status = WaysideStatusUpdate(
@@ -151,8 +118,7 @@ class TrackControllerBackend:
         try:
             if hasattr(self.ctc_backend, 'receive_wayside_status'):
                 self.ctc_backend.receive_wayside_status(self.line_name, status_updates)
-                logger.debug("%s: Sent %d status updates to CTC", 
-                           self.line_name, len(status_updates))
+                logger.debug("%s: Sent %d status updates to CTC", self.line_name, len(status_updates))
             else:
                 for status in status_updates:
                     self._send_single_status_to_ctc(status)
@@ -160,10 +126,8 @@ class TrackControllerBackend:
             logger.exception("%s: Failed to send status to CTC", self.line_name)
     
     def _send_single_status_to_ctc(self, status: WaysideStatusUpdate) -> None:
-        """Send a single status update to CTC."""
         if self.ctc_backend is None:
             return
-        
         try:
             if hasattr(self.ctc_backend, 'update_block_occupancy'):
                 self.ctc_backend.update_block_occupancy(
@@ -189,7 +153,6 @@ class TrackControllerBackend:
                            self.line_name, status.block_id)
 
     def _initialize_infrastructure(self) -> None:
-        """Initialize switch and crossing mappings based on line."""
         if self.line_name == "Blue Line":
             self.switch_map[1] = (5, 6, 11)
             self.crossing_blocks[1] = 3
@@ -207,15 +170,13 @@ class TrackControllerBackend:
             self.switch_map[3] = (76, 77, 101)
             self.switch_map[4] = (85, 86, 100)
             self.crossing_blocks[1] = 19
-        
-        # Initialize with Track Model data types
+
         for sid in self.switch_map:
-            self.switches[sid] = 0  # 0 = Normal
+            self.switches[sid] = 0
         for cid in self.crossing_blocks:
-            self.crossings[cid] = False  # False = Inactive/open
+            self.crossings[cid] = False
 
     def _initial_sync(self) -> None:
-        """Perform initial synchronization with track model on startup."""
         logger.info("Starting initial sync with Track Model for %s", self.line_name)
         try:
             if not hasattr(self.track_model, "get_wayside_status"):
@@ -247,13 +208,13 @@ class TrackControllerBackend:
                         logger.debug("Synced block %d signal: %s", bid, info["signal_state"])
                     
                     if "current_position" in info and bid in self.switches:
-                        self.switches[bid] = int(info["current_position"])  # Store as int
+                        self.switches[bid] = int(info["current_position"])
                         logger.debug("Synced switch %d position: %d", bid, self.switches[bid])
                     
                     if "gate_status" in info:
                         for cid, cblock in self.crossing_blocks.items():
                             if cblock == bid:
-                                self.crossings[cid] = bool(info["gate_status"])  # Store as bool
+                                self.crossings[cid] = bool(info["gate_status"])
                                 logger.debug("Synced crossing %d status: %s", cid, self.crossings[cid])
             
             logger.info("Initial sync completed for %s", self.line_name)
@@ -280,12 +241,12 @@ class TrackControllerBackend:
                 self._known_signal[msg.block_id] = msg.value
                 logger.info("Signal %d state updated from model -> %s", msg.block_id, msg.value)
             case "switch":
-                self.switches[msg.block_id] = int(msg.value)  # Store as int
+                self.switches[msg.block_id] = int(msg.value)
                 logger.info("Switch %d position updated from model -> %d", msg.block_id, msg.value)
             case "crossing":
                 for cid, cblock in self.crossing_blocks.items():
                     if cblock == msg.block_id:
-                        self.crossings[cid] = bool(msg.value)  # Store as bool
+                        self.crossings[cid] = bool(msg.value)
                 logger.info("Crossing at block %d status updated from model -> %s", 
                            msg.block_id, msg.value)
             case _:
@@ -294,12 +255,7 @@ class TrackControllerBackend:
         self._send_status_to_ctc()
 
     def set_commanded_speed(self, block_id: int, speed_mps: int) -> None:
-        """Set commanded speed and send to Track Model.
-        
-        Args:
-            block_id: Block ID
-            speed_mps: Speed in meters per second (Track Model units)
-        """
+
         if block_id not in self._line_block_ids():
             logger.warning("Cannot set commanded speed: block %d not in %s", 
                         block_id, self.line_name)
@@ -326,15 +282,9 @@ class TrackControllerBackend:
         self._notify_listeners()
 
     def set_commanded_authority(self, block_id: int, authority_m: int) -> None:
-        """Set commanded authority and send to Track Model.
-        
-        Args:
-            block_id: Block ID
-            authority_m: Authority in meters (Track Model units)
-        """
+
         if block_id not in self._line_block_ids():
-            logger.warning("Cannot set commanded authority: block %d not in %s", 
-                        block_id, self.line_name)
+            logger.warning("Cannot set commanded authority: block %d not in %s", block_id, self.line_name)
             return
         
         self._commanded_auth_m[block_id] = authority_m
@@ -345,15 +295,12 @@ class TrackControllerBackend:
         try:
             speed_mps = self._commanded_speed_mps.get(block_id, 0)
             
-            self.track_model.broadcast_train_command(
-                block_id, int(speed_mps), int(authority_m))
+            self.track_model.broadcast_train_command(block_id, int(speed_mps), int(authority_m))
             
-            logger.info("✓ Sent to Track Model: block %d, speed=%d m/s, auth=%d m", 
-                    block_id, int(speed_mps), int(authority_m))
+            logger.info("Sent to Track Model: block %d, speed=%d m/s, auth=%d m", block_id, int(speed_mps), int(authority_m))
             
         except Exception as e:
-            logger.warning("Track Model rejected commanded authority for block %d: %s", 
-                        block_id, e)
+            logger.warning("Track Model rejected commanded authority for block %d: %s", block_id, e)
         
         self._notify_listeners()
 
@@ -376,7 +323,7 @@ class TrackControllerBackend:
         logger.info("PLC upload completed for %s", self.line_name)
 
     def _upload_plc_python(self, filepath: str) -> None:
-        """Handle Python PLC file upload."""
+        """Python PLC file upload."""
         spec = importlib.util.spec_from_file_location("plc_module", filepath)
         if spec is None or spec.loader is None:
             logger.error("Could not load PLC module from %s", filepath)
@@ -403,7 +350,6 @@ class TrackControllerBackend:
                 if lname.startswith("switch_"):
                     sid = int(lname.split("_")[1])
                     if sid in self.switches:
-                        # Accept int (0/1) or bool or string
                         if isinstance(value, bool):
                             pos = 0 if value else 1
                         elif isinstance(value, int):
@@ -417,7 +363,6 @@ class TrackControllerBackend:
                 if lname.startswith("crossing_"):
                     cid = int(lname.split("_")[1])
                     if cid in self.crossings:
-                        # Accept bool or string
                         if isinstance(value, bool):
                             status = value
                         else:
@@ -429,8 +374,10 @@ class TrackControllerBackend:
                 if lname.startswith("commanded_speed_") or lname.startswith("cmd_speed_"):
                     block_id = int(lname.split("_")[-1])
                     if block_id in self._line_block_ids():
-                        # Assume value is in m/s (Track Model units)
-                        self.set_commanded_speed(block_id, int(value))
+                        speed_mph = float(value)
+                        speed_mps = ConversionFunctions.mph_to_mps(speed_mph)
+                        self.set_commanded_speed(block_id, int(speed_mps))
+                        logger.info("PLC: Set block %d speed: %d mph -> %d m/s", block_id, int(speed_mph), int(speed_mps))
                     continue
 
                 if (lname.startswith("commanded_auth_") or 
@@ -438,8 +385,10 @@ class TrackControllerBackend:
                     lname.startswith("commanded_authority_")):
                     block_id = int(lname.split("_")[-1])
                     if block_id in self._line_block_ids():
-                        # Assume value is in meters (Track Model units)
-                        self.set_commanded_authority(block_id, int(value))
+                        auth_yd = float(value)
+                        auth_m = ConversionFunctions.yards_to_meters(auth_yd)
+                        self.set_commanded_authority(block_id, int(auth_m))
+                        logger.info("PLC: Set block %d auth: %d yd -> %d m", block_id, int(auth_yd), int(auth_m))
                     continue
 
                 if lname.startswith("signal_"):
@@ -456,7 +405,6 @@ class TrackControllerBackend:
                 continue
 
     def _upload_plc_text(self, filepath: str) -> None:
-        """Handle text PLC file upload."""
         try:
             with open(filepath, "r") as f:
                 lines = f.read().splitlines()
@@ -474,7 +422,6 @@ class TrackControllerBackend:
                 if cmd == "SWITCH" and len(parts) >= 3:
                     sid = int(parts[1])
                     if sid in self.switches:
-                        # Accept 0/1 or Normal/Alternate
                         if parts[2].isdigit():
                             self.safe_set_switch(sid, int(parts[2]))
                         else:
@@ -485,7 +432,6 @@ class TrackControllerBackend:
                 elif cmd == "CROSSING" and len(parts) >= 3:
                     cid = int(parts[1])
                     if cid in self.crossings:
-                        # Accept True/False or Active/Inactive
                         if parts[2].lower() in ('true', 'false'):
                             status = parts[2].lower() == 'true'
                         else:
@@ -504,8 +450,11 @@ class TrackControllerBackend:
                 elif cmd == "CMD_SPEED" and len(parts) >= 3:
                     bid = int(parts[1])
                     if bid in self._line_block_ids():
-                        # Assume value is in m/s (Track Model units)
-                        self.set_commanded_speed(bid, int(parts[2]))
+                        speed_mph = float(parts[2])
+                        speed_mps = ConversionFunctions.mph_to_mps(speed_mph)
+                        self.set_commanded_speed(bid, int(speed_mps))
+                        logger.info("TXT PLC: Set block %d speed: %d mph -> %d m/s", 
+                                   bid, int(speed_mph), int(speed_mps))
                     else:
                         logger.debug("TXT PLC CMD_SPEED for block %d ignored (not part of %s)", 
                                    bid, self.line_name)
@@ -513,8 +462,11 @@ class TrackControllerBackend:
                 elif cmd == "CMD_AUTH" and len(parts) >= 3:
                     bid = int(parts[1])
                     if bid in self._line_block_ids():
-                        # Assume value is in meters (Track Model units)
-                        self.set_commanded_authority(bid, int(parts[2]))
+                        auth_yd = float(parts[2])
+                        auth_m = ConversionFunctions.yards_to_meters(auth_yd)
+                        self.set_commanded_authority(bid, int(auth_m))
+                        logger.info("TXT PLC: Set block %d auth: %d yd -> %d m", 
+                                   bid, int(auth_yd), int(auth_m))
                     else:
                         logger.debug("TXT PLC CMD_AUTH for block %d ignored (not part of %s)", 
                                    bid, self.line_name)
@@ -523,8 +475,8 @@ class TrackControllerBackend:
                 logger.exception("PLC line %d failed: %s", line_num, line)
                 continue
 
+
     def _sync_after_plc_upload(self) -> None:
-        """Synchronize all states after PLC upload."""
         for block_id in self._line_block_ids():
             seg = self.track_model.segments.get(block_id)
             if not seg:
@@ -546,8 +498,6 @@ class TrackControllerBackend:
                     self._known_commanded_auth[block_id] = auth_m
 
     def report_state(self) -> Dict[str, object]:
-        """Generate comprehensive state report for UI or debugging."""
-        # Convert internal values to display-friendly format for report
         switches_display = {}
         for sid, pos in self.switches.items():
             switches_display[sid] = "Normal" if pos == 0 else "Alternate"
@@ -580,7 +530,6 @@ class TrackControllerBackend:
         }
 
     def _update_occupancy_from_model(self, block_id: int, occupied: bool) -> None:
-        """Update occupancy state from track model and handle side effects."""
         old_state = self._known_occupancy.get(block_id)
         self._known_occupancy[block_id] = occupied
         logger.info("%s: Block %d occupancy updated from model -> %s", 
@@ -611,7 +560,6 @@ class TrackControllerBackend:
             self._known_commanded_auth[block_id] = int(suggested_auth)
 
     def start_live_link(self, poll_interval: float = 1.0) -> None:
-        """Start live polling of Track Model for state updates."""
         if self._live_thread_running:
             logger.warning("Live link already running for %s", self.line_name)
             return
@@ -632,12 +580,10 @@ class TrackControllerBackend:
                    self.line_name, poll_interval)
 
     def stop_live_link(self) -> None:
-        """Stop live polling of Track Model."""
         self._live_thread_running = False
         logger.info("Live link stopped for %s", self.line_name)
 
     def _poll_track_model(self) -> None:
-        """Poll track model for status updates with comprehensive state detection."""
         if not hasattr(self.track_model, "segments"):
             return
         
@@ -669,7 +615,7 @@ class TrackControllerBackend:
                     current_pos = int(segment.current_position)
                     known_pos = self.switches.get(block_id)
                     if known_pos != current_pos:
-                        self.switches[block_id] = current_pos  # Store as int
+                        self.switches[block_id] = current_pos
                         logger.info("Switch %d position updated from model -> %d", 
                                 block_id, current_pos)
                         state_changed = True
@@ -680,7 +626,7 @@ class TrackControllerBackend:
                         if cblock == block_id:
                             known_state = self.crossings.get(cid)
                             if known_state != current_gate:
-                                self.crossings[cid] = current_gate  # Store as bool
+                                self.crossings[cid] = current_gate
                                 logger.info("Crossing %d status updated from model -> %s", 
                                         cid, current_gate)
                                 state_changed = True
@@ -715,20 +661,17 @@ class TrackControllerBackend:
             self._send_status_to_ctc()
 
     def _line_block_ids(self) -> List[int]:
-        """Get list of block IDs for this line."""
         rng = LINE_BLOCK_MAP.get(self.line_name)
         if rng is None:
             return sorted(self.track_model.segments.keys())
         return [b for b in rng if b in self.track_model.segments]
     
     def add_listener(self, callback: Callable[[], None]) -> None:
-        """Add a listener callback for state changes."""
         if callback not in self._listeners:
             self._listeners.append(callback)
             logger.debug("Added listener %r for %s", callback, self.line_name)
 
     def remove_listener(self, callback: Callable[[], None]) -> None:
-        """Remove a listener callback."""
         try:
             self._listeners.remove(callback)
             logger.debug("Removed listener %r for %s", callback, self.line_name)
@@ -736,7 +679,6 @@ class TrackControllerBackend:
             logger.debug("Listener %r not registered for %s", callback, self.line_name)
 
     def _notify_listeners(self) -> None:
-        """Notify all registered listeners of state changes."""
         for cb in list(self._listeners):
             try:
                 cb()
@@ -744,13 +686,11 @@ class TrackControllerBackend:
                 logger.exception("Listener %r raised exception while notifying", cb)
 
     def set_maintenance_mode(self, enabled: bool) -> None:
-        """Enable or disable maintenance mode."""
         self.maintenance_mode = bool(enabled)
         logger.info("%s: maintenance mode -> %s", self.line_name, self.maintenance_mode)
         self._notify_listeners()
 
     def _get_segment(self, block: int) -> TrackSegment:
-        """Get segment from track model with validation."""
         seg = self.track_model.segments.get(block)
         if seg is None:
             raise ValueError(f"Invalid block {block}")
@@ -760,7 +700,6 @@ class TrackControllerBackend:
 
     @property
     def blocks(self) -> Dict[int, Dict[str, object]]:
-        """Get dictionary of all blocks and their states (for UI display)."""
         d: Dict[int, Dict[str, object]] = {}
         for b in self._line_block_ids():
             if b not in self.track_model.segments:
@@ -771,22 +710,22 @@ class TrackControllerBackend:
             else:
                 occupied_val = "N/A"
                 
-            # Convert suggested values to display units (mph and yards for UI)
-            suggested_speed_mps = self._suggested_speed_mps.get(b, 22.352)  # ~50 mph default
-            suggested_auth_m = self._suggested_auth_m.get(b, 45.72)  # ~50 yards default
+            suggested_speed_mps = self._suggested_speed_mps.get(b, 22.352)
+            suggested_auth_m = self._suggested_auth_m.get(b, 45.72)
             suggested_speed_mph = ConversionFunctions.mps_to_mph(suggested_speed_mps)
             suggested_auth_yd = ConversionFunctions.meters_to_yards(suggested_auth_m)
             
-            # Convert commanded values to display units
-            if b in self._known_commanded_speed and self._commanded_speed_mps.get(b, 0) != 0:
-                commanded_speed_mps = self._commanded_speed_mps.get(b, 0)
+            if b in self._commanded_speed_mps or b in self._known_commanded_speed:
+                commanded_speed_mps = self._commanded_speed_mps.get(b) or self._known_commanded_speed.get(b, 0)
                 commanded_speed_mph = ConversionFunctions.mps_to_mph(commanded_speed_mps)
+                commanded_speed_mph = int(round(commanded_speed_mph))
             else:
                 commanded_speed_mph = "N/A"
                 
-            if b in self._known_commanded_auth and self._commanded_auth_m.get(b, 0) != 0:
-                commanded_auth_m = self._commanded_auth_m.get(b, 0)
+            if b in self._commanded_auth_m or b in self._known_commanded_auth:
+                commanded_auth_m = self._commanded_auth_m.get(b) or self._known_commanded_auth.get(b, 0)
                 commanded_auth_yd = ConversionFunctions.meters_to_yards(commanded_auth_m)
+                commanded_auth_yd = int(round(commanded_auth_yd))
             else:
                 commanded_auth_yd = "N/A"
                 
@@ -799,19 +738,17 @@ class TrackControllerBackend:
                 "occupied": occupied_val,
                 "suggested_speed": int(round(suggested_speed_mph)),
                 "suggested_auth": int(round(suggested_auth_yd)),
-                "commanded_speed": int(round(commanded_speed_mph)) if commanded_speed_mph != "N/A" else "N/A",
-                "commanded_auth": int(round(commanded_auth_yd)) if commanded_auth_yd != "N/A" else "N/A",
+                "commanded_speed": commanded_speed_mph,
+                "commanded_auth": commanded_auth_yd,
                 "signal": signal_val,
             }
         return d
-
+    
     @property
     def num_blocks(self) -> int:
-        """Get number of blocks in this line."""
         return len(self._line_block_ids())
 
     def set_block_occupancy(self, block: int, status: bool) -> None:
-        """Set occupancy for a block."""
         seg = self._get_segment(block)
         seg.set_occupancy(bool(status))
         self._known_occupancy[block] = bool(status)
@@ -820,7 +757,6 @@ class TrackControllerBackend:
         self._send_status_to_ctc()
 
     def set_signal(self, block: int, color: str | SignalState) -> None:
-        """Set signal state for a block and send to Track Model."""
         seg = self._get_segment(block)
         
         if isinstance(color, SignalState):
@@ -836,7 +772,7 @@ class TrackControllerBackend:
         
         try:
             self.track_model.set_signal_state(block, state)
-            logger.info("✓ Sent to Track Model: Block %d signal -> %s", 
+            logger.info("Sent to Track Model: Block %d signal -> %s", 
                     block, state.name)
         except Exception as e:
             logger.warning("Failed to set signal %d in Track Model: %s", block, e)
@@ -845,16 +781,10 @@ class TrackControllerBackend:
         self._send_status_to_ctc()
 
     def safe_set_switch(self, switch_id: int, position: int | str) -> None:
-        """Set switch position (maintenance mode only).
-        
-        Args:
-            switch_id: ID of the switch
-            position: 0 or "Normal" for straight, 1 or "Alternate" for diverging
-        """
+
         if not self.maintenance_mode:
             raise PermissionError("Must be in maintenance mode to change switches")
         
-        # Convert string to int if needed
         if isinstance(position, str):
             pos_str = position.title()
             if pos_str == "Normal":
@@ -884,35 +814,28 @@ class TrackControllerBackend:
                         raise SafetyException(
                             f"Cannot change switch {switch_id}: block {b} occupied")
         
-        self.switches[switch_id] = pos_int  # Store as int
+        self.switches[switch_id] = pos_int
         
         try:
             self.track_model.set_switch_position(switch_id, pos_int)
             logger.info("✓ Sent to Track Model: Switch %d -> %d", switch_id, pos_int)
         except Exception as e:
-            logger.warning("Failed to set switch %d in Track Model: %s", 
-                        switch_id, e)
+            logger.warning("Failed to set switch %d in Track Model: %s", switch_id, e)
         
         self._notify_listeners()
         self._send_status_to_ctc()
 
     def safe_set_crossing(self, crossing_id: int, status: bool | str) -> None:
-        """Set crossing status (maintenance mode only).
-        
-        Args:
-            crossing_id: ID of the crossing
-            status: True/"Active" for closed gates, False/"Inactive" for open gates
-        """
+
         if not self.maintenance_mode:
             raise PermissionError("Must be in maintenance mode to change crossings")
         
-        # Convert string to bool if needed
         if isinstance(status, str):
             stat_str = status.title()
             if stat_str == "Active":
-                stat_bool = True  # Active = closed gates
+                stat_bool = True
             elif stat_str == "Inactive":
-                stat_bool = False  # Inactive = open gates
+                stat_bool = False
             else:
                 raise ValueError("Invalid crossing status")
         else:
@@ -922,20 +845,17 @@ class TrackControllerBackend:
         
         if block and block in self.track_model.segments:
             if getattr(self.track_model.segments[block], 'occupied', False):
-                if not stat_bool:  # If trying to open gates (False)
-                    raise SafetyException(
-                        f"Cannot set crossing {crossing_id} inactive: block {block} occupied")
+                if not stat_bool:
+                    raise SafetyException(f"Cannot set crossing {crossing_id} inactive you dumb ass: block {block} occupied")
         
-        self.crossings[crossing_id] = stat_bool  # Store as bool
+        self.crossings[crossing_id] = stat_bool
         
         if block:
             try:
                 self.track_model.set_gate_status(block, stat_bool)
-                logger.info("✓ Sent to Track Model: Crossing %d (block %d) -> %s", 
-                        crossing_id, block, stat_bool)
+                logger.info("Track Model: Crossing %d (block %d): %s", crossing_id, block, stat_bool)
             except Exception as e:
-                logger.warning("Failed to set crossing %d in Track Model: %s", 
-                            crossing_id, e)
+                logger.warning("Failed to set crossing %d: %s", crossing_id, e)
         
         self._notify_listeners()
         self._send_status_to_ctc()

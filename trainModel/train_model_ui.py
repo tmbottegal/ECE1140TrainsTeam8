@@ -108,7 +108,7 @@ class TrainModelUI(QWidget):
         self._ad_path = next(
             (p for p in (
                 "/Users/sarakeriakes/Desktop/ECE/2025-26/1140/ECE1140TrainsTeam8/trainModel/ad.png",
-                "ad.png", "./assets/ad.png", "./Assets/ad.png", "/mnt/data/ad.png"
+                "ad.png", "./assets/ad.png", "./Assets/ad.png", "/mnt/data/ad.png", "C:/Users/Tim Bottegal/Desktop/ECE1140TrainsTeam8/trainModel/ad.png",
             ) if os.path.exists(p)),
             None
         )

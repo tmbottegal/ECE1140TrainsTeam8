@@ -307,7 +307,7 @@ class TrainControllerUI(QWidget):
         self.lbl_gains = QLabel("--")
         self.lbl_beacon = QLabel("--")
         self.lbl_grade = QLabel("--")
-
+        
         # Assemble into vertical layout
         tele_v = QVBoxLayout()
         tele_v.addWidget(self._kv("Mode", self.lbl_mode))

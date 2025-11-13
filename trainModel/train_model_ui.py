@@ -73,15 +73,15 @@ class TrainModelUI(QWidget):
 
         # left column
         left_col = QVBoxLayout() 
-        title = QLabel("Current Time:") 
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter) 
-        title.setStyleSheet("font-size:22px; font-weight:800; color:white;") 
-        left_col.addWidget(title) 
+        #title = QLabel("Today:") 
+        #title.setAlignment(Qt.AlignmentFlag.AlignCenter) 
+        #title.setStyleSheet("font-size:22px; font-weight:800; color:white;") 
+        #left_col.addWidget(title) 
         
         # clock (shows GLOBAL CTC time))
-        self.clock_lbl = QLabel("Time: 2000-01-01 00:00:00")
+        self.clock_lbl = QLabel("2000-01-01 00:00:00")
         self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_lbl.setStyleSheet("font-size:28px; font-weight:700; color:white;")
+        self.clock_lbl.setStyleSheet("font-size:18px; font-weight:700; color:white;")
         left_col.addWidget(self.clock_lbl)
 
         # subscribe to global clock updates
@@ -324,8 +324,9 @@ class TrainModelUI(QWidget):
         listener for universal.global_clock
         """
         try:
-            time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
-            self.clock_lbl.setText(f"Time: {time_str}")
+            date_str = current_time.strftime("%Y-%m-%d")
+            time_str = current_time.strftime("%H:%M:%S")
+            self.clock_lbl.setText(f"Today's Date: {date_str}\n Current Time: {time_str}")
 
             # keep backend's notion of time in sync
             if hasattr(self.backend, "set_time"):

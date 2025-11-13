@@ -9,6 +9,7 @@ _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _pkg_root not in sys.path:
     sys.path.append(_pkg_root)
 
+
 from universal.universal import SignalState, TrainCommand, ConversionFunctions
 from trackModel.track_model_backend import (
     TrackNetwork as TrackModelNetwork, TrackSegment, LevelCrossing,
@@ -846,7 +847,6 @@ class TrackControllerBackend:
 
     def set_time(self, new_time: datetime) -> None:
         self.time = new_time
-        logger.info("%s: Time updated to %s", self.line_name, self.time.strftime("%Y-%m-%d %H:%M:%S"))
         self._notify_listeners()
 
     def manual_set_time(self, year: int, month: int, day: int, hour: int, minute: int, second: int) -> None:

@@ -24,6 +24,7 @@ _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _pkg_root not in sys.path:
     sys.path.append(_pkg_root)
 
+from universal.global_clock import clock as global_clock
 from universal.universal import SignalState
 from track_controller_backend import TrackControllerBackend
 from trackModel.track_model_backend import TrackNetwork as TrackModelNetwork
@@ -50,12 +51,13 @@ class TrackControllerUI(QWidget):
                 c.add_listener(self.refresh_tables)
         except Exception:
             logger.exception("Failed to attach refresh listener to backend(s).")
-
+        global_clock.register_listener(self._update_clock_display)
         self._build_ui()
         self.tablemain.cellClicked.connect(self._on_block_clicked)
         self.tableswitch.cellClicked.connect(self._on_switch_clicked)
         self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
         self.plc_button.clicked.connect(self._on_plc_upload)
+        self._update_clock_display(global_clock.get_time())
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -370,3 +372,13 @@ class TrackControllerUI(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
             self.refresh_tables()
+
+    def _update_clock_display(self, current_time) -> None:
+        try:
+            time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+            self.clock_label.setText(f"Time: {time_str}")
+
+            for controller in self.controllers.values():
+                controller.set_time(current_time)
+        except Exception:
+            logger.exception("Failed to update clock display")

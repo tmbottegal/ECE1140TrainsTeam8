@@ -23,14 +23,16 @@ class GlobalClock:
                 hour=start_hour, minute=start_minute, second=0, microsecond=0
             )
         # ----------------------------------------------------------------------
-        self.time_multiplier = 20.0     # 20× faster than real time
+        self.time_multiplier = 1.0     # 20× faster than real time
+        self.tick_interval = 1.0  
         self.running = False
         self._listeners: List[Callable[[datetime.datetime], None]] = []
 
     # ---- core time control ----
     def tick(self):
         """Advance simulated time by (1 s × multiplier) and notify listeners."""
-        delta = datetime.timedelta(seconds=self.time_multiplier)
+        delta = datetime.timedelta(seconds=self.tick_interval * self.time_multiplier)
+
         self.current_time += delta
         for cb in self._listeners:
             try:

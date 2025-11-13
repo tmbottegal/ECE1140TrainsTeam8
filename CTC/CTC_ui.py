@@ -9,7 +9,7 @@
 # ============================================================
 
 from PyQt6 import QtWidgets, QtCore, QtGui
-from .CTC_backend import TrackState, GREEN_LINE_DATA
+from CTC_backend import TrackState, GREEN_LINE_DATA
 from universal.global_clock import clock
 
 BLOCK_LEN_M = 50.0
@@ -19,7 +19,6 @@ LINE_DATA = {
     "Red Line": [],
     "Green Line": GREEN_LINE_DATA,  # 💡 now pulls from backend’s live Green Line
 }
-
 
 class CTCWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
@@ -239,6 +238,9 @@ class CTCWindow(QtWidgets.QMainWindow):
             f"{train_id} dispatched at block {start_block}\n"
             f"Speed: {speed} mph\nAuthority: {auth} yd"
         )
+
+        
+        print("CTC UI FILE LOADED SUCCESSFULLY")
 
         self._train_info()
         self._reload_line(self.state.line_name)

@@ -25,7 +25,8 @@ LINE_SPEED_LIMIT_MPS = BLOCK_LEN_M / BLOCK_TRAVEL_TIME_S  # ≈7.14 m/s
 from universal.global_clock import clock
 
 # The Track Model simulates the physical railway (blocks, trains, etc.)
-from trackModel.track_model_backend import TrackNetwork, Train
+from trackModel.track_model_backend import TrackNetwork
+from trainModel.train_model_backend import Train
 
 # The Track Controller governs signals, switches, crossings, etc.
 from trackControllerSW.track_controller_backend import TrackControllerBackend

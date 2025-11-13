@@ -1,8 +1,12 @@
 import time
+import sys
+import os
 import logging
 from typing import Callable, List, Dict, Optional
 import math
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from universal.global_clock import clock 
 
@@ -386,8 +390,9 @@ class Train:
         self.current_segment: Optional[object] = None
         self.segment_displacement_m: float = 0.0
 
+     # FIXME: #115 This is circular. To add a Train, the CTC must create it and then call the TrackNetwork methods to connect.
     # step 1
-    def attach_to_network(self, network) -> None:
+    def attach_to_network(self, network) -> None:                                              
         """register this Train with the TrackNetwork (calls network.add_train(self))"""
         self.network = network
 
@@ -407,7 +412,7 @@ class Train:
 
 
     # step 3 
-    def connect_to_track(self, block_id: int, displacement_m: float = 0.0) -> None:
+    def connect_to_track(self, block_id: int, displacement_m: float = 0.0) -> None:   
         """
         physically connect this train to a starting block + displacement using
         TrackNetwork.connect_train. Also refresh local segment pointer for UI
@@ -584,9 +589,9 @@ class Train:
         """
         exited = self.tm.alight_passengers(n)
         try:
-            # signature: passengers_exiting(train_id, count, station_id)
+            # signature: passengers_exiting(block_id, count)
             if hasattr(self.network, "passengers_exiting"):
-                self.network.passengers_exiting(self.train_id, exited, station_id)
+                self.network.passengers_exiting(station_id, exited)
         except Exception:
             pass
         return exited

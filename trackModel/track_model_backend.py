@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 from enum import Enum
 from random import Random
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,8 +16,12 @@ from universal.universal import (
     SignalState, 
     TrainCommand
 )
+if TYPE_CHECKING:
+    from trainModel.train_model_backend import Train
 
-#TEMPORARY until Train class is implemented in Train Model
+
+"""
+temporary Train class pre-integration
 class Train:
     def __init__(self, train_id: int) -> None:
 
@@ -29,32 +33,32 @@ class Train:
            self.current_segment.set_occupancy(True) 
 
     def get_next_segment(self) -> Optional['TrackSegment']:
-        """Get the next connected track segment.
+        Get the next connected track segment.
         
         Returns:
             The next connected TrackSegment, or None if there is no connection.
-        """
+        
         if self.current_segment is not None:
             return self.current_segment.get_next_segment()
         return None
     
     def get_previous_segment(self) -> Optional['TrackSegment']:
-        """Get the previous connected track segment.
+        Get the previous connected track segment.
         
         Returns:
             The previous connected TrackSegment, or None if there 
                     is no connection.
-        """
+        
         if self.current_segment is not None:
             return self.current_segment.get_previous_segment()
         return None
     
     def move(self, distance: float) -> bool:
-        """Move the train along the track by a specified distance.
+        Move the train along the track by a specified distance.
         
         Args:
             distance: Distance to move in meters.
-        """
+        
         if self.current_segment is None:
             raise ValueError("Train is not currently on any track segment.")
         
@@ -103,7 +107,7 @@ class Train:
             else:
                 self.segment_displacement += distance
                 return True
-
+"""
 class TrackFailureType(Enum):
     """Enumeration of possible track failure types."""
     BROKEN_RAIL = "broken_rail"
@@ -501,7 +505,7 @@ class Station(TrackSegment):
                 count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        # TODO: #105 train_model.board_passengers(trainID, count)
+        # TODO: #105 find train on station block and pass to said train board_passengers(count)
         pass
         
     def passengers_exiting(self, count: int) -> None:
@@ -546,7 +550,7 @@ class TrackNetwork:
         """Initialize an empty track network."""
         self.segments: Dict[TrackSegment] = {}
         # EVENTUAL: import train class from train model
-        self.trains: Dict[Train] = {}
+        self.trains: Dict['Train'] = {}
         # System-wide properties
         self.line_name = ""
         self.time = datetime(2000,1,1,0,0,0)
@@ -1334,7 +1338,7 @@ class TrackNetwork:
         }
         return network_status
     
-    def add_train(self, train: Train) -> None:
+    def add_train(self, train: 'Train') -> None:
         """Add a train to the network for tracking purposes.
         
         Args:

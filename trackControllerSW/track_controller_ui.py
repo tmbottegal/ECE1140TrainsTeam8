@@ -278,7 +278,7 @@ class TrackControllerUI(QWidget):
             else:
                 self.tableswitch.setRowCount(1)
                 self.tableswitch.setColumnCount(3)
-                self.tableswitch.setHorizontalHeaderLabels(["Switch ID", "Position", "Connected Blocks"])
+                self.tableswitch.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
                 self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tableswitch.verticalHeader().setVisible(False)
                 for col in range(3):
@@ -290,7 +290,7 @@ class TrackControllerUI(QWidget):
             if crossings:
                 self.tablecrossing.setRowCount(len(crossings))
                 self.tablecrossing.setColumnCount(3)
-                self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
+                self.tablecrossing.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
                 self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tablecrossing.verticalHeader().setVisible(False)
                 
@@ -306,7 +306,7 @@ class TrackControllerUI(QWidget):
             else:
                 self.tablecrossing.setRowCount(1)
                 self.tablecrossing.setColumnCount(3)
-                self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
+                self.tablecrossing.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
                 self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tablecrossing.verticalHeader().setVisible(False)
                 for col in range(3):

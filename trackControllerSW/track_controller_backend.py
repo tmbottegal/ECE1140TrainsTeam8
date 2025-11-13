@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, os, logging, importlib.util, threading, time
+import sys, os, logging, importlib.util, threading, time, math
 from typing import Callable, Dict, List, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime
@@ -342,7 +342,7 @@ class TrackControllerBackend:
                         else:
                             pos_str = str(value).title()
                             pos = 0 if pos_str == "Normal" else 1
-                        self.safe_set_switch(sid, pos)
+                        self._plc_set_switch(sid, pos)
                     continue
 
                 if lname.startswith("crossing_"):
@@ -353,7 +353,7 @@ class TrackControllerBackend:
                         else:
                             status_str = str(value).title()
                             status = True if status_str == "Active" else False
-                        self.safe_set_crossing(cid, status)
+                        self._plc_set_crossing(cid, status)
                     continue
 
                 if lname.startswith("commanded_speed_") or lname.startswith("cmd_speed_"):
@@ -412,7 +412,7 @@ class TrackControllerBackend:
                         else:
                             pos_str = parts[2].title()
                             pos = 0 if pos_str == "Normal" else 1
-                            self.safe_set_switch(sid, pos)
+                            self._plc_set_switch(sid, pos)
                         
                 elif cmd == "CROSSING" and len(parts) >= 3:
                     cid = int(parts[1])
@@ -422,7 +422,7 @@ class TrackControllerBackend:
                         else:
                             status_str = parts[2].title()
                             status = True if status_str == "Active" else False
-                        self.safe_set_crossing(cid, status)
+                        self._plc_set_crossing(cid, status)
                         
                 elif cmd == "SIGNAL" and len(parts) >= 3:
                     bid = int(parts[1])
@@ -529,7 +529,7 @@ class TrackControllerBackend:
                     seg = self.track_model.segments.get(block_id)
                     if seg and isinstance(seg, LevelCrossing):
                         seg.set_gate_status(occupied)
-                        self.crossings[cid] = occupied  # Store as bool
+                        self.crossings[cid] = occupied
                         logger.info("Auto-managed crossing %d gates: %s (block %d occupancy=%s)", 
                                    cid, self.crossings[cid], block_id, occupied)
                 except Exception:
@@ -695,22 +695,22 @@ class TrackControllerBackend:
             else:
                 occupied_val = "N/A"
                 
-            suggested_speed_mps = self._suggested_speed_mps.get(b, 22.352)
-            suggested_auth_m = self._suggested_auth_m.get(b, 45.72)
+            suggested_speed_mps = self._suggested_speed_mps.get(b, 0.0)
+            suggested_auth_m = self._suggested_auth_m.get(b, 0.0)
             suggested_speed_mph = ConversionFunctions.mps_to_mph(suggested_speed_mps)
             suggested_auth_yd = ConversionFunctions.meters_to_yards(suggested_auth_m)
             
             if b in self._commanded_speed_mps or b in self._known_commanded_speed:
                 commanded_speed_mps = self._commanded_speed_mps.get(b) or self._known_commanded_speed.get(b, 0)
                 commanded_speed_mph = ConversionFunctions.mps_to_mph(commanded_speed_mps)
-                commanded_speed_mph = int(round(commanded_speed_mph))
+                commanded_speed_mph = int(math.ceil(commanded_speed_mph))
             else:
                 commanded_speed_mph = "N/A"
                 
             if b in self._commanded_auth_m or b in self._known_commanded_auth:
                 commanded_auth_m = self._commanded_auth_m.get(b) or self._known_commanded_auth.get(b, 0)
                 commanded_auth_yd = ConversionFunctions.meters_to_yards(commanded_auth_m)
-                commanded_auth_yd = int(round(commanded_auth_yd))
+                commanded_auth_yd = int(math.ceil(commanded_auth_yd))
             else:
                 commanded_auth_yd = "N/A"
                 
@@ -853,3 +853,30 @@ class TrackControllerBackend:
         self.time = datetime(year, month, day, hour, minute, second)
         logger.info("%s: Time manually set to %s", self.line_name, self.time.strftime("%Y-%m-%d %H:%M:%S"))
         self._notify_listeners()
+    
+    def _plc_set_switch(self, switch_id: int, position: int) -> None:
+        if isinstance(position, str):
+            pos_str = position.title()
+            pos_int = 0 if pos_str == "Normal" else 1
+        else:
+            pos_int = int(position)
+        self.switches[switch_id] = pos_int
+        try:
+            self.track_model.set_switch_position(switch_id, pos_int)
+            logger.info("PLC set switch %d -> %d", switch_id, pos_int)
+        except Exception as e:
+            logger.warning("Failed to set switch %d in Track Model: %s", switch_id, e)
+
+    def _plc_set_crossing(self, crossing_id: int, status: bool) -> None:
+        if isinstance(status, str):
+            stat_bool = True if status.title() == "Active" else False
+        else:
+            stat_bool = bool(status)
+        self.crossings[crossing_id] = stat_bool
+        block = self.crossing_blocks.get(crossing_id)
+        if block:
+            try:
+                self.track_model.set_gate_status(block, stat_bool)
+                logger.info("PLC set crossing %d (block %d): %s", crossing_id, block, stat_bool)
+            except Exception as e:
+                logger.warning("Failed to set crossing %d: %s", crossing_id, e)

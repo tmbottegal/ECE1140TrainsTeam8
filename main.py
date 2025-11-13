@@ -293,8 +293,6 @@ if __name__ == "__main__":
     # trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed
     controllers = {
         "Green Line": TrackControllerBackend(network, "Green Line"),
-        "Red Line": TrackControllerBackend(network, "Red Line"),
-        "Blue Line": TrackControllerBackend(network, "Blue Line"),
         }
     for ctrl in controllers.values(): 
         ctrl.start_live_link(poll_interval=1.0)
@@ -302,8 +300,6 @@ if __name__ == "__main__":
     # track controller hw
     nets_hw = _build_networks()
     hw_controllers = {
-        "Blue Line": build_backend_for_sim(nets_hw["Blue Line"], "Blue Line"),
-        "Red Line":  build_backend_for_sim(nets_hw["Red Line"],  "Red Line"),
         "Green Line": build_backend_for_sim(nets_hw["Green Line"], "Green Line"),
     }
 

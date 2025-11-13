@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QGroupBox, QButtonGroup, QDialog, QLineEdit,
     QMessageBox, QSizePolicy 
 )
-from universal.global_clock import clock 
+from universal.global_clock import clock as global_clock
 from datetime import datetime
 
 if TYPE_CHECKING:
@@ -78,15 +78,21 @@ class TrainModelUI(QWidget):
         title.setStyleSheet("font-size:22px; font-weight:800; color:white;") 
         left_col.addWidget(title) 
         
-        # clock (shows GLOBAL CTC time)
-        self.clock_lbl = QLabel("--:--:--") 
-        self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter) 
-        self.clock_lbl.setStyleSheet("font-size:28px; font-weight:700; color:white;") 
-        left_col.addWidget(self.clock_lbl) 
-        self._clock_timer = QTimer(self) 
-        self._clock_timer.timeout.connect(self._tick_clock) 
-        self._clock_timer.start(250)
-        self._tick_clock()
+        # clock (shows GLOBAL CTC time))
+        self.clock_lbl = QLabel("Time: 2000-01-01 00:00:00")
+        self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.clock_lbl.setStyleSheet("font-size:28px; font-weight:700; color:white;")
+        left_col.addWidget(self.clock_lbl)
+
+        # subscribe to global clock updates
+        global_clock.register_listener(self._update_clock_display)
+        # initialize immediately with current clock time, if available
+        try:
+            current_time = global_clock.get_time()
+            self._update_clock_display(current_time)
+        except Exception:
+            pass
+
 
         self._ui_refresh_timer = QTimer(self)
         self._ui_refresh_timer.timeout.connect(self.refresh_display)
@@ -313,9 +319,20 @@ class TrainModelUI(QWidget):
         self.refresh_display()
 
     # helpers 
-    def _tick_clock(self) -> None:
-        # show shared global clock time
-        self.clock_lbl.setText(clock.get_time_string())
+    def _update_clock_display(self, current_time: datetime) -> None:
+        """
+        listener for universal.global_clock
+        """
+        try:
+            time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+            self.clock_lbl.setText(f"Time: {time_str}")
+
+            # keep backend's notion of time in sync
+            if hasattr(self.backend, "set_time"):
+                self.backend.set_time(current_time)
+        except Exception:
+            logger.exception("Failed to update TrainModelUI clock display")
+
 
     def _set_ad_pixmap(self) -> None:
         if not self._ad_path:

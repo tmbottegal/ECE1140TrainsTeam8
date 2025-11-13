@@ -82,14 +82,19 @@ class TrainModelBackend:
         # register with global clock
         clock.register_listener(self._on_clock_tick)
         self._clock_driven: bool = True  # registered to global clock; suppress local stepping
+        self.time: datetime = datetime(2000, 1, 1, 0, 0, 0)
 
 
     # ------------------------------------------------------------------
     # clock listener
     def _on_clock_tick(self, now: datetime) -> None:
+        # keep local time in sync with global clock
+        self.time = now
+
         if self._last_clock_time is None:
             self._last_clock_time = now
             return
+
         dt_s = (now - self._last_clock_time).total_seconds()
         self._last_clock_time = now
 
@@ -101,6 +106,7 @@ class TrainModelBackend:
             remaining -= step
 
         self._notify_listeners()
+
 
     # ------------------------------------------------------------------
     # listeners
@@ -309,6 +315,37 @@ class TrainModelBackend:
             # cabin
             "actual_temperature_c": self.actual_temperature,
         }
+    
+        # ------------------------------------------------------------------
+    # time (kept in sync with universal.global_clock)
+    def set_time(self, new_time: datetime) -> None:
+        """
+        Called by UI when the global clock ticks
+        Does not advance physics; _on_clock_tick handles stepping.
+        """
+        self.time = new_time
+        self._notify_listeners()
+
+    def manual_set_time(
+        self,
+        year: int,
+        month: int,
+        day: int,
+        hour: int,
+        minute: int,
+        second: int,
+    ) -> None:
+        """
+        manual override
+        """
+        self.time = datetime(year, month, day, hour, minute, second)
+        logger.info(
+            "%s: Time manually set to %s",
+            getattr(self, "line_name", "TrainModel"),
+            self.time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        self._notify_listeners()
+
 
 # multi-train wrapper that binds a TrainModelBackend to the Track Network 
 class Train:

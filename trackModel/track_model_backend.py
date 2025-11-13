@@ -670,7 +670,7 @@ class TrackNetwork:
         Args:
             layout_file: Path to the track layout configuration file.
         """
-
+        print("[TrackNetwork] Loading track layout from file:", layout_file)
         self.line_name = os.path.splitext(os.path.basename(layout_file))[0]
 
         # First pass to create segments
@@ -1173,7 +1173,6 @@ class TrackNetwork:
         """
         self.time = new_time
         self.temperature_sim()
-        pass
 
     def manual_set_time(self, year: int, month: int, day: int,
                         hour: int, minute: int, second: int) -> None:
@@ -1317,13 +1316,16 @@ class TrackNetwork:
         Returns:
             Dictionary containing comprehensive network status information.
         """
+
+        current_time = self.time if self.time is not None else datetime(2000, 1, 1, 0, 0, 0)
+
         network_status = {
             "segments": {
                 block_id: self.get_segment_status(block_id)
                 for block_id in self.segments
             },
             "line_name": self.line_name,
-            "time": self.time,
+            "time": current_time,
             "environmental_temperature": self.environmental_temperature,
             "rail_temperature": self.rail_temperature,
             "heater_threshold": self.heater_threshold,
@@ -1363,4 +1365,9 @@ class TrackNetwork:
         train.current_segment = self.segments[block_id]
         train.segment_displacement = displacement
         train.network = self
+        pass
+
+    def clear_trains(self) -> None:
+        """Remove all trains from the network."""
+        self.trains.clear()
         pass

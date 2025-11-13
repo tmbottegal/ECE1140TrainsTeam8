@@ -12,6 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # The CTC owns the global simulation clock; every tick updates all modules.
 from universal.global_clock import clock
@@ -308,24 +311,27 @@ class TrackState:
     CTC manually drives simulation time each tick.
     """
 
-    def __init__(self, line_name: str = "Green Line", line_tuples: List[Tuple] = GREEN_LINE_DATA):
+    def __init__(self, line_name: str = "Green Line", line_tuples: List[Tuple] = GREEN_LINE_DATA, network: TrackNetwork = None):
         self.line_name = line_name
 
         # Create and load the Track Model
-        self.track_model = TrackNetwork()
-        try:
-            layout_path = os.path.join(os.path.dirname(__file__), "..", "trackModel", "green_line.csv")
-            layout_path = os.path.abspath(layout_path)
-            self.track_model.load_track_layout(layout_path)
-            print(f"[CTC Backend] Loaded track layout from {layout_path}")
-        except Exception as e:
-            print(f"[CTC Backend] Warning: failed to load layout → {e}")
+        if network is not None:
+            self.track_model = network
+            print(f"[CTC Backend] Using provided TrackNetwork for {network.line_name}")
+        else:
+            self.track_model = TrackNetwork()
+            try:
+                layout_path = os.path.join(os.path.dirname(__file__), "..", "trackModel", "green_line.csv")
+                layout_path = os.path.abspath(layout_path)
+                self.track_model.load_track_layout(layout_path)
+                print(f"[CTC Backend] Loaded track layout from {layout_path}")
+            except Exception as e:
+                print(f"[CTC Backend] Warning: failed to load layout → {e}")
 
         #Build Track Controller backend and link both sides
         self.track_controller = TrackControllerBackend(self.track_model, line_name)
         self.track_controller.set_ctc_backend(self)  # Enables CTC ←→ Controller communication
         self.track_controller.start_live_link(poll_interval=1.0)
-
 
         #Register Track Model as a clock listener (optional redundancy)
         clock.register_listener(self.track_model.set_time)
@@ -536,9 +542,8 @@ class TrackState:
     # --------------------------------------------------------
     # Reset utilities
     # --------------------------------------------------------
+
     def reset_all(self):
-        self.track_model.trains.clear()
-        for seg in self.track_model.segments.values():
-            seg.set_occupancy(False)
-            seg.open()
+        self.track_model.clear_trains()
+       # self.track_model.load_track_layout(os.path.join(os.path.dirname(__file__), "..", "trackModel", "green_line.csv"))
         print(f"[CTC Backend] Reset all track and train data for {self.line_name}")

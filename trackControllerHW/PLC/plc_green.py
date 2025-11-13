@@ -26,10 +26,10 @@ crossing_3 = False   # example – change/remove if needed
 ###########################################
 
 signal_63 = "GREEN"
-signal_64 = "GREEN"
+signal_64 = "RED"
 signal_65 = "GREEN"
 signal_66 = "GREEN"
-signal_67 = "GREEN"
+signal_67 = "YELLOW"
 signal_68 = "GREEN"
 signal_69 = "GREEN"
 signal_70 = "GREEN"

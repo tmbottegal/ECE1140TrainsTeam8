@@ -3,6 +3,7 @@ import time, threading, logging
 from typing import Dict, Tuple, Any, Callable, List, Optional
 from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -158,6 +159,8 @@ class HardwareTrackControllerBackend:
         # CTC integration
         self.ctc_backend: Any | None = None
         self._ctc_update_enabled: bool = True
+
+        self.time: datetime = datetime(2000, 1, 1, 0, 0, 0) #global clock
 
         ### NEW: derive HW + view-only blocks for this line
         self._hw_blocks: List[int] = list(HW_CONTROLLED_BLOCK_MAP.get(self.line_name, []))
@@ -733,6 +736,34 @@ class HardwareTrackControllerBackend:
             "crossings": self.crossings.copy(),
             "crossing_blocks": self.crossing_blocks.copy(),
         }
+        # ---------- Global clock integration ----------
+    def set_time(self, new_time: datetime) -> None:
+        """
+        Called by the global clock/UI to update this wayside's notion of time.
+        """
+        self.time = new_time
+        # If you add time-based safety logic later, use self.time there.
+        self._notify_listeners()
+
+    def manual_set_time(
+        self,
+        year: int,
+        month: int,
+        day: int,
+        hour: int,
+        minute: int,
+        second: int,
+    ) -> None:
+        """
+        Optional: let UI manually override the time (similar to software side).
+        """
+        self.time = datetime(year, month, day, hour, minute, second)
+        logger.info(
+            "%s (HW): Time manually set to %s",
+            self.line_name,
+            self.time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        self._notify_listeners()
 
     # ---------- Convenience test helper ----------
     def run_line_test(self, plc_path: str) -> Dict[str, Any]:
@@ -756,7 +787,7 @@ class HardwareTrackControllerBackend:
         }
 
 def build_backend_for_sim(
-    track_model: TrackModelAdapter,
+    track_model: TrackModelAdapter, 
     line_name: str = "Blue Line",
 ) -> HardwareTrackControllerBackend:
     return HardwareTrackControllerBackend(track_model, line_name=line_name)

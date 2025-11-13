@@ -267,12 +267,6 @@ LINE_DATA = {
    ("Z", 150, "free", "", "", "", "", "", 6.3, 20),
 
 
-
-
-
-
-
-
    ],
 }
 
@@ -342,10 +336,11 @@ class TrackState:
         self.track_controller.set_ctc_backend(self)  # Enables CTC ←→ Controller communication
         self.track_controller.start_live_link(poll_interval=1.0)
 
+        #Build Track Controller HW backend and link both times 
         self.track_controller_hw = HardwareTrackControllerBackend(self.track_model, line_name)
-        #self.track_controller_hw = set_ctc_backend(self)
+        self.track_controller_hw.set_ctc_backend(self)
+        self.track_controller_hw.start_live_link(poll_interval=1.0)
 
-        #build Track Controller HW backend and link both sides
         
 
         #Register Track Model as a clock listener (optional redundancy)
@@ -431,6 +426,7 @@ class TrackState:
 
             # Send to Track Controller (in metric!)
             self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+            self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps,auth_m )
 
             # Save for per-tick resend
             self._train_suggestions[train_id] = (speed_mps, auth_m)
@@ -461,6 +457,7 @@ class TrackState:
         # --- Update Track Controller (signals, switches, crossings) ---
         try:
             self.track_controller.set_time(current_time)
+            self.track_controller_hw.set_time(current_time)
         except Exception:
             pass
 
@@ -482,6 +479,7 @@ class TrackState:
 
                 # Send updated suggestion to Track Controller
                 self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+                self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth )
 
                 # Save updated authority
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
@@ -512,6 +510,7 @@ class TrackState:
             return {
                 "track_model": self.track_model.get_network_status(),
                 "track_controller": self.track_controller.report_state()
+                
             }
         except Exception as e:
             print(f"[CTC] Network status error: {e}")

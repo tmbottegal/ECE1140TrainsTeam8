@@ -173,19 +173,9 @@ class TrackControllerHWUI(QWidget):
             
             QTableWidget {
                 border: none;
-                background-color: white;
                 gridline-color: #f1f5f9;
                 selection-background-color: #dbeafe;
-            }
-            
-            QTableWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #f1f5f9;
-            }
-            
-            QTableWidget::item:selected {
-                background-color: #dbeafe;
-                color: #1e293b;
+                background-color: transparent;
             }
             
             QHeaderView::section {
@@ -560,16 +550,16 @@ class TrackControllerHWUI(QWidget):
         s = (sig_text or "").upper()
         if s == "RED":
             item.setBackground(QColor("#ef4444"))
-            item.setForeground(QColor("#ffffff"))
+            item.setForeground(QColor("#000000"))
         elif s == "YELLOW":
             item.setBackground(QColor("#eab308"))
-            item.setForeground(QColor("#ffffff"))
+            item.setForeground(QColor("#000000"))
         elif s == "GREEN":
             item.setBackground(QColor("#22c55e"))
-            item.setForeground(QColor("#ffffff"))
+            item.setForeground(QColor("#000000"))
         else:
             item.setBackground(QColor("#ffffff"))
-            item.setForeground(QColor("#64748b"))
+            item.setForeground(QColor("#000000"))
 
     def _on_blocks_cell_changed(self, row: int, col: int) -> None:
         if not self.maintenance_enabled:

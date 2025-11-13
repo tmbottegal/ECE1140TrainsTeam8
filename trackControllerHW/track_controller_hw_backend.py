@@ -497,6 +497,7 @@ class HardwareTrackControllerBackend:
         self._notify_listeners()
         self._send_status_to_ctc()
 
+
     def set_commanded_speed(self, block: int, speed_mph: int) -> None:
         self._commanded_speed_mph[block] = int(speed_mph)
 

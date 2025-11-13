@@ -35,6 +35,13 @@ if __name__ == "__main__":
     train = Train(1)
     network.add_train(train)
     network.connect_train(1, 1, 0.0)
+
+    train2 = Train(2)
+    network.add_train(train2)
+    network.connect_train(2, 6, 0.0)
+    network.broadcast_train_command(1, 1, 1)
+    network.mto(1, 200)
+    network.mto(1, 200)
     window = NetworkStatusUI(network)
     window.show()
     app.exec()

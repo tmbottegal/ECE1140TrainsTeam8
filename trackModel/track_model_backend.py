@@ -282,6 +282,8 @@ class TrackSegment:
 
         self.active_command = TrainCommand(commanded_speed, authority)
         #TODO: #106 for each train train_command_interrupt(block_id)
+        for train in self.network.trains.values():
+                train.train_command_interrupt(self.block_id)
 
     def close(self) -> None:
         """Close the block for maintenance."""

@@ -515,14 +515,14 @@ class Train:
 
             next_len = float(getattr(next_seg, "length", 0.0))
             new_disp = min(next_len, new_pos - seg_len)
-            
+            """
             ok = self._network_set_location(
                 getattr(next_seg, "block_id", getattr(next_seg, "id", -1)),
                 new_disp,
             )
             if not ok:
                 return False
-            
+            """
             _set_occ(self.current_segment, False)
             _set_occ(next_seg, True)
 
@@ -585,6 +585,14 @@ class Train:
         except Exception:
             pass
         return exited
+    
+    def train_command_interrupt(self, block_id: int) -> None:
+        """
+        called by TrackModel when a new train command is available
+        """
+        if block_id is self.current_segment.block_id:
+            self.apply_train_command(self.current_segment.active_command)
+        pass
 
     def apply_train_command(self, cmd) -> None:
         """
@@ -624,6 +632,8 @@ class Train:
                 self.controller.set_service_brake(bool(self.tm.service_brake))
             if eb is not None:
                 self.controller.set_emergency_brake(bool(self.tm.emergency_brake))
+
+        print(f"Train {self.train_id} applied train command: speed={self.tm.commanded_speed:.2f} m/s, ")
 
     
     # controller wiring

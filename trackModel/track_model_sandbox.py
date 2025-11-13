@@ -3,6 +3,7 @@ Track Model Sandbox
 """
 import sys
 import os
+from typing import TYPE_CHECKING
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from universal.universal import (
@@ -11,8 +12,10 @@ from universal.universal import (
     ConversionFunctions
 )
 
-from track_model_frontend import NetworkStatusUI
+from track_model_test_frontend import NetworkStatusUI
 from PyQt6.QtWidgets import QApplication
+
+from trainModel.train_model_backend import Train
 
 from track_model_backend import (
     TrackNetwork, 
@@ -22,7 +25,6 @@ from track_model_backend import (
     Station,
     StationSide,
     TrackFailureType,
-    Train
 )
 from typing import List, Dict, Optional
 
@@ -30,6 +32,9 @@ if __name__ == "__main__":
     app = QApplication([])
     network = TrackNetwork()
     network.load_track_layout('trackModel/green_line.csv')
+    train = Train(1)
+    network.add_train(train)
+    network.connect_train(1, 1, 0.0)
     window = NetworkStatusUI(network)
     window.show()
     app.exec()

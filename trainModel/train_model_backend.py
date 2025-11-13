@@ -446,8 +446,14 @@ class Train:
         beacon_info = str(beacon_raw) if beacon_raw else "None"
         return {"grade_percent": grade_percent, "beacon_info": beacon_info, "speed_limit_mps": speed_limit_mps}
 
+    def mto(self, distance_m: float) -> bool: #DEBUG
+        """
+        externally move the train by distance_m (bypass physics)
+        returns T if moved, F if blocked
+        """
+        return self._advance_along_track(float(distance_m))
     
-    def _advance_along_track(self, distance_m: float) -> bool:
+    def _advance_along_track(self, distance_m: float) -> bool:      #BUG: #118 edge case: cannot traverse more than one segment at a time
         """
         move by distance_m and ask the network to reflect the new location
         T if moved, F if blocked
@@ -507,21 +513,16 @@ class Train:
                 self.segment_displacement_m = seg_len
                 return False
 
-            if getattr(next_seg, "closed", False) or self._is_red(next_seg):
-                # blocked by closed/red block
-                self.segment_displacement_m = seg_len
-                return False
-
             next_len = float(getattr(next_seg, "length", 0.0))
             new_disp = min(next_len, new_pos - seg_len)
-
+            
             ok = self._network_set_location(
                 getattr(next_seg, "block_id", getattr(next_seg, "id", -1)),
                 new_disp,
             )
             if not ok:
                 return False
-
+            
             _set_occ(self.current_segment, False)
             _set_occ(next_seg, True)
 

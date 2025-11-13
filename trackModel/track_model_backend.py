@@ -1385,3 +1385,24 @@ class TrackNetwork:
         """Remove all trains from the network."""
         self.trains.clear()
         pass
+
+    def gti(self, train_id: int) -> None:    #DEBUG
+        train = self.trains.get(train_id)
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        print(f"[TrackNetwork] Train Info: Train ID: {train.train_id}, Current Segment: {train.current_segment.block_id if train.current_segment else 'None'}, Displacement: {train.segment_displacement_m} m")
+        pass
+
+    def mto(self, train_id: int, distance: float) -> None:   #DEBUG
+        """Move a train by a specified distance, overriding normal movement logic.
+        
+        Args:
+            train_id: ID of the train to move.
+            distance: Distance in meters to move the train.
+        """
+        train = self.trains.get(train_id)
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        success = train.mto(distance)
+        print(f"[TrackNetwork] Moved Train {train_id} by {distance} m: {'Success' if success else 'Blocked'}.")
+        pass

@@ -1367,8 +1367,10 @@ class TrackNetwork:
         if train is None:
             raise ValueError(f"Train ID {train_id} not found in track network.")
         train.current_segment = self.segments[block_id]
-        train.segment_displacement = displacement
+        train.segment_displacement_m = displacement
         train.network = self
+        print(f"[TrackNetwork] Connected Train {train_id} to Block {block_id} at displacement {displacement} m on network {self.line_name}.")
+        train.current_segment.set_occupancy(True)
         pass
 
     def clear_trains(self) -> None:

@@ -287,6 +287,7 @@ if __name__ == "__main__":
     app = QApplication([])
     network = TrackNetwork()
     network.load_track_layout('trackModel/green_line.csv')
+    network.line_name = "MAIN"
 
     #------------------------------------------------------------------------------------------------
     #trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed

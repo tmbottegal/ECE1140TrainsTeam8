@@ -474,7 +474,7 @@ class Train:
             return
         try:
             # if backend exposes a dedicated updater, use it
-            self.network.update_train_location(self.train_id, int(block_id), float(displacement_m))
+            self.network.update_train_location(self.train_id, int(block_id), float(displacement_m))     #FIXME: This method does not exist (and will not)
         except AttributeError:
             # fallback: re-connect
             self.network.connect_train(self.train_id, int(block_id), float(displacement_m))
@@ -491,6 +491,7 @@ class Train:
         beacon_info = str(beacon_raw) if beacon_raw else "None"
         return {"grade_percent": grade_percent, "beacon_info": beacon_info, "speed_limit_mps": speed_limit_mps}
 
+    #FIXME: #116 Movement does not call self.current_segment.occupied() to toggle occupancy.
     # movement along the track
     def _advance_along_track(self, distance_m: float) -> None:
         """

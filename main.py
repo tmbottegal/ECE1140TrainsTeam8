@@ -33,6 +33,7 @@ from trainModel.train_model_ui import TrainModelUI
 
 
 # Train Controller import
+from trainControllerSW.TrainControllerBackend import TrainControllerBackend as TC_Backend
 
 # Universal import
 from universal.universal import TrainCommand, SignalState, ConversionFunctions
@@ -341,5 +342,38 @@ if __name__ == "__main__":
     train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
     train_ui.setWindowTitle("Train Model – T1 (Green Line)")
     train_ui.show()
+
+ #-----------------------------------------------------------------------------------------------
+    print("\n" + "="*60)
+    print("INTEGRATING TRAIN CONTROLLER...")
+    print("="*60)
+    
+    # Create Train Controller backend
+    print("[1/2] Creating Train Controller backend...")
+    train_controller = TC_Backend(train_id="T1-Controller")
+    print(f"  ✓ Train Controller created")
+    print(f"    Train ID: {train_controller.state.train_id}")
+    print(f"    Kp: {train_controller.state.kp}, Ki: {train_controller.state.ki}")
+    
+    # Attach Train Controller to Train Model
+    # This enables the automatic integration loop:
+    # Every clock tick: TM → send_to_controller() → TC.update() → receive_from_controller() → TM
+    print("\n[2/2] Attaching Train Controller to Train Model...")
+    train_ui.attach_controller(train_controller)
+    print(f"  ✓ Train Controller attached to Train Model")
+    print(f"  ✓ Integration loop enabled")
+    print(f"    Data flow: Train Model → Train Controller → Train Model")
+    
+    print("\n" + "="*60)
+    print("TRAIN CONTROLLER INTEGRATION COMPLETE!")
+    print("="*60)
+    print("\nYour Train Controller is now controlling the train!")
+    print("Watch the Train Model UI to see:")
+    print("  - Commanded speed (from CTC)")
+    print("  - Actual speed (from physics)")
+    print("  - Power output (from YOUR controller!)")
+    print("  - Brake states (from YOUR controller!)")
+    print("\nThe integration runs automatically via global clock.")
+    print("="*60 + "\n")
 
     app.exec()

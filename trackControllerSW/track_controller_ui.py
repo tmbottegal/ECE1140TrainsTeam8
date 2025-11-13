@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
 _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _pkg_root not in sys.path:
     sys.path.append(_pkg_root)
-
 from universal.global_clock import clock as global_clock
 from universal.universal import SignalState
 from track_controller_backend import TrackControllerBackend
@@ -39,7 +38,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class TrackControllerUI(QWidget):
-    """Main application window for the Track Controller module."""
     def __init__(self, controllers: Dict[str, "TrackControllerBackend"], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controllers = controllers
@@ -50,10 +48,9 @@ class TrackControllerUI(QWidget):
             for c in self.controllers.values():
                 c.add_listener(self.refresh_tables)
         except Exception:
-            logger.exception("Failed to attach refresh listener to backend(s).")
+            logger.exception("no attach to backend")
         global_clock.register_listener(self._update_clock_display)
         self._build_ui()
-        self.tablemain.cellClicked.connect(self._on_block_clicked)
         self.tableswitch.cellClicked.connect(self._on_switch_clicked)
         self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
         self.plc_button.clicked.connect(self._on_plc_upload)
@@ -63,7 +60,7 @@ class TrackControllerUI(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         top_row = QHBoxLayout()
-        self.dropdown_text = QLabel("Track Controller")
+        self.dropdown_text = QLabel("Wayside SW")
         font_title = QFont()
         font_title.setPointSize(16)
         font_title.setBold(True)
@@ -116,7 +113,7 @@ class TrackControllerUI(QWidget):
         self.clock_label.setFont(font_clock)
         self.clock_label.setFixedHeight(bigboi.height() * 2)
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000000; }")
+        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000000; }") #will add to other parts of ui later for iteration 4
         bottom_row.addWidget(self.clock_label)
         #maintenace button
         self.manual_button = QPushButton("Maintenance Mode")
@@ -143,7 +140,7 @@ class TrackControllerUI(QWidget):
             self.dropdown_text.setText(f"Track: {line_name}")
             self.refresh_tables()
         except Exception:
-            logger.exception("Failed to switch to line %s", line_name)
+            logger.exception("cant switch to line %s", line_name)
 
     def toggle_manual_mode(self, enabled: bool) -> None:
         self.manual_mode_enabled = enabled
@@ -152,20 +149,19 @@ class TrackControllerUI(QWidget):
             for c in self.controllers.values():
                 c.set_maintenance_mode(enabled)
         except Exception:
-            logger.exception("Failed to set maintenance mode on controllers")
+            logger.exception("cant set maintenance mode")
         self.refresh_tables()
 
     def _on_plc_upload(self) -> None:
 
         if not self.manual_mode_enabled:
-            QMessageBox.warning(self, "Maintenance Mode Required","You must enable Maintenance Mode before uploading a PLC file.")
+            QMessageBox.warning(self, "Maintenance Mode Required","Enable Maintenance Mode before uploading a PLC file.")
             return
 
         file_path, _ = QFileDialog.getOpenFileName(self,"Open PLC File","","PLC Files (*.txt *.plc *.py)")
         if not file_path:
-            logger.info("PLC file selection cancelled.")
+            logger.info("PLC file upload cancelled")
             return 
-        
         try:
             self.backend.upload_plc(file_path)
             logger.info("After PLC upload - commanded speeds: %s", self.backend._commanded_speed_mps)
@@ -185,11 +181,7 @@ class TrackControllerUI(QWidget):
             logger.warning("PLC upload failed - permission error: %s", e)
             
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "PLC Upload Failed",
-                f"Failed to upload PLC file:\n{str(e)}"
-            )
+            QMessageBox.critical(self,"PLC Upload Failed",f"Failed to upload PLC file:\n{str(e)}")
             logger.exception("PLC upload failed: %s", file_path)
 
     def refresh_tables(self) -> None:
@@ -226,22 +218,18 @@ class TrackControllerUI(QWidget):
             for i, block in enumerate(block_ids):
                 self.tablemain.setItem(i, 0, QTableWidgetItem(str(block)))
                 data = blocks_data.get(block, {})
-
                 self._set_table_item(self.tablemain, i, 1, str(data.get("suggested_speed", "N/A")), editable=False)
                 self._set_table_item(self.tablemain, i, 2, str(data.get("suggested_auth", "N/A")), editable=False)
-
                 occ_val = data.get("occupied")
                 if occ_val == "N/A":
                     occ_text = "N/A"
                 else:
                     occ_text = "Yes" if occ_val else "No"
                 self._set_table_item(self.tablemain, i, 3, occ_text, editable=False)
-
                 cmd_speed = data.get("commanded_speed")
                 cmd_auth = data.get("commanded_auth")
                 self._set_table_item(self.tablemain, i, 4, str(cmd_speed), editable=False)
                 self._set_table_item(self.tablemain, i, 5, str(cmd_auth), editable=False)
-
                 sig = data.get("signal")
                 if isinstance(sig, SignalState):
                     sig_text = sig.name.title()
@@ -254,7 +242,6 @@ class TrackControllerUI(QWidget):
                     item.setBackground(Qt.GlobalColor.blue)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.tablemain.setItem(i, 6, item)
-
             switches = self.backend.switches
             switch_map = self.backend.switch_map
             if switches:
@@ -283,17 +270,15 @@ class TrackControllerUI(QWidget):
                 self.tableswitch.verticalHeader().setVisible(False)
                 for col in range(3):
                     self.tableswitch.setItem(0, col, QTableWidgetItem("No switches"))
-
             crossings = self.backend.crossings
             crossing_blocks = self.backend.crossing_blocks
-            
+        
             if crossings:
                 self.tablecrossing.setRowCount(len(crossings))
                 self.tablecrossing.setColumnCount(3)
                 self.tablecrossing.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
                 self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tablecrossing.verticalHeader().setVisible(False)
-                
                 for i, (cid, status_bool) in enumerate(crossings.items()):
                     block = crossing_blocks.get(cid, "N/A")
                     self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
@@ -311,13 +296,11 @@ class TrackControllerUI(QWidget):
                 self.tablecrossing.verticalHeader().setVisible(False)
                 for col in range(3):
                     self.tablecrossing.setItem(0, col, QTableWidgetItem("No crossings"))
-
-            self.tablemain.cellClicked.connect(self._on_block_clicked)
             self.tableswitch.cellClicked.connect(self._on_switch_clicked)
             self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
 
         except Exception:
-            logger.exception("Failed to refresh tables.")
+            logger.exception("failed to refresh tables somehow. what did you do lol")
 
     def _set_table_item(self, table, row: int, col: int, text: str, editable: bool = False) -> None:
         item = QTableWidgetItem(text)
@@ -340,13 +323,6 @@ class TrackControllerUI(QWidget):
         elif sig == SignalState.SUPERGREEN:
             item.setBackground(Qt.GlobalColor.darkGreen)
 
-    def _on_block_clicked(self, row: int, col: int) -> None:
-        if not self.manual_mode_enabled:
-            return
-        if col in (3, 6):
-            QMessageBox.information(self, "Maintenance Mode", "Occupancy and signal state cannot be edited from UI in maintenance mode")
-            return
-
     def _on_switch_clicked(self, row: int, col: int) -> None:
         if not self.manual_mode_enabled:
             return
@@ -357,7 +333,7 @@ class TrackControllerUI(QWidget):
                 next_pos = 1 if current == 0 else 0
                 self.backend.safe_set_switch(sid, next_pos)
         except Exception as exc:
-            QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
+            QMessageBox.warning(self, "Maintenance Click No Work", str(exc))
             self.refresh_tables()
 
     def _on_crossing_clicked(self, row: int, col: int) -> None:
@@ -370,7 +346,7 @@ class TrackControllerUI(QWidget):
                 next_status = not current
                 self.backend.safe_set_crossing(cid, next_status)
         except Exception as exc:
-            QMessageBox.warning(self, "Maintenance Click Failed", str(exc))
+            QMessageBox.warning(self, "Maintenance Click No Work", str(exc))
             self.refresh_tables()
 
     def _update_clock_display(self, current_time) -> None:
@@ -381,4 +357,4 @@ class TrackControllerUI(QWidget):
             for controller in self.controllers.values():
                 controller.set_time(current_time)
         except Exception:
-            logger.exception("Failed to update clock display")
+            logger.exception("cant update clock display")

@@ -290,7 +290,7 @@ if __name__ == "__main__":
     network.line_name = "MAIN"
 
     #------------------------------------------------------------------------------------------------
-    #trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed
+    # trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed
     controllers = {
         "Green Line": TrackControllerBackend(network, "Green Line"),
         "Red Line": TrackControllerBackend(network, "Red Line"),
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     for ctrl in controllers.values(): 
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
-    #wayside hw
+    # track controller hw
     nets_hw = _build_networks()
     hw_controllers = {
         "Blue Line": build_backend_for_sim(nets_hw["Blue Line"], "Blue Line"),
@@ -319,7 +319,6 @@ if __name__ == "__main__":
     TrackModelUI.refresh_status()
     clock.register_listener(network.set_time)
     #-----------------------------------------------------------------------------------------------
-
     TrackControllerUi = TrackControllerUI(controllers)
     TrackControllerUi.setWindowTitle("Wayside SW Module")
     TrackControllerUi.show()

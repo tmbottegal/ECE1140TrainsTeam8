@@ -8,14 +8,12 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 try:
-    # Prefer local (same folder) when run directly
     from track_controller_hw_backend import (
         HardwareTrackControllerBackend,
         TrackModelAdapter,
         SignalState,
     )
 except ModuleNotFoundError:
-    # Fallback when run as a module from the repo root
     from trackControllerHW.track_controller_hw_backend import (
         HardwareTrackControllerBackend,
         TrackModelAdapter,
@@ -23,6 +21,7 @@ except ModuleNotFoundError:
     )
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog,
@@ -53,6 +52,7 @@ class TrackControllerHWUI(QWidget):
             except Exception:
                 logger.exception("Failed attaching listener to backend")
 
+        self._apply_stylesheet()
         self._build_ui()
         self._wire_signals()
 
@@ -69,19 +69,158 @@ class TrackControllerHWUI(QWidget):
 
         self.refresh_all()
 
+    def _apply_stylesheet(self) -> None:
+        """Apply modern, clean styling to the entire UI"""
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f8fafc;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-size: 13px;
+                color: #1e293b;
+            }
+            
+            QLabel {
+                color: #475569;
+                font-weight: 500;
+            }
+            
+            QComboBox {
+                padding: 8px 12px;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                background-color: white;
+                min-height: 20px;
+            }
+            
+            QComboBox:hover {
+                border-color: #94a3b8;
+            }
+            
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                background-color: white;
+                color: #1e293b;
+                font-weight: 500;
+                min-height: 20px;
+            }
+            
+            QPushButton:hover {
+                background-color: #f1f5f9;
+                border-color: #94a3b8;
+            }
+            
+            QPushButton:pressed {
+                background-color: #e2e8f0;
+            }
+            
+            QPushButton:checked {
+                background-color: #3b82f6;
+                color: white;
+                border-color: #2563eb;
+            }
+            
+            QPushButton:checked:hover {
+                background-color: #2563eb;
+            }
+            
+            QLineEdit {
+                padding: 8px 12px;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                background-color: white;
+                color: #64748b;
+            }
+            
+            QLineEdit:focus {
+                border-color: #3b82f6;
+                outline: none;
+            }
+            
+            QTabWidget::pane {
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                background-color: white;
+                top: -1px;
+            }
+            
+            QTabBar::tab {
+                padding: 10px 20px;
+                margin-right: 2px;
+                border: 1px solid #e2e8f0;
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                background-color: #f1f5f9;
+                color: #64748b;
+            }
+            
+            QTabBar::tab:selected {
+                background-color: white;
+                color: #1e293b;
+                font-weight: 500;
+            }
+            
+            QTabBar::tab:hover:!selected {
+                background-color: #e2e8f0;
+            }
+            
+            QTableWidget {
+                border: none;
+                background-color: white;
+                gridline-color: #f1f5f9;
+                selection-background-color: #dbeafe;
+            }
+            
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #f1f5f9;
+            }
+            
+            QTableWidget::item:selected {
+                background-color: #dbeafe;
+                color: #1e293b;
+            }
+            
+            QHeaderView::section {
+                background-color: #f8fafc;
+                padding: 10px;
+                border: none;
+                border-bottom: 2px solid #e2e8f0;
+                font-weight: 600;
+                color: #475569;
+                text-align: left;
+            }
+            
+            QSplitter::handle {
+                background-color: #e2e8f0;
+                width: 1px;
+            }
+        """)
+
     # ---------------- UI ----------------
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         # ---- Sidebar ----
         sidebar = QWidget()
+        sidebar.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-right: 1px solid #e2e8f0;
+            }
+        """)
         side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(8, 8, 8, 8)
-        side_layout.setSpacing(8)
-
-        # (Removed the left-panel title per your request)
+        side_layout.setContentsMargins(20, 20, 20, 20)
+        side_layout.setSpacing(16)
 
         side_layout.addWidget(QLabel("Line:"))
         self.line_picker = QComboBox()
@@ -90,51 +229,56 @@ class TrackControllerHWUI(QWidget):
         self.line_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         side_layout.addWidget(self.line_picker)
 
-        # Space between Line dropdown and Maintenance button (tweak if desired)
-        side_layout.addSpacing(14)
+        side_layout.addSpacing(8)
 
         self.btn_maint = QPushButton("Maintenance Mode")
         self.btn_maint.setCheckable(True)
         side_layout.addWidget(self.btn_maint)
 
-        # (Removed the Status label since it's redundant)
         side_layout.addStretch(1)
 
         # ---- Main content ----
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(24, 24, 24, 24)
+        content_layout.setSpacing(16)
 
-        # --- Clean PLC "search bar + Browse" row ---
-        plc_row = QHBoxLayout()
+        # --- PLC upload section ---
+        plc_container = QWidget()
+        plc_container.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+            }
+        """)
+        plc_layout = QHBoxLayout(plc_container)
+        plc_layout.setContentsMargins(16, 12, 16, 12)
+        plc_layout.setSpacing(12)
 
-        plc_label = QLabel("Upload PLC File:")
+        plc_label = QLabel("PLC File:")
         plc_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         self.plc_edit = QLineEdit()
         self.plc_edit.setPlaceholderText("No file selected")
         self.plc_edit.setReadOnly(True)
-        self.plc_edit.setMinimumWidth(420)
-        self.plc_edit.setStyleSheet(
-            "QLineEdit { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }"
-        )
+        self.plc_edit.setMinimumWidth(300)
 
         self.btn_plc = QPushButton("Browse")
         self.btn_plc.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.btn_plc.setFixedWidth(90)
+        self.btn_plc.setFixedWidth(100)
 
-        plc_row.addWidget(plc_label)
-        plc_row.addWidget(self.plc_edit, 1)
-        plc_row.addWidget(self.btn_plc)
+        plc_layout.addWidget(plc_label)
+        plc_layout.addWidget(self.plc_edit, 1)
+        plc_layout.addWidget(self.btn_plc)
 
-        content_layout.addLayout(plc_row)
+        content_layout.addWidget(plc_container)
 
         # Tabs
         self.tabs = QTabWidget()
         content_layout.addWidget(self.tabs)
 
-        # -------- Blocks table (separate suggested/commanded columns; no "—" col) --------
+        # -------- Blocks table --------
         self.tbl_blocks = QTableWidget()
         self.tbl_blocks.setColumnCount(7)
         self.tbl_blocks.setHorizontalHeaderLabels([
@@ -148,6 +292,7 @@ class TrackControllerHWUI(QWidget):
         ])
         self.tbl_blocks.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tbl_blocks.verticalHeader().setVisible(False)
+        self.tbl_blocks.setAlternatingRowColors(False)
         self.tabs.addTab(self.tbl_blocks, "Blocks")
 
         # Switches
@@ -173,6 +318,7 @@ class TrackControllerHWUI(QWidget):
         splitter.addWidget(content)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([250, 1350])
         root.addWidget(splitter)
 
     def _wire_signals(self) -> None:
@@ -182,6 +328,15 @@ class TrackControllerHWUI(QWidget):
         self.tbl_switch.cellClicked.connect(self._on_switch_click)
         self.tbl_cross.cellClicked.connect(self._on_crossing_click)
         self.tbl_blocks.cellChanged.connect(self._on_blocks_cell_changed)
+        
+        # Pause refresh when editing
+        self.tbl_blocks.itemChanged.connect(self._pause_refresh_on_edit)
+        
+    def _pause_refresh_on_edit(self, item) -> None:
+        """Pause the refresh timer briefly when user is editing"""
+        if self.maintenance_enabled and item and (item.flags() & Qt.ItemFlag.ItemIsEditable):
+            self._hb_timer.stop()
+            QTimer.singleShot(2000, lambda: self._hb_timer.start(1000))
 
     # -------------- Actions --------------
     def _on_line_changed(self, name: str) -> None:
@@ -218,7 +373,7 @@ class TrackControllerHWUI(QWidget):
             if not path:
                 return
             self.current_plc_path = path
-            self.plc_edit.setText(path)     # show in the search bar
+            self.plc_edit.setText(path)
             self.backend.upload_plc(path)
             self.refresh_all()
         except Exception as exc:
@@ -270,10 +425,13 @@ class TrackControllerHWUI(QWidget):
             logger.exception("Refresh failed")
 
     def _refresh_blocks(self) -> None:
+        # Don't refresh if user is actively editing a cell
+        if self.tbl_blocks.state() == QAbstractItemView.State.EditingState:
+            return
+            
         ids = self.backend.get_line_block_ids()
         logger.debug(f"Refreshing blocks for {self.backend.line_name}; ids={len(ids)}")
         if not ids:
-            # Fallback ranges so you still see a table if something is off
             if self.backend.line_name == "Blue Line":
                 ids = list(range(1, 16))
             elif self.backend.line_name == "Red Line":
@@ -295,19 +453,19 @@ class TrackControllerHWUI(QWidget):
                 occ_text = "N/A" if occ == "N/A" else ("Yes" if occ else "No")
                 self._set_item(self.tbl_blocks, r, 1, occ_text, editable=False)
 
-                # Suggested (separate columns)
+                # Suggested
                 sug_spd = data.get(b, {}).get("suggested_speed", "N/A")
                 sug_auth = data.get(b, {}).get("suggested_auth", "N/A")
                 self._set_item(self.tbl_blocks, r, 2, str(sug_spd), editable=False)
                 self._set_item(self.tbl_blocks, r, 3, str(sug_auth), editable=False)
 
-                # Commanded (separate columns) – editable in maintenance
+                # Commanded
                 cmd_spd = data.get(b, {}).get("commanded_speed", "N/A")
                 cmd_auth = data.get(b, {}).get("commanded_auth", "N/A")
                 self._set_item(self.tbl_blocks, r, 4, str(cmd_spd), editable=self.maintenance_enabled)
                 self._set_item(self.tbl_blocks, r, 5, str(cmd_auth), editable=self.maintenance_enabled)
 
-                # Signal – editable in maintenance, colored cells
+                # Signal with color
                 sig = data.get(b, {}).get("signal", "N/A")
                 sig_text = sig.name.title() if isinstance(sig, SignalState) else (sig if isinstance(sig, str) else "N/A")
                 self._set_item(self.tbl_blocks, r, 6, sig_text, editable=self.maintenance_enabled)
@@ -401,17 +559,24 @@ class TrackControllerHWUI(QWidget):
     def _color_signal_item(self, item: QTableWidgetItem, sig_text: str) -> None:
         s = (sig_text or "").upper()
         if s == "RED":
-            item.setBackground(Qt.GlobalColor.red)
+            item.setBackground(QColor("#ef4444"))
+            item.setForeground(QColor("#ffffff"))
         elif s == "YELLOW":
-            item.setBackground(Qt.GlobalColor.yellow)
+            item.setBackground(QColor("#eab308"))
+            item.setForeground(QColor("#ffffff"))
         elif s == "GREEN":
-            item.setBackground(Qt.GlobalColor.green)
+            item.setBackground(QColor("#22c55e"))
+            item.setForeground(QColor("#ffffff"))
         else:
-            item.setBackground(Qt.GlobalColor.transparent)
+            item.setBackground(QColor("#ffffff"))
+            item.setForeground(QColor("#64748b"))
 
     def _on_blocks_cell_changed(self, row: int, col: int) -> None:
         if not self.maintenance_enabled:
             return
+        
+        # Block signals during this update to prevent recursive calls
+        self.tbl_blocks.blockSignals(True)
         try:
             block_item = self.tbl_blocks.item(row, 0)
             if not block_item:
@@ -425,6 +590,7 @@ class TrackControllerHWUI(QWidget):
                 raw = (item.text() or "").strip()
                 spd = 0 if raw in ("", "N/A") else int(raw)
                 self.backend.set_commanded_speed(b, spd)
+                logger.info(f"Set commanded speed for block {b} to {spd}")
 
             elif col == 5:  # Commanded Authority
                 item = self.tbl_blocks.item(row, col)
@@ -433,6 +599,7 @@ class TrackControllerHWUI(QWidget):
                 raw = (item.text() or "").strip()
                 auth = 0 if raw in ("", "N/A") else int(raw)
                 self.backend.set_commanded_authority(b, auth)
+                logger.info(f"Set commanded authority for block {b} to {auth}")
 
             elif col == 6:  # Signal
                 item = self.tbl_blocks.item(row, col)
@@ -440,11 +607,26 @@ class TrackControllerHWUI(QWidget):
                     return
                 sig_text = (item.text() or "N/A").strip().upper()
                 if sig_text in ("RED", "YELLOW", "GREEN"):
+                    # Set the text to uppercase
+                    item.setText(sig_text)
+                    # Update backend
                     self.backend.set_signal(b, sig_text)
+                    logger.info(f"Set signal for block {b} to {sig_text}")
+                    # Update the color immediately
+                    self._color_signal_item(item, sig_text)
+                else:
+                    logger.warning(f"Invalid signal value: {sig_text}. Must be RED, YELLOW, or GREEN")
+                    # Revert to previous value
+                    old_sig = self.backend.blocks.get(b, {}).get("signal", "N/A")
+                    old_text = old_sig.name.title() if isinstance(old_sig, SignalState) else (old_sig if isinstance(old_sig, str) else "N/A")
+                    item.setText(old_text)
+                    self._color_signal_item(item, old_text)
         except Exception:
             logger.exception("Cell edit failed")
         finally:
-            self.refresh_all()
+            self.tbl_blocks.blockSignals(False)
+            # Refresh after a short delay
+            QTimer.singleShot(500, self.refresh_all)
 
 
 # -------------------- app boot --------------------
@@ -453,9 +635,9 @@ def _build_networks() -> Dict[str, TrackModelAdapter]:
     tm_red = TrackModelAdapter()
     tm_green = TrackModelAdapter()
 
-    tm_blue.ensure_blocks(list(range(1, 16)))      # Blue: 1..15
-    tm_red.ensure_blocks(list(range(74, 151)))     # Red: 74..150
-    tm_green.ensure_blocks(list(range(1, 151)))    # Green: 1..150
+    tm_blue.ensure_blocks(list(range(1, 16)))
+    tm_red.ensure_blocks(list(range(74, 151)))
+    tm_green.ensure_blocks(list(range(1, 151)))
 
     return {"Blue Line": tm_blue, "Red Line": tm_red, "Green Line": tm_green}
 
@@ -466,7 +648,6 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
 
-    # Quiet excepthook for Ctrl+C so no traceback prints
     def _quiet_excepthook(exctype, value, tb):
         if exctype is KeyboardInterrupt:
             try:
@@ -493,7 +674,6 @@ if __name__ == "__main__":
     ui.setWindowTitle("Wayside Controller – Hardware UI")
     ui.show()
 
-    # Clean shutdown on window close or Ctrl+C
     app.aboutToQuit.connect(ui._hb_timer.stop)
     app.aboutToQuit.connect(lambda: [b.stop_live_link() for b in controllers.values()])
 

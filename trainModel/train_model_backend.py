@@ -408,25 +408,31 @@ class Train:
     def _sync_backend_track_segment(self) -> None:
         try:
             block_id = getattr(self.current_segment, "block_id", None)
-            label = block_id if block_id is not None else getattr(self.current_segment, "name", "—")
+            label = block_id if block_id is not None else getattr(self.current_segment, "name", "-")
             self.tm.track_segment = str(label)
         except Exception:
-            self.tm.track_segment = "—"
+            self.tm.track_segment = "-"
 
-    # small shim so don’t have to guess their exact API beyond connect_train
-    def _network_set_location(self, block_id: int, displacement_m: float) -> None:
+
+    def _network_set_location(self, block_id: int, displacement_m: float) -> bool:
         """
-        hypothetical update_train_location(train_id, block_id, displacement),
-        otherwise reuse connect_train to re-seat the train at a new location
+        tell TrackNetwork that train moved to block_id at displacement_m
+        returns T on success, F if the network cannot be updated
         """
         if not self.network:
-            return
+            return False
+
         try:
-            # if backend exposes a dedicated updater, use it
-            self.network.update_train_location(self.train_id, int(block_id), float(displacement_m))     #FIXME: This method does not exist (and will not)
-        except AttributeError:
-            # fallback: re-connect
             self.network.connect_train(self.train_id, int(block_id), float(displacement_m))
+            return True
+
+        except Exception:
+            logging.exception(
+                "Failed to update network location for train %s -> block %s, disp %.2f",
+                self.train_id, block_id, displacement_m
+            )
+            return False
+
 
     # per-step sync from track -> physics
     def _pull_track_inputs(self) -> dict:
@@ -440,62 +446,95 @@ class Train:
         beacon_info = str(beacon_raw) if beacon_raw else "None"
         return {"grade_percent": grade_percent, "beacon_info": beacon_info, "speed_limit_mps": speed_limit_mps}
 
-    #FIXME: #116 Movement does not call self.current_segment.occupied() to toggle occupancy.
-    # movement along the track
-    def _advance_along_track(self, distance_m: float) -> None:
+    
+    def _advance_along_track(self, distance_m: float) -> bool:
         """
-        Move by `distance_m` and ask the network to reflect the new location
-        DO NOT toggle occupancy flag; network owns that
+        move by distance_m and ask the network to reflect the new location
+        T if moved, F if blocked
+        toggles block occupancy on segment objects
         """
         if self.current_segment is None or self.network is None or distance_m == 0.0:
-            return
+            return False
 
         seg = self.current_segment
         seg_len = float(getattr(seg, "length", 0.0))
         pos = self.segment_displacement_m
-        new_pos = pos + distance_m
+        new_pos = pos + float(distance_m)
 
-        # backward
+        # helper for occupancy
+        def _set_occ(segment, occ: bool) -> None:
+            try:
+                if hasattr(segment, "set_occupancy"):
+                    segment.set_occupancy(bool(occ))
+                elif hasattr(segment, "occupied"):
+                    segment.occupied = bool(occ)
+            except Exception:
+                logger.exception("Failed to set occupancy=%s for segment %r", occ, segment)
+
+        # moving backwards
         if new_pos < 0.0:
             prev_seg = self._prev_segment()
             if prev_seg is None or getattr(prev_seg, "closed", False) or self._is_red(prev_seg):
+                # cannot move into previous block
                 self.segment_displacement_m = 0.0
-                return
+                return False
 
-            # enter previous block via network API
             prev_len = float(getattr(prev_seg, "length", 0.0))
             new_disp = max(0.0, new_pos + prev_len)
-            self._network_set_location(getattr(prev_seg, "block_id", getattr(prev_seg, "id", -1)), new_disp)
+
+            # tell network first; if it fails, revert
+            ok = self._network_set_location(
+                getattr(prev_seg, "block_id", getattr(prev_seg, "id", -1)),
+                new_disp,
+            )
+            if not ok:
+                return False
+
+            # toggle occupancies
+            _set_occ(self.current_segment, False)
+            _set_occ(prev_seg, True)
 
             self.current_segment = prev_seg
             self.segment_displacement_m = new_disp
             self._sync_backend_track_segment()
-            return
+            return True
 
-        # forward
+        # moving forwards
         if new_pos > seg_len:
             next_seg = self._next_segment()
             if next_seg is None:
+                # end of line, clamp to end of block
                 self.segment_displacement_m = seg_len
-                return
-            if getattr(next_seg, "closed", False) or self._is_red(next_seg):
-                self.segment_displacement_m = seg_len
-                return
+                return False
 
-            new_disp = min(float(getattr(next_seg, "length", 0.0)), new_pos - seg_len)
-            self._network_set_location(getattr(next_seg, "block_id", getattr(next_seg, "id", -1)), new_disp)
+            if getattr(next_seg, "closed", False) or self._is_red(next_seg):
+                # blocked by closed/red block
+                self.segment_displacement_m = seg_len
+                return False
+
+            next_len = float(getattr(next_seg, "length", 0.0))
+            new_disp = min(next_len, new_pos - seg_len)
+
+            ok = self._network_set_location(
+                getattr(next_seg, "block_id", getattr(next_seg, "id", -1)),
+                new_disp,
+            )
+            if not ok:
+                return False
+
+            _set_occ(self.current_segment, False)
+            _set_occ(next_seg, True)
 
             self.current_segment = next_seg
             self.segment_displacement_m = new_disp
             self._sync_backend_track_segment()
-            return
+            return True
 
         # still inside this block
         self.segment_displacement_m = new_pos
-        try:
-            self.network.update_train_displacement(self.train_id, float(new_pos))
-        except AttributeError:
-            pass
+        _set_occ(seg, True)  # make sure block stays marked occupied
+        return True
+
 
     # public tick
     def tick(self, dt_s: float, *, power_kw: float | None = None,
@@ -654,7 +693,7 @@ class Train:
 
     def step_controller(self, dt_s: float) -> None:
         """
-        one controller step — send inputs -> update(dt) -> receive outputs
+        one controller step - send inputs -> update(dt) -> receive outputs
         call this before advancing along the track
         """
         if not self.controller:

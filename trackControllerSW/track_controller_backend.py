@@ -11,9 +11,7 @@ if _pkg_root not in sys.path:
 
 
 from universal.universal import SignalState, TrainCommand, ConversionFunctions
-from trackModel.track_model_backend import (
-    TrackNetwork as TrackModelNetwork, TrackSegment, LevelCrossing,
-)
+from trackModel.track_model_backend import (TrackNetwork)
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -43,7 +41,7 @@ class WaysideStatusUpdate:
 
 class TrackControllerBackend:
 
-    def __init__(self, track_model: TrackModelNetwork, line_name: str = "Blue Line") -> None:
+    def __init__(self, track_model: TrackNetwork, line_name: str = "Blue Line") -> None:
         self.track_model = track_model
         self.line_name = line_name
         self._suggested_speed_mps: Dict[int, float] = {}
@@ -527,7 +525,7 @@ class TrackControllerBackend:
             if cblock == block_id:
                 try:
                     seg = self.track_model.segments.get(block_id)
-                    if seg and isinstance(seg, LevelCrossing):
+                    if seg and isinstance(seg, TrackNetwork):
                         seg.set_gate_status(occupied)
                         self.crossings[cid] = occupied
                         logger.info("Auto-managed crossing %d gates: %s (block %d occupancy=%s)", 
@@ -675,7 +673,7 @@ class TrackControllerBackend:
         logger.info("%s: maintenance mode -> %s", self.line_name, self.maintenance_mode)
         self._notify_listeners()
 
-    def _get_segment(self, block: int) -> TrackSegment:
+    def _get_segment(self, block: int) -> TrackNetwork:
         seg = self.track_model.segments.get(block)
         if seg is None:
             raise ValueError(f"Invalid block {block}")

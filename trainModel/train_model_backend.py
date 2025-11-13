@@ -313,47 +313,61 @@ class TrainModelBackend:
 # multi-train wrapper that binds a TrainModelBackend to the Track Network 
 class Train:
     """
-      - owns its own TrainModelBackend 
-      - can bind to TrackNetwork for grade/speed-limit/beacon/occupancy
-      - maintains its block + in-block displacement
+      - owns its own TrainModelBackend
+      - binds to TrackNetwork (add_train/connect_train) for grade/speed-limit/beacon/occupancy
+      - maintains its block + in-block displacement (local view, kept in sync with network)
     """
 
     def __init__(self, train_id: int | str, backend: Optional["TrainModelBackend"] = None) -> None:
         self.train_id = str(train_id)
         self.tm = backend if backend is not None else TrainModelBackend()
         self.controller = None  # TrainControllerBackend instance
-
         self.tm.train_id = self.train_id
 
-        # track binding
         self.network: Optional[object] = None
         self.current_segment: Optional[object] = None
         self.segment_displacement_m: float = 0.0
 
-    #  binding to Track Model network
-    def bind_to_track(self, network, start_block_id: int, displacement_m: float = 0.0) -> None:
-        """
-        attach this Train to a TrackNetwork (from trackModel/track_model_backend.py)
-        without importing it here (keeps this file independent of TrackNetwork)
-        """
+    # step 1
+    def attach_to_network(self, network) -> None:
+        """register this Train with the TrackNetwork (calls network.add_train(self))"""
         self.network = network
-        seg = getattr(self.network, "segments", {}).get(start_block_id)
+        if hasattr(network, "add_train"):
+            network.add_train(self)
+        else:
+            raise AttributeError("TrackNetwork is missing add_train(self)")
+
+    # step 3 
+    def connect_to_track(self, block_id: int, displacement_m: float = 0.0) -> None:
+        """
+        physically connect this train to a starting block + displacement using
+        TrackNetwork.connect_train. Also refresh local segment pointer for UI
+        """
+        if not self.network:
+            raise RuntimeError("Call attach_to_network(network) before connect_to_track(...)")
+        if not hasattr(self.network, "connect_train"):
+            raise AttributeError("TrackNetwork is missing connect_train(train_id, block_id, displacement)")
+
+        self.network.connect_train(self.train_id, int(block_id), float(displacement_m))
+
+        # keep a local pointer for fast reads/UI (no ownership of occupancy here)
+        seg = getattr(self.network, "segments", {}).get(block_id)
         if seg is None:
-            raise ValueError(f"Block {start_block_id} not found in TrackNetwork")
+            # if segments dict isn’t exposed, still mirror labels via block_id.
+            self.current_segment = None
+            self.tm.track_segment = str(block_id)
+        else:
+            self.current_segment = seg
+            self.segment_displacement_m = max(0.0, min(float(displacement_m), float(getattr(seg, "length", 0.0))))
+            self._sync_backend_track_segment()
 
-        self.current_segment = seg
-        self.segment_displacement_m = max(0.0, min(float(displacement_m), float(getattr(seg, "length", 0.0))))
+    # wrapper
+    def bind_to_track(self, network, start_block_id: int, displacement_m: float = 0.0) -> None:
+        """back-compat: wraps two-step API"""
+        self.attach_to_network(network)
+        self.connect_to_track(start_block_id, displacement_m)
 
-        # mark occupancy
-        try:
-            self.current_segment.set_occupancy(True)
-        except Exception:
-            pass
-
-        # keep backend label in sync for the UI
-        self._sync_backend_track_segment()
-
-    #  helpers from track graph 
+    # helpers from track graph
     def _next_segment(self):
         return None if self.current_segment is None else self.current_segment.get_next_segment()
 
@@ -362,15 +376,13 @@ class Train:
 
     @staticmethod
     def _is_red(seg) -> bool:
-        """tolerant check for a red signal state (enum, name, or string)"""
         st = getattr(seg, "signal_state", None)
         val = getattr(st, "value", st)
         name = getattr(st, "name", None)
         s = str(val or name or st).lower()
-        return "red" in s  # catches "red", "SignalState.RED", etc.
+        return "red" in s
 
     def _sync_backend_track_segment(self) -> None:
-        """update backend.track_segment from the current segment (id/name)"""
         try:
             block_id = getattr(self.current_segment, "block_id", None)
             label = block_id if block_id is not None else getattr(self.current_segment, "name", "—")
@@ -378,36 +390,38 @@ class Train:
         except Exception:
             self.tm.track_segment = "—"
 
-    #  per-step sync from track -> physics 
+    # small shim so don’t have to guess their exact API beyond connect_train
+    def _network_set_location(self, block_id: int, displacement_m: float) -> None:
+        """
+        hypothetical update_train_location(train_id, block_id, displacement),
+        otherwise reuse connect_train to re-seat the train at a new location
+        """
+        if not self.network:
+            return
+        try:
+            # if backend exposes a dedicated updater, use it
+            self.network.update_train_location(self.train_id, int(block_id), float(displacement_m))
+        except AttributeError:
+            # fallback: re-connect
+            self.network.connect_train(self.train_id, int(block_id), float(displacement_m))
+
+    # per-step sync from track -> physics
     def _pull_track_inputs(self) -> dict:
-        """
-        read grade, speed-limit, beacon, etc. from current block (if bound)
-        returns a dict for backend.set_inputs(...)
-        """
         if self.current_segment is None:
-            return {
-                "grade_percent": 0.0,
-                "beacon_info": "None",
-                "speed_limit_mps": float(self.tm.MAX_SPEED),
-            }
+            return {"grade_percent": 0.0, "beacon_info": "None", "speed_limit_mps": float(self.tm.MAX_SPEED)}
 
         seg = self.current_segment
         speed_limit_mps = float(getattr(seg, "speed_limit", self.tm.MAX_SPEED))
         grade_percent = float(getattr(seg, "grade", 0.0))
         beacon_raw = getattr(seg, "beacon_data", "")
         beacon_info = str(beacon_raw) if beacon_raw else "None"
-
-        return {
-            "grade_percent": grade_percent,
-            "beacon_info": beacon_info,
-            "speed_limit_mps": speed_limit_mps,
-        }
+        return {"grade_percent": grade_percent, "beacon_info": beacon_info, "speed_limit_mps": speed_limit_mps}
 
     # movement along the track
     def _advance_along_track(self, distance_m: float) -> None:
         """
-        move along the track graph by `distance_m`;
-        updates occupancy when crossing block boundaries
+        Move by `distance_m` and ask the network to reflect the new location
+        DO NOT toggle occupancy flag; network owns that
         """
         if self.current_segment is None or self.network is None or distance_m == 0.0:
             return
@@ -417,86 +431,52 @@ class Train:
         pos = self.segment_displacement_m
         new_pos = pos + distance_m
 
-        # moving backward
+        # backward
         if new_pos < 0.0:
             prev_seg = self._prev_segment()
-            if prev_seg is None:
-                # clamp to start of current block
+            if prev_seg is None or getattr(prev_seg, "closed", False) or self._is_red(prev_seg):
                 self.segment_displacement_m = 0.0
                 return
 
-            # stop at boundary if previous is closed or red
-            if getattr(prev_seg, "closed", False) or self._is_red(prev_seg):
-                self.segment_displacement_m = 0.0
-                return
+            # enter previous block via network API
+            prev_len = float(getattr(prev_seg, "length", 0.0))
+            new_disp = max(0.0, new_pos + prev_len)
+            self._network_set_location(getattr(prev_seg, "block_id", getattr(prev_seg, "id", -1)), new_disp)
 
-            # cross into previous block
-            try:
-                seg.set_occupancy(False)
-            except Exception:
-                pass
             self.current_segment = prev_seg
-            try:
-                self.current_segment.set_occupancy(True)
-            except Exception:
-                pass
-
-            self.segment_displacement_m = max(0.0, new_pos + float(getattr(prev_seg, "length", 0.0)))
+            self.segment_displacement_m = new_disp
             self._sync_backend_track_segment()
             return
 
-        # moving forward
+        # forward
         if new_pos > seg_len:
             next_seg = self._next_segment()
             if next_seg is None:
-                # end of line
                 self.segment_displacement_m = seg_len
                 return
-
             if getattr(next_seg, "closed", False) or self._is_red(next_seg):
-                # park at end of current block
                 self.segment_displacement_m = seg_len
                 return
 
-            # cross into next block
-            try:
-                seg.set_occupancy(False)
-            except Exception:
-                pass
-            self.current_segment = next_seg
-            try:
-                self.current_segment.set_occupancy(True)
-            except Exception:
-                pass
+            new_disp = min(float(getattr(next_seg, "length", 0.0)), new_pos - seg_len)
+            self._network_set_location(getattr(next_seg, "block_id", getattr(next_seg, "id", -1)), new_disp)
 
-            self.segment_displacement_m = min(
-                float(getattr(self.current_segment, "length", 0.0)),
-                new_pos - seg_len,
-            )
+            self.current_segment = next_seg
+            self.segment_displacement_m = new_disp
             self._sync_backend_track_segment()
             return
 
-        # still within current block
+        # still inside this block
         self.segment_displacement_m = new_pos
+        try:
+            self.network.update_train_displacement(self.train_id, float(new_pos))
+        except AttributeError:
+            pass
 
     # public tick
-    def tick(
-        self,
-        dt_s: float,
-        *,
-        power_kw: float | None = None,
-        service_brake: bool | None = None,
-        emergency_brake: bool | None = None,
-    ) -> None:
-        """
-        integration step for train:
-          1) read track (grade, beacon, speed limit)
-          2) apply inputs to physics and integrate (backend handles stepping)
-          3) move along the track by v * dt and update occupancy
-        """
+    def tick(self, dt_s: float, *, power_kw: float | None = None,
+             service_brake: bool | None = None, emergency_brake: bool | None = None) -> None:
         trk = self._pull_track_inputs()
-
-        # feed physics; let backend/global clock handle time integration
         self.tm.set_inputs(
             power_kw=float(self.tm.power_kw if power_kw is None else power_kw),
             service_brake=bool(self.tm.service_brake if service_brake is None else service_brake),
@@ -504,43 +484,34 @@ class Train:
             grade_percent=float(trk["grade_percent"]),
             beacon_info=trk["beacon_info"],
         )
-
-        # enforce track speed limit (hard cap)
         try:
             limit = float(trk["speed_limit_mps"])
             if self.tm.velocity > limit:
                 self.tm.velocity = limit
         except Exception:
             pass
-
-        # move on the graph
         if dt_s > 0.0:
             self._advance_along_track(float(self.tm.velocity) * float(dt_s))
 
+    # global clock hook
     def attach_to_global_clock(self):
-        """call once after bind_to_track(..) so this Train advances each global tick"""
         self._last_clock_time = None
-
         def _on_clock(now):
-            # first call just initializes
             if self._last_clock_time is None:
                 self._last_clock_time = now
                 return
             dt = (now - self._last_clock_time).total_seconds()
             self._last_clock_time = now
-
-            # substep like the backend does, so crossings are smooth
             remaining = max(0.0, float(dt))
             while remaining > 1e-6:
                 step = min(self.tm.DT_MAX, remaining)
-                self.tick(step)  # tick moves along the track & updates occupancy
+                self.tick(step)
                 remaining -= step
-
         from universal.global_clock import clock
         clock.register_listener(_on_clock)
-        self._clock_cb = _on_clock  # keep a handle if you want to detach later
+        self._clock_cb = _on_clock
 
-    # helpers for UI
+    # UI/report 
     def report_state(self) -> dict:
         s = self.tm.report_state()
         s.update({
@@ -550,7 +521,7 @@ class Train:
             "line_name": getattr(self.tm, "line_name", "Green Line"),
         })
         return s
-
+    
     # controller wiring
     def attach_controller(self, controller) -> None:
         """

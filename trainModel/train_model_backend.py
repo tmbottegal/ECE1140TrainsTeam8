@@ -28,8 +28,12 @@ class TrainModelBackend:
     MAX_EBRAKE = -2.73        # m/s^2 emergency-brake
     MAX_SPEED = 22.35         # m/s (≈50 mph)
 
-    def __init__(self, line_name: str = "Green Line") -> None:
-        self.line_name = line_name
+    # passenger boarding
+    PASSENGER_MASS_KG = 70.0  #avg weight
+    CAPACITY = 272
+
+    def __init__(self, line_name: str | None = None) -> None:
+        self.line_name = line_name or "-"
         self.train_id: str = "T1"
 
         # physical properties 
@@ -151,7 +155,7 @@ class TrainModelBackend:
 
         # commanded speed (mph -> m/s)
         if "commanded_speed_mph" in kwargs:
-            self.commanded_speed = max(0.0, float(kwargs["commanded_speed_mph"])) / 2.23694
+            self.commanded_speed = max(0.0, float(kwargs["commanded_speed_mph"])) / self.MPS_TO_MPH
 
         # one physics step per input change (legacy local dt)
         if not self._clock_driven:
@@ -175,7 +179,7 @@ class TrainModelBackend:
     def _step_dt(self, dt: float) -> None:
         """Advance physics by a provided dt (seconds)."""
         # compute once
-        mass = max(1.0, self.mass_kg * self.num_cars)  # guard
+        mass = max(1.0, (self.mass_kg * self.num_cars) + self.passenger_count * self.PASSENGER_MASS_KG)
         v_old = self.velocity
 
         # tractive force from power
@@ -264,6 +268,23 @@ class TrainModelBackend:
             self.service_brake, self.emergency_brake, self.power_kw, self.grade_percent
         )
 
+    def board_passengers(self, n: int) -> int:
+        """increase passengers up to CAPACITY. Returns actually boarded"""
+        n = max(0, int(n))
+        room = max(0, self.CAPACITY - int(self.passenger_count))
+        boarded = min(room, n)
+        self.passenger_count += boarded
+        self._notify_listeners()
+        return boarded
+
+    def alight_passengers(self, n: int) -> int:
+        """decrease passengers. Returns actually exited."""
+        n = max(0, int(n))
+        exited = min(n, int(self.passenger_count))
+        self.passenger_count -= exited
+        self._notify_listeners()
+        return exited
+    
     # ------------------------------------------------------------------
     # failures
     def set_failure_state(self, failure_type: str, state: bool) -> None:
@@ -310,13 +331,13 @@ class TrainModelBackend:
             "signal_pickup_failure": self.signal_pickup_failure,
             "block_occupied": self.block_occupied,
             "train_id": getattr(self, "train_id", "T1"),
-            "line_name": getattr(self, "line_name", "Green Line"),
+            "line_name": getattr(self, "line_name", "-"),
 
             # cabin
             "actual_temperature_c": self.actual_temperature,
         }
     
-        # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # time (kept in sync with universal.global_clock)
     def set_time(self, new_time: datetime) -> None:
         """
@@ -369,10 +390,21 @@ class Train:
     def attach_to_network(self, network) -> None:
         """register this Train with the TrackNetwork (calls network.add_train(self))"""
         self.network = network
+
+        # try to grab line name from TrackNetwork so TM/ UI show the right line
+        net_line = (
+            getattr(network, "line_name", None)
+            or getattr(network, "line", None)
+            or getattr(network, "name", None)
+        )
+        if net_line is not None:
+            self.tm.line_name = str(net_line)
+
         if hasattr(network, "add_train"):
             network.add_train(self)
         else:
             raise AttributeError("TrackNetwork is missing add_train(self)")
+
 
     # step 3 
     def connect_to_track(self, block_id: int, displacement_m: float = 0.0) -> None:
@@ -530,24 +562,6 @@ class Train:
         if dt_s > 0.0:
             self._advance_along_track(float(self.tm.velocity) * float(dt_s))
 
-    # global clock hook
-    def attach_to_global_clock(self):
-        self._last_clock_time = None
-        def _on_clock(now):
-            if self._last_clock_time is None:
-                self._last_clock_time = now
-                return
-            dt = (now - self._last_clock_time).total_seconds()
-            self._last_clock_time = now
-            remaining = max(0.0, float(dt))
-            while remaining > 1e-6:
-                step = min(self.tm.DT_MAX, remaining)
-                self.tick(step)
-                remaining -= step
-        from universal.global_clock import clock
-        clock.register_listener(_on_clock)
-        self._clock_cb = _on_clock
-
     # UI/report 
     def report_state(self) -> dict:
         s = self.tm.report_state()
@@ -555,9 +569,67 @@ class Train:
             "train_id": self.train_id,
             "track_block_id": None if self.current_segment is None else getattr(self.current_segment, "block_id", None),
             "inblock_displacement_m": self.segment_displacement_m,
-            "line_name": getattr(self.tm, "line_name", "Green Line"),
         })
         return s
+    
+    # public passenger APIs the Track Model can call
+    def board_passengers(self, n: int) -> int:
+        """TrackModel calls this at stations to add riders"""
+        return self.tm.board_passengers(n)
+
+    def notify_passengers_exiting(self, n: int, station_id: int | str | None = None) -> int:
+        """
+        TrackModel calls this when doors open so riders exit
+        report throughput back to TrackModel if it exposes passengers_exiting(...).
+        """
+        exited = self.tm.alight_passengers(n)
+        try:
+            # signature: passengers_exiting(train_id, count, station_id)
+            if hasattr(self.network, "passengers_exiting"):
+                self.network.passengers_exiting(self.train_id, exited, station_id)
+        except Exception:
+            pass
+        return exited
+
+    def apply_train_command(self, cmd) -> None:
+        """
+        accepts either a dict or an object with attributes:
+          speed_mps, authority_m, service_brake, emergency_brake
+        any missing field is ignored.
+        """
+        # read fields from dict/obj safely
+        def getf(name, default=None):
+            if isinstance(cmd, dict):
+                return cmd.get(name, default)
+            return getattr(cmd, name, default)
+
+        spd = getf("speed_mps")
+        if spd is not None:
+            self.tm.commanded_speed = max(0.0, float(spd))
+
+        auth = getf("authority_m")
+        if auth is not None:
+            self.tm.authority_m = max(0.0, float(auth))
+
+        sb = getf("service_brake")
+        if sb is not None:
+            self.tm.service_brake = bool(sb)
+
+        eb = getf("emergency_brake")
+        if eb is not None:
+            self.tm.emergency_brake = bool(eb)
+
+        # immediately propagate to Train Controller if attached
+        if self.controller:
+            if spd is not None:
+                self.controller.set_commanded_speed(float(self.tm.commanded_speed))
+            if auth is not None:
+                self.controller.set_commanded_authority(float(self.tm.authority_m))
+            if sb is not None:
+                self.controller.set_service_brake(bool(self.tm.service_brake))
+            if eb is not None:
+                self.controller.set_emergency_brake(bool(self.tm.emergency_brake))
+
     
     # controller wiring
     def attach_controller(self, controller) -> None:

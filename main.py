@@ -27,6 +27,9 @@ from trackModel.track_model_backend import TrackNetwork
 from trackModel.track_model_frontend import NetworkStatusUI
 
 # Train Model import
+from trainModel.train_model_backend import TrainModelBackend, Train
+from trainModel.train_model_ui import TrainModelUI  
+
 
 # Train Controller import
 
@@ -51,7 +54,6 @@ if __name__ == "__main__":
     for ctrl in controllers.values(): 
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
-    
     #wayside hw
     nets_hw = _build_networks()
     hw_controllers = {
@@ -66,13 +68,14 @@ if __name__ == "__main__":
     hw_ui = TrackControllerHWUI(hw_controllers)
     hw_ui.setWindowTitle("Wayside Controller – Hardware UI")
     hw_ui.show()
-    
+    #-----------------------------------------------------------------------------------------------
     TrackModelUI = NetworkStatusUI(network)
     TrackControllerUi = TrackControllerUI(controllers)
     TrackModelUI.show()
     TrackControllerUi.setWindowTitle("Wayside SW Module")
     TrackControllerUi.show()
     TrackControllerUi.refresh_tables()
+    #-----------------------------------------------------------------------------------------------
     # === CTC Backend + UI ===
     ctc_state = TrackState("Green Line")
     # Replace its internal controller with the already-created one
@@ -84,5 +87,15 @@ if __name__ == "__main__":
     ctc_ui.state = ctc_state  # ensure UI uses this backend
     ctc_ui.setWindowTitle("Centralized Traffic Controller")
     ctc_ui.show()
-    
+    #-----------------------------------------------------------------------------------------------
+    # train model backend + train wrapper + ui
+    train_backend = TrainModelBackend() #backend
+    train = Train(train_id="T1", backend=train_backend) # train object wrapper so it can talk to TrackNetwork
+    train.attach_to_network(network)
+    # choose a starting block for the train on Green Line (adjust block_id/displacement)
+    train.connect_to_track(block_id=1, displacement_m=0.0)
+    train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
+    train_ui.setWindowTitle("Train Model – T1 (Green Line)")
+    train_ui.show()
+
     app.exec()

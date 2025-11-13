@@ -12,6 +12,8 @@ from universal.universal import (
     ConversionFunctions
 )
 
+from universal.global_clock import clock
+
 from track_model_backend import (
     TrackNetwork, 
     TrackSegment, 
@@ -22,7 +24,7 @@ from track_model_backend import (
     StationSide
 )
 from typing import List, Dict, Optional
-import sys
+
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QTextEdit, 
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, 
@@ -45,6 +47,9 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Loading track layout from given TrackNetwork argument \"{network.line_name}\"...\n")
             self.refresh_status()  # Load existing network status
             self.status_display.append("Track layout loaded successfully!\n")
+
+        clock.register_listener(self.track_network.set_time)
+        clock.register_listener(self.auto_refresh_status)
         
     def init_ui(self):
         self.setWindowTitle("Track Model - Test Network Status")
@@ -134,7 +139,7 @@ class NetworkStatusUI(QWidget):
         bottom_layout = QHBoxLayout()
         
         # Refresh button (takes up most of the space)
-        refresh_btn = QPushButton("Refresh Status")
+        refresh_btn = QPushButton("Manually Refresh Status")
         refresh_btn.clicked.connect(self.refresh_status)
         bottom_layout.addWidget(refresh_btn, 1)  # Give it stretch factor of 1
         
@@ -534,6 +539,19 @@ class NetworkStatusUI(QWidget):
             
             self.status_display.append("Network status refreshed.")
             
+        except Exception as e:
+            self.status_display.append(f"Error refreshing status: {str(e)}")
+
+    def auto_refresh_status(self, current_time=None):
+        """Refresh the network status display (without reloading CSV)"""
+        try:
+            self.track_network.temperature_sim()
+            # Get and display network status
+            network_status = self.track_network.get_network_status()
+            
+            # Display in table format
+            self.populate_status_table(network_status)
+        
         except Exception as e:
             self.status_display.append(f"Error refreshing status: {str(e)}")
         

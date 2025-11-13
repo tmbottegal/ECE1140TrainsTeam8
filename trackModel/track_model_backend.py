@@ -727,6 +727,8 @@ class TrackNetwork:
                             grade=float(lines["grade"]),
                             underground=lines["underground"].lower() == "true"
                         )
+                        if "beacon_data" in lines and lines["beacon_data"].strip():
+                            segment.set_beacon_data(lines["beacon_data"])
                         self.add_segment(segment)
                     case "TrackSwitch":
                         switch = TrackSwitch(
@@ -736,6 +738,8 @@ class TrackNetwork:
                             grade=float(lines["grade"]),
                             underground=lines["underground"].lower() == "true"
                         )
+                        if "beacon_data" in lines and lines["beacon_data"].strip():
+                            switch.set_beacon_data(lines["beacon_data"])
                         self.add_segment(switch)
                     case "LevelCrossing":
                         crossing = LevelCrossing(
@@ -745,6 +749,8 @@ class TrackNetwork:
                             grade=float(lines["grade"]),
                             underground=lines["underground"].lower() == "true"
                         )
+                        if "beacon_data" in lines and lines["beacon_data"].strip():
+                            crossing.set_beacon_data(lines["beacon_data"])
                         self.add_segment(crossing)
                     case "Station":
                         if ("station_name" not in lines or 
@@ -768,6 +774,8 @@ class TrackNetwork:
                             station_name=lines["station_name"],
                             station_side=StationSide(
                                 lines["station_side"].lower()))
+                        if "beacon_data" in lines and lines["beacon_data"].strip():
+                            station.set_beacon_data(lines["beacon_data"])
                         self.add_segment(station)
                     case _:
                         raise ValueError(

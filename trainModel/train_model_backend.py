@@ -511,7 +511,15 @@ class Train:
             if next_seg is None:
                 # end of line, clamp to end of block
                 self.segment_displacement_m = seg_len
+                # _set_occ(seg, True)
                 return False
+            
+            """
+            if getattr(next_seg, "closed", False) or self._is_red(next_seg):
+                self.segment_displacement_m = seg_len
+                _set_occ(seg, True)
+                return False
+            """
 
             next_len = float(getattr(next_seg, "length", 0.0))
             new_disp = min(next_len, new_pos - seg_len)

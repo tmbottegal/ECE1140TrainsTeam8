@@ -73,10 +73,6 @@ class TrainModelUI(QWidget):
 
         # left column
         left_col = QVBoxLayout() 
-        #title = QLabel("Today:") 
-        #title.setAlignment(Qt.AlignmentFlag.AlignCenter) 
-        #title.setStyleSheet("font-size:22px; font-weight:800; color:white;") 
-        #left_col.addWidget(title) 
         
         # clock (shows GLOBAL CTC time))
         self.clock_lbl = QLabel("2000-01-01 00:00:00")

@@ -339,10 +339,10 @@ if __name__ == "__main__":
     #-----------------------------------------------------------------------------------------------
     # train model backend + train wrapper + ui
     train_backend = TrainModelBackend() #backend
-    train = Train(train_id="T1", backend=train_backend) # train object wrapper so it can talk to TrackNetwork
-    train.attach_to_network(network)
+    train = Train(train_id=99, backend=train_backend) # train object wrapper so it can talk to TrackNetwork
+    network.add_train(train)
+    network.connect_train(99, block_id=1, displacement=0.0) 
     # choose a starting block for the train on Green Line (adjust block_id/displacement)
-    train.connect_to_track(block_id=1, displacement_m=0.0)
     train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
     train_ui.setWindowTitle("Train Model – T1 (Green Line)")
     train_ui.show()

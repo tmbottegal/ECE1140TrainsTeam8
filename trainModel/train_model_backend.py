@@ -380,8 +380,8 @@ class Train:
       - maintains its block + in-block displacement (local view, kept in sync with network)
     """
 
-    def __init__(self, train_id: int | str, backend: Optional["TrainModelBackend"] = None) -> None:
-        self.train_id = str(train_id)
+    def __init__(self, train_id: int, backend: Optional["TrainModelBackend"] = None) -> None:
+        self.train_id = train_id
         self.tm = backend if backend is not None else TrainModelBackend()
         self.controller = None  # TrainControllerBackend instance
         self.tm.train_id = self.train_id
@@ -389,57 +389,6 @@ class Train:
         self.network: Optional[object] = None
         self.current_segment: Optional[object] = None
         self.segment_displacement_m: float = 0.0
-
-     # FIXME: #115 This is circular. To add a Train, the CTC must create it and then call the TrackNetwork methods to connect.
-    # step 1
-    def attach_to_network(self, network) -> None:                                              
-        """register this Train with the TrackNetwork (calls network.add_train(self))"""
-        self.network = network
-
-        # try to grab line name from TrackNetwork so TM/ UI show the right line
-        net_line = (
-            getattr(network, "line_name", None)
-            or getattr(network, "line", None)
-            or getattr(network, "name", None)
-        )
-        if net_line is not None:
-            self.tm.line_name = str(net_line)
-
-        if hasattr(network, "add_train"):
-            network.add_train(self)
-        else:
-            raise AttributeError("TrackNetwork is missing add_train(self)")
-
-
-    # step 3 
-    def connect_to_track(self, block_id: int, displacement_m: float = 0.0) -> None:   
-        """
-        physically connect this train to a starting block + displacement using
-        TrackNetwork.connect_train. Also refresh local segment pointer for UI
-        """
-        if not self.network:
-            raise RuntimeError("Call attach_to_network(network) before connect_to_track(...)")
-        if not hasattr(self.network, "connect_train"):
-            raise AttributeError("TrackNetwork is missing connect_train(train_id, block_id, displacement)")
-
-        self.network.connect_train(self.train_id, int(block_id), float(displacement_m))
-
-        # keep a local pointer for fast reads/UI (no ownership of occupancy here)
-        seg = getattr(self.network, "segments", {}).get(block_id)
-        if seg is None:
-            # if segments dict isn’t exposed, still mirror labels via block_id.
-            self.current_segment = None
-            self.tm.track_segment = str(block_id)
-        else:
-            self.current_segment = seg
-            self.segment_displacement_m = max(0.0, min(float(displacement_m), float(getattr(seg, "length", 0.0))))
-            self._sync_backend_track_segment()
-
-    # wrapper
-    def bind_to_track(self, network, start_block_id: int, displacement_m: float = 0.0) -> None:
-        """back-compat: wraps two-step API"""
-        self.attach_to_network(network)
-        self.connect_to_track(start_block_id, displacement_m)
 
     # helpers from track graph
     def _next_segment(self):

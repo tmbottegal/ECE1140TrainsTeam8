@@ -31,6 +31,8 @@ from trainModel.train_model_backend import Train
 # The Track Controller governs signals, switches, crossings, etc.
 from trackControllerSW.track_controller_backend import TrackControllerBackend
 
+from trackControllerHW.track_controller_hw_backend import HardwareTrackControllerBackend
+
 
 # ------------------------------------------------------------
 # LINE DATA (UI definitions)
@@ -277,6 +279,7 @@ LINE_DATA = {
 GREEN_LINE_DATA = LINE_DATA["Green Line"]
 
 
+
 # ------------------------------------------------------------
 # Block dataclass + lightweight mutator methods
 # ------------------------------------------------------------
@@ -338,6 +341,12 @@ class TrackState:
         self.track_controller = TrackControllerBackend(self.track_model, line_name)
         self.track_controller.set_ctc_backend(self)  # Enables CTC ←→ Controller communication
         self.track_controller.start_live_link(poll_interval=1.0)
+
+        self.track_controller_hw = HardwareTrackControllerBackend(self.track_model, line_name)
+        #self.track_controller_hw = set_ctc_backend(self)
+
+        #build Track Controller HW backend and link both sides
+        
 
         #Register Track Model as a clock listener (optional redundancy)
         clock.register_listener(self.track_model.set_time)
@@ -456,8 +465,9 @@ class TrackState:
             pass
 
         # --- Re-send and update active train suggestions ---
+        # --- Re-send and update active train suggestions ---
+        # --- Re-send and update active train suggestions ---
         if self.mode == "manual":
-            to_remove = []
 
             for train_id, (speed_mps, auth_m) in list(self._train_suggestions.items()):
                 train = self.track_model.trains.get(train_id)
@@ -466,42 +476,20 @@ class TrackState:
 
                 block = train.current_segment.block_id
 
-                # how far the train travels this tick
-                distance_per_tick = speed_mps * clock.tick_interval
-                self._train_progress[train_id] += distance_per_tick
+                # Decrease authority based on actual distance traveled:
+                distance_per_tick = speed_mps * clock.tick_interval   # meters
+                new_auth = max(0.0, auth_m - distance_per_tick)
 
-                BLOCK_LEN_M = 50.0
-                # advance block when cumulative distance >= one block
-                while self._train_progress[train_id] >= BLOCK_LEN_M:
-                    next_block = block + 1
-                    if next_block not in self.track_model.segments:
-                        to_remove.append(train_id)
-                        print(f"[CTC] {train_id} reached end of line.")
-                        break
-                    train.current_segment = self.track_model.segments[next_block]
-                    block = next_block
-                    self._train_progress[train_id] -= BLOCK_LEN_M
-                    print(f"[CTC] {train_id} moved → block {block}")
+                # Send updated suggestion to Track Controller
+                self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
 
-                # recompute authority *after* block updates
-                remaining_auth = max(0.0, auth_m - (block - 1) * BLOCK_LEN_M - self._train_progress[train_id])
+                # Save updated authority
+                self._train_suggestions[train_id] = (speed_mps, new_auth)
 
-                # resend
-                self.track_controller.receive_ctc_suggestion(block, speed_mps, remaining_auth)
-                self._train_suggestions[train_id] = (speed_mps, remaining_auth)
+                print(f"[CTC] Suggestion → Train {train_id} in block {block}: "
+                    f"{speed_mps:.2f} m/s, {new_auth:.1f} m authority")
 
 
-            # cleanup
-            for tid in to_remove:
-                self._train_suggestions.pop(tid, None)
-                self._train_progress.pop(tid, None)
-
-
-        # --- Sync Track Controller wayside data back to CTC ---
-        try:
-            self.track_controller._poll_track_model()
-        except Exception as e:
-            print(f"[CTC] Error polling Track Controller: {e}")
 
     # --------------------------------------------------------
     # Maintenance control

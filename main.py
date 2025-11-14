@@ -21,7 +21,7 @@ from trackControllerSW.track_controller_ui import TrackControllerUI
 
 # Wayside Controller HW import
 from trackControllerHW.track_controller_hw_ui import TrackControllerHWUI, _build_networks
-from trackControllerHW.track_controller_hw_backend import build_backend_for_sim
+from trackControllerHW.track_controller_hw_backend import build_backend_for_sim, HardwareTrackControllerBackend
 
 # Track Model import
 from trackModel.track_model_backend import TrackNetwork
@@ -300,10 +300,11 @@ if __name__ == "__main__":
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
     # track controller hw
-    nets_hw = _build_networks()
     hw_controllers = {
-        "Green Line": build_backend_for_sim(nets_hw["Green Line"], "Green Line"),
-    }
+    "Green Line": HardwareTrackControllerBackend(network, "Green Line"),
+    # Add Red Line if needed:
+    # "Red Line": HardwareTrackControllerBackend(tm, "Red Line"),
+}
 
     for ctrl in hw_controllers.values():
         ctrl.start_live_link(1.0)

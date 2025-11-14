@@ -49,7 +49,7 @@ class NetworkStatusUI(QWidget):
         layout = QVBoxLayout()
         
         # Title
-        title = QLabel("Network Status")
+        title = QLabel("Track Model - Network Status")
         title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -327,14 +327,14 @@ class NetworkStatusUI(QWidget):
         # Define attributes to exclude from Segment Info
         excluded_segment_attributes = {
             'diverging_segment', 'failures', 
-            'passengers_boarded_total', 'passengers_exited_total', 
+            'passengers_boarded_total', 'closed', 'passengers_exited_total', 
             'passengers_waiting', 'station_side', 'straight_segment', 
             'tickets_sold_total', 'station_name', 'underground'
         }
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'closed', 'signal_state', 
+            'block_id', 'type', 'occupied', 'signal_state', 
             'speed_limit', 'length', 'grade', 'active_command',
             'previous_segment', 'next_segment', 'current_position',
             'gate_status', 'beacon_data',

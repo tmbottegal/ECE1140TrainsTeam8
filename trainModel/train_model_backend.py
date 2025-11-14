@@ -9,6 +9,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from universal.global_clock import clock 
+from universal.universal import TrainCommand
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class TrainModelBackend:
         self.position: float = 0.0      # m
         self.power_kw: float = 0.0      # kW
         self.grade_percent: float = 0.0 # %
-        self.authority_m: float = 500.0 # m
+        self.authority_m: float = 0.0 # m
         self.commanded_speed: float = 0.0  # m/s 
 
         # device / failures
@@ -77,7 +78,7 @@ class TrainModelBackend:
         self.actual_temperature: float = 22.0
 
         # misc / I/O
-        self.beacon_info: str = "None"
+        self.beacon_info: str = ""
         self.track_segment: Optional[str] = None  # filled by Train._sync_backend_track_segment()
 
         # observers
@@ -240,13 +241,13 @@ class TrainModelBackend:
 
         # authority decreases as distance is consumed
         self.authority_m = max(0.0, self.authority_m - 0.5 * (v_old + v_new) * dt)
-
+        """
         # if out of authority, stop train
         if self.authority_m <= 0.0 and v_new > 0.0:
             v_new = 0.0
             a_new = 0.0
             logger.warning("Authority limit reached. Train stopped.")
-
+        """
         # commit
         self.velocity = v_new
         self.acceleration = a_new
@@ -266,9 +267,9 @@ class TrainModelBackend:
             self.actual_temperature += dT
 
         logger.info(
-            "v=%.2f m/s, a=%.2f m/s², x=%.1f m, auth=%.1f m, "
+            "v=%.2f m/s, a=%.2f m/s², x=%.1f m, cspd=%.2f m/s, auth=%.1f m, "
             "brk=%s EB=%s P=%.1f kW grade=%.2f%%",
-            self.velocity, self.acceleration, self.position, self.authority_m,
+            self.velocity, self.acceleration, self.position, self.commanded_speed, self.authority_m,
             self.service_brake, self.emergency_brake, self.power_kw, self.grade_percent
         )
 
@@ -602,18 +603,16 @@ class Train:
             self.apply_train_command(self.current_segment.active_command)
         pass
 
-    def apply_train_command(self, cmd) -> None:
+    def apply_train_command(self, active_command: TrainCommand) -> None:
         """
         accepts either a dict or an object with attributes:
           speed_mps, authority_m, service_brake, emergency_brake
         any missing field is ignored.
         """
         # read fields from dict/obj safely
-        def getf(name, default=None):
-            if isinstance(cmd, dict):
-                return cmd.get(name, default)
-            return getattr(cmd, name, default)
-
+        commanded_speed = active_command.commanded_speed
+        authority = active_command.authority
+        """
         spd = getf("speed_mps")
         if spd is not None:
             self.tm.commanded_speed = max(0.0, float(spd))
@@ -640,8 +639,16 @@ class Train:
                 self.controller.set_service_brake(bool(self.tm.service_brake))
             if eb is not None:
                 self.controller.set_emergency_brake(bool(self.tm.emergency_brake))
+        """
 
-        print(f"Train {self.train_id} applied train command: speed={self.tm.commanded_speed:.2f} m/s, ")
+        spd = getattr(active_command, "commanded_speed", None)
+        if spd is not None:
+            self.tm.commanded_speed = max(0.0, float(spd))
+        auth = getattr(active_command, "authority", None)
+        if auth is not None:
+            self.tm.authority_m = max(0.0, float(auth))
+
+        print(f"Train {self.train_id} applied train command: speed={commanded_speed:.2f} m/s, authority={authority:.1f} m")
 
     
     # controller wiring

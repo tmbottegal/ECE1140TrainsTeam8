@@ -167,6 +167,7 @@ commanded_speed_59 = 30
 commanded_speed_60 = 30
 commanded_speed_61 = 30
 commanded_speed_62 = 30
+commanded_speed_63 = 30 # REMOVE LATER
 
 commanded_speed_122 = 20
 commanded_speed_123 = 20

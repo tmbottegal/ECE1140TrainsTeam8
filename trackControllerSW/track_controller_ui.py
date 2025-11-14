@@ -113,7 +113,7 @@ class TrackControllerUI(QWidget):
         self.clock_label.setFont(font_clock)
         self.clock_label.setFixedHeight(bigboi.height() * 2)
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000000; }") #will add to other parts of ui later for iteration 4
+        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #ffffff; }") #will add to other parts of ui later for iteration 4
         bottom_row.addWidget(self.clock_label)
         #maintenace button
         self.manual_button = QPushButton("Maintenance Mode")

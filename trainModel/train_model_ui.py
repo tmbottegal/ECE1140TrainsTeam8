@@ -77,7 +77,7 @@ class TrainModelUI(QWidget):
         # clock (shows GLOBAL CTC time))
         self.clock_lbl = QLabel("2000-01-01 00:00:00")
         self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_lbl.setStyleSheet("font-size:18px; font-weight:700; color:white;")
+        self.clock_lbl.setStyleSheet("font-size:18px; font-weight:700; color:black;")
         left_col.addWidget(self.clock_lbl)
 
         # subscribe to global clock updates
@@ -193,7 +193,7 @@ class TrainModelUI(QWidget):
         self.train_lbl = QLabel("Train -")
         self.train_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.train_lbl.setStyleSheet("font-size:16px; font-weight:800;")
-        self.next_lbl = QLabel("Next Stop: Station C")
+        self.next_lbl = QLabel(f"Next Stop: Castle Shannon")                   #TODO #125 : will need to be updated based on beacon data
         self.next_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.next_lbl.setStyleSheet("font-size:14px;")
         header_v.addWidget(self.train_lbl)

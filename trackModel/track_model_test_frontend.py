@@ -58,7 +58,7 @@ class NetworkStatusUI(QWidget):
         layout = QVBoxLayout()
         
         # Title
-        title = QLabel("Network Status - Test UI")
+        title = QLabel("Track Model - Test UI")
         title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)

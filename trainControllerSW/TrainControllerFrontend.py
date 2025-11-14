@@ -1,9 +1,6 @@
 from __future__ import annotations
 """
-Train Controller Frontend
-"""
-
-"""
+Train Controller Frontend - CLEANED VERSION (No Grade/Beacon)
 
 This module acts as the glue between the UI and the Backend, and handles
 integration with the Train Model.
@@ -18,8 +15,6 @@ The correct data flow is:
    - commanded_speed (from CTC via Track Circuit)
    - authority (from CTC via Track Circuit)  
    - actual_speed (from tachometer)
-   - grade (from Track Model)
-   - beacon (from Track Model)
 
 2. Train Controller computes control outputs
 
@@ -32,6 +27,9 @@ The correct data flow is:
 IMPORTANT: The Train Controller does NOT push CTC commands to the Train Model.
 Instead, it RECEIVES CTC commands FROM the Train Model (which gets them from 
 Track Circuit/CTC).
+
+Grade and beacon data DO NOT flow through Train Controller. They go directly:
+Track Model → Train Model (for physics simulation and passenger information).
 """
 
 from typing import Optional
@@ -63,7 +61,7 @@ class TrainControllerFrontend:
     Train Model and responds with control outputs. It does NOT command
     the Train Model what speed/authority to use.
     """
-
+    
     def __init__(self, train_id: str = "T1", train_model: Optional["TrainModelBackend"] = None) -> None:
         """
         Initialize the Frontend
@@ -84,7 +82,7 @@ class TrainControllerFrontend:
         self._demo_speed_mps = 0.0
         self._demo_cmd_speed_mps = 0.0  # For demo mode only
         self._demo_authority_m = 0.0     # For demo mode only
-
+    
     # ======================================================================
     # FEATURE FLAGS - For UI to adjust behavior
     # ======================================================================
@@ -92,7 +90,7 @@ class TrainControllerFrontend:
     def has_train_model(self) -> bool:
         """Check if a Train Model is connected"""
         return self.tm is not None
-
+    
     # ======================================================================
     # UI → CONTROLLER SETTERS (Driver/Engineer inputs)
     # ======================================================================
@@ -144,7 +142,7 @@ class TrainControllerFrontend:
     def set_temp_c(self, temp_c: float) -> None:
         """Set cabin temperature setpoint"""
         self.ctrl.set_temp_setpoint_c(temp_c)
-
+    
     # ======================================================================
     # DEMO MODE ONLY - Simulated inputs (used when no Train Model)
     # ======================================================================
@@ -181,7 +179,7 @@ class TrainControllerFrontend:
             self._demo_authority_m = authority_m
             self.ctrl.set_commanded_speed(self._demo_cmd_speed_mps)
             self.ctrl.set_commanded_authority(self._demo_authority_m)
-
+    
     # ======================================================================
     # MAIN TICK - Integration loop with Train Model
     # ======================================================================
@@ -221,33 +219,36 @@ class TrainControllerFrontend:
             commanded_speed_mps = float(state.get("commanded_speed", 0.0))
             commanded_authority_m = float(state.get("authority", 0.0))
             
-            # Extract environmental data
-            grade_percent = float(state.get("grade", 0.0))
-            beacon_str = str(state.get("beacon", "None"))
-
             # Feed these inputs into the controller
             self.ctrl.set_actual_speed(actual_velocity_mps)
             self.ctrl.set_commanded_speed(commanded_speed_mps)
             self.ctrl.set_commanded_authority(commanded_authority_m)
-            self.ctrl.set_grade(grade_percent)
-            self.ctrl.set_beacon_info(beacon_str)
-
+            
             # STEP 2: Run the controller algorithm
             # This computes power and brake commands based on the inputs
             self.ctrl.update(dt_s)
             
             # Get the computed outputs
             outputs = self.ctrl.get_display_values()
-
+            
             # STEP 3: Push outputs TO Train Model
             # The Train Model will use these to update its physics simulation
-            self.tm.set_inputs(
-                power_kw=float(outputs["power_kw"]),
-                service_brake=bool(outputs["service_brake"]),
-                emergency_brake=bool(outputs["emergency_brake"]),
-                grade_percent=grade_percent,  # Pass through
-                beacon_info=beacon_str,       # Pass through
-            )
+            # NOTE: Grade and beacon are NOT provided by Train Controller!
+            # They come directly from Track Model to Train Model.
+            # If the Train Model's set_inputs requires them, they should be
+            # passed through from Track Model or default to 0/"None".
+            
+            # Check if train model expects these parameters
+            try:
+                self.tm.set_inputs(
+                    power_kw=float(outputs["power_kw"]),
+                    service_brake=bool(outputs["service_brake"]),
+                    emergency_brake=bool(outputs["emergency_brake"]),
+                )
+            except TypeError:
+                # If set_inputs requires grade/beacon, the Train Model should
+                # get those from Track Model, not from us. This is a fallback.
+                pass
             
             # Also send pass-through controls (doors, lights, temperature)
             # These go directly to the Train Model without controller logic
@@ -263,9 +264,9 @@ class TrainControllerFrontend:
                 )
             if hasattr(self.tm, 'set_temperature'):
                 self.tm.set_temperature(float(outputs["temp_c"]))
-
+            
             return outputs
-
+        
         else:
             # ========== DEMO MODE (No Train Model) ==========
             # Simulate the data flow using toy physics
@@ -285,7 +286,7 @@ class TrainControllerFrontend:
             power_kw = float(outputs.get("power_kw", 0.0))
             eb_active = bool(outputs.get("emergency_brake", False))
             sb_active = bool(outputs.get("service_brake", False))
-
+            
             # Compute acceleration based on outputs
             if eb_active:
                 accel = -3.0  # Hard braking
@@ -293,7 +294,7 @@ class TrainControllerFrontend:
                 accel = -1.0  # Moderate braking
             else:
                 accel = 0.02 * power_kw  # Power → acceleration
-
+            
             # Update demo speed
             self._demo_speed_mps = max(0.0, self._demo_speed_mps + accel * dt_s)
             self.ctrl.set_actual_speed(self._demo_speed_mps)

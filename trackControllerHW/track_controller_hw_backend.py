@@ -3,6 +3,7 @@ import time, threading, logging
 from typing import Dict, Tuple, Any, Callable, List, Optional
 from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -86,11 +87,29 @@ class TrackModelAdapter:
 
 
 # -------------------- Line partition (your HW ownership) --------------------
-HW_LINE_BLOCK_MAP: Dict[str, range] = {
-    "Blue Line":  range(1, 16),     # 1..15
-    "Red Line":   range(74, 151),   # 74..150
-    "Green Line": range(1, 151),    # 1..150
+### NEW: explicit HW-controlled vs HW-view-only maps
+
+# Blocks actually CONTROLLED by this hardware wayside
+HW_CONTROLLED_BLOCK_MAP: Dict[str, range] = {
+    # Blue line unused for HW in your spec; keep empty or adjust if needed
+    "Blue Line":  range(1, 1),      # empty
+    # Red line: 35–71 (your HW territory)
+    "Red Line":   range(35, 72),    # 35..71
+    # Green line: 63–121 (your HW territory)
+    "Green Line": range(63, 122),   # 63..121
 }
+
+# Blocks that HW can *see* but does not control (view-only on HW side)
+HW_VIEW_ONLY_BLOCK_MAP: Dict[str, List[int]] = {
+    # Red: 24–34, 72–76
+    "Red Line":   list(range(24, 35)) + list(range(72, 77)),
+    # Green: 58–62, 122–143
+    "Green Line": list(range(58, 63)) + list(range(122, 144)),
+    "Blue Line":  [],  # no view-only defined
+}
+
+# For backwards-compat (some UI may import this), keep as "controlled range"
+HW_LINE_BLOCK_MAP: Dict[str, range] = HW_CONTROLLED_BLOCK_MAP.copy()
 
 
 # -------------------- CTC interoperability types --------------------
@@ -141,18 +160,22 @@ class HardwareTrackControllerBackend:
         self.ctc_backend: Any | None = None
         self._ctc_update_enabled: bool = True
 
-        # Our block range
-        self._line_blocks = list(HW_LINE_BLOCK_MAP.get(self.line_name, []))
+        self.time: datetime = datetime(2000, 1, 1, 0, 0, 0) #global clock
 
-        # Guard blocks just outside our ownership (blind-spot mitigation)
+        ### NEW: derive HW + view-only blocks for this line
+        self._hw_blocks: List[int] = list(HW_CONTROLLED_BLOCK_MAP.get(self.line_name, []))
+        self._view_blocks: List[int] = list(HW_VIEW_ONLY_BLOCK_MAP.get(self.line_name, []))
+        self._line_blocks: List[int] = sorted(set(self._hw_blocks) | set(self._view_blocks))
+
+        # Guard blocks just outside our HW ownership (blind-spot mitigation)
         self._guard_blocks: List[int] = []
-        rng = HW_LINE_BLOCK_MAP.get(self.line_name)
-        if isinstance(rng, range):
-            first, last = rng.start, rng.stop - 1
+        if self._hw_blocks:
+            first, last = min(self._hw_blocks), max(self._hw_blocks)
             before, after = first - 1, last + 1
-            if before in getattr(self.track_model, "segments", {}):
+            segments = getattr(self.track_model, "segments", {})
+            if before in segments:
                 self._guard_blocks.append(before)
-            if after in getattr(self.track_model, "segments", {}):
+            if after in segments:
                 self._guard_blocks.append(after)
         self._guard_thread_running = False
         self._guard_poll_interval = 1.0
@@ -160,6 +183,7 @@ class HardwareTrackControllerBackend:
         # If we're using the local adapter, make sure our blocks exist
         if hasattr(self.track_model, "ensure_blocks"):
             try:
+                # Ensure *all* line blocks (HW + view-only) exist for standalone mode
                 self.track_model.ensure_blocks(self._line_blocks)
             except Exception:
                 logger.exception("ensure_blocks failed")
@@ -474,8 +498,6 @@ class HardwareTrackControllerBackend:
 
     def set_signal(self, block: int, color: str | SignalState) -> None:
         seg = getattr(self.track_model, "segments", {}).get(block)
-        if not seg:
-            return
 
         if isinstance(color, SignalState):
             state = color
@@ -485,18 +507,20 @@ class HardwareTrackControllerBackend:
                 return  # silently ignore invalid text
             state = SignalState[key]
 
-        try:
-            if hasattr(seg, "set_signal_state"):
-                seg.set_signal_state(state)
-            elif hasattr(self.track_model, "set_signal_state"):
-                self.track_model.set_signal_state(block, state)
-        except Exception:
-            logger.exception("Failed to set signal")
+        # Try to push into track model if segment exists, but don't require it
+        if seg:
+            try:
+                if hasattr(seg, "set_signal_state"):
+                    seg.set_signal_state(state)
+                elif hasattr(self.track_model, "set_signal_state"):
+                    self.track_model.set_signal_state(block, state)
+            except Exception:
+                logger.exception("Failed to set signal in track model")
 
+        # Always keep local cache so PLC-only blocks still show in UI
         self._known_signal[block] = state
         self._notify_listeners()
         self._send_status_to_ctc()
-
 
     def set_commanded_speed(self, block: int, speed_mph: int) -> None:
         self._commanded_speed_mph[block] = int(speed_mph)
@@ -679,14 +703,14 @@ class HardwareTrackControllerBackend:
 
     # ---------- Data exposure for UI ----------
     def get_line_block_ids(self) -> List[int]:
-        return list(HW_LINE_BLOCK_MAP.get(self.line_name, []))
+        ### NEW: always use union of HW + view-only for this line
+        return list(self._line_blocks)
 
     @property
     def blocks(self) -> Dict[int, Dict[str, object]]:
         d: Dict[int, Dict[str, object]] = {}
+        # segments can be missing; we still want to show the block with N/A values
         for b in self.get_line_block_ids():
-            if b not in getattr(self.track_model, "segments", {}):
-                continue
             cmd_spd = int(self._commanded_speed_mph.get(b, 0)) or "N/A"
             cmd_auth = int(self._commanded_auth_yd.get(b, 0)) or "N/A"
             d[b] = {
@@ -712,6 +736,34 @@ class HardwareTrackControllerBackend:
             "crossings": self.crossings.copy(),
             "crossing_blocks": self.crossing_blocks.copy(),
         }
+        # ---------- Global clock integration ----------
+    def set_time(self, new_time: datetime) -> None:
+        """
+        Called by the global clock/UI to update this wayside's notion of time.
+        """
+        self.time = new_time
+        # If you add time-based safety logic later, use self.time there.
+        self._notify_listeners()
+
+    def manual_set_time(
+        self,
+        year: int,
+        month: int,
+        day: int,
+        hour: int,
+        minute: int,
+        second: int,
+    ) -> None:
+        """
+        Optional: let UI manually override the time (similar to software side).
+        """
+        self.time = datetime(year, month, day, hour, minute, second)
+        logger.info(
+            "%s (HW): Time manually set to %s",
+            self.line_name,
+            self.time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        self._notify_listeners()
 
     # ---------- Convenience test helper ----------
     def run_line_test(self, plc_path: str) -> Dict[str, Any]:
@@ -734,9 +786,8 @@ class HardwareTrackControllerBackend:
             },
         }
 
-
 def build_backend_for_sim(
-    track_model: TrackModelAdapter,
+    track_model: TrackModelAdapter, 
     line_name: str = "Blue Line",
 ) -> HardwareTrackControllerBackend:
     return HardwareTrackControllerBackend(track_model, line_name=line_name)

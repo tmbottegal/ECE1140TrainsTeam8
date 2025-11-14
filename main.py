@@ -21,7 +21,7 @@ from trackControllerSW.track_controller_ui import TrackControllerUI
 
 # Wayside Controller HW import
 from trackControllerHW.track_controller_hw_ui import TrackControllerHWUI, _build_networks
-from trackControllerHW.track_controller_hw_backend import build_backend_for_sim
+from trackControllerHW.track_controller_hw_backend import build_backend_for_sim, HardwareTrackControllerBackend
 
 # Track Model import
 from trackModel.track_model_backend import TrackNetwork
@@ -300,10 +300,11 @@ if __name__ == "__main__":
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
     # track controller hw
-    nets_hw = _build_networks()
     hw_controllers = {
-        "Green Line": build_backend_for_sim(nets_hw["Green Line"], "Green Line"),
-    }
+    "Green Line": HardwareTrackControllerBackend(network, "Green Line"),
+    # Add Red Line if needed:
+    # "Red Line": HardwareTrackControllerBackend(tm, "Red Line"),
+}
 
     for ctrl in hw_controllers.values():
         ctrl.start_live_link(1.0)
@@ -346,36 +347,77 @@ if __name__ == "__main__":
 
  #-----------------------------------------------------------------------------------------------
     '''
+    # === TRAIN CONTROLLER INTEGRATION (WORKAROUND VERSION) ===
     print("\n" + "="*60)
     print("INTEGRATING TRAIN CONTROLLER...")
     print("="*60)
+    print("NOTE: Using workaround method (clock listener)")
+    print("      Ideal: Train Model calls controller in tick()")
+    print("      Current: main.py listener calls controller manually")
+    print("="*60)
     
     # Create Train Controller backend
-    print("[1/2] Creating Train Controller backend...")
-    train_controller = TrainControllerUI(train_id="T1-Controller")
+    print("\n[1/4] Creating Train Controller backend...")
+    train_controller = TC_Backend(train_id="T1")
     print(f"  ✓ Train Controller created")
     print(f"    Train ID: {train_controller.state.train_id}")
     print(f"    Kp: {train_controller.state.kp}, Ki: {train_controller.state.ki}")
+    print(f"    Initial mode: {'AUTO' if train_controller.state.auto_mode else 'MANUAL'}")
     
     # Attach Train Controller to Train Model
-    # This enables the automatic integration loop:
-    # Every clock tick: TM → send_to_controller() → TC.update() → receive_from_controller() → TM
-    print("\n[2/2] Attaching Train Controller to Train Model...")
+    print("\n[2/4] Attaching Train Controller to Train Model...")
     train.attach_controller(train_controller)
-    print(f"  ✓ Train Controller attached to Train Model")
-    print(f"  ✓ Integration loop enabled")
-    print(f"    Data flow: Train Model → Train Controller → Train Model")
+    print(f"  ✓ Train Controller attached")
     
-    print("\n" + "="*60)
-    print("TRAIN CONTROLLER INTEGRATION COMPLETE!")
-    print("="*60)
-    print("\nYour Train Controller is now controlling the train!")
-    print("Watch the Train Model UI to see:")
-    print("  - Commanded speed (from CTC)")
-    print("  - Actual speed (from physics)")
-    print("  - Power output (from YOUR controller!)")
-    print("  - Brake states (from YOUR controller!)")
-    print("\nThe integration runs automatically via global clock.")
-    print("="*60 + "\n")
+    # Workaround: Register clock listener
+    print("\n[3/4] Setting up automatic integration (workaround)...")
+    
+    # Track last tick time for accurate dt calculation
+    train_controller_last_tick = [None]  # Use list to allow modification in closure
+    
+    def train_controller_clock_listener(current_time):
+        """
+        Workaround: Manually call controller integration every clock tick.
+        
+        In ideal solution, Train.tick() would call step_controller() automatically.
+        Since Train Model hasn't made that change yet, we register this listener
+        with the global clock to call step_controller() manually.
+        """
+        try:
+            # Calculate dt since last tick
+            if train_controller_last_tick[0] is None:
+                train_controller_last_tick[0] = current_time
+                return
+            
+            dt_s = (current_time - train_controller_last_tick[0]).total_seconds()
+            train_controller_last_tick[0] = current_time
+            
+            # Call the controller integration (same as Train.tick() would)
+            if dt_s > 0.0:
+                train.step_controller(dt_s)
+                
+        except Exception as e:
+            import traceback
+            print(f"\n[ERROR] Train Controller integration failed:")
+            print(f"  {e}")
+            traceback.print_exc()
+    
+    # Register with global clock
+    clock.register_listener(train_controller_clock_listener)
+    print(f"  ✓ Clock listener registered")
+    print(f"  ✓ Controller will run every clock tick")
+    
+    # Create Train Controller UI
+    print("\n[4/4] Creating Train Controller UI...")
+    from trainControllerSW.TrainControllerFrontend import TrainControllerFrontend
+    train_controller_frontend = TrainControllerFrontend(train_id="T1", train_model=None)
+    train_controller_frontend.ctrl = train_controller
+    
+    train_controller_ui = TrainControllerUI(train_controller_frontend)
+    train_controller_ui.setWindowTitle("Train Controller - T1 (Green Line)")
+    train_controller_ui.resize(1200, 750)
+    train_controller_ui.show()
     '''
     app.exec()
+
+    

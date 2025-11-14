@@ -275,9 +275,9 @@ class TrainModelBackend:
 
     def board_passengers(self, n: int) -> int:
         """increase passengers up to CAPACITY. Returns actually boarded"""
-        n = max(0, int(n))
+        n = max(0, int(n)) 
         room = max(0, self.CAPACITY - int(self.passenger_count))
-        boarded = min(room, n)
+        boarded = min(room, n) 
         self.passenger_count += boarded
         self._notify_listeners()
         return boarded
@@ -392,12 +392,15 @@ class Train:
         self.segment_displacement_m: float = 0.0
 
     # helpers from track graph
+    # what is next
     def _next_segment(self):
         return None if self.current_segment is None else self.current_segment.get_next_segment()
 
+    #what is previous
     def _prev_segment(self):
         return None if self.current_segment is None else self.current_segment.get_previous_segment()
 
+    # signal to stop at "red"
     @staticmethod
     def _is_red(seg) -> bool:
         st = getattr(seg, "signal_state", None)
@@ -405,7 +408,8 @@ class Train:
         name = getattr(st, "name", None)
         s = str(val or name or st).lower()
         return "red" in s
-
+    
+    # send label to backend
     def _sync_backend_track_segment(self) -> None:
         try:
             block_id = getattr(self.current_segment, "block_id", None)
@@ -435,7 +439,7 @@ class Train:
             return False
 
 
-    # per-step sync from track -> physics
+    # per-step sync from track to send to physics
     def _pull_track_inputs(self) -> dict:
         if self.current_segment is None:
             return {"grade_percent": 0.0, "beacon_info": "None", "speed_limit_mps": float(self.tm.MAX_SPEED)}
@@ -463,12 +467,12 @@ class Train:
         if self.current_segment is None or self.network is None or distance_m == 0.0:
             return False
 
-        seg = self.current_segment
-        seg_len = float(getattr(seg, "length", 0.0))
-        pos = self.segment_displacement_m
-        new_pos = pos + float(distance_m)
+        seg = self.current_segment # current segment
+        seg_len = float(getattr(seg, "length", 0.0)) # segment length 
+        pos = self.segment_displacement_m # where i am inside the block
+        new_pos = pos + float(distance_m) #updated position
 
-        # helper for occupancy
+        # helper for occupancy; returns true if occ
         def _set_occ(segment, occ: bool) -> None:
             try:
                 if hasattr(segment, "set_occupancy"):
@@ -480,7 +484,7 @@ class Train:
 
         # moving backwards
         if new_pos < 0.0:
-            prev_seg = self._prev_segment()
+            prev_seg = self._prev_segment() # grab whatever is linked before this 
             if prev_seg is None or getattr(prev_seg, "closed", False) or self._is_red(prev_seg):
                 # cannot move into previous block
                 self.segment_displacement_m = 0.0
@@ -550,6 +554,7 @@ class Train:
     def tick(self, dt_s: float, *, power_kw: float | None = None,
              service_brake: bool | None = None, emergency_brake: bool | None = None) -> None:
         trk = self._pull_track_inputs()
+        #take inputs and feed to backend
         self.tm.set_inputs(
             power_kw=float(self.tm.power_kw if power_kw is None else power_kw),
             service_brake=bool(self.tm.service_brake if service_brake is None else service_brake),
@@ -564,7 +569,7 @@ class Train:
         except Exception:
             pass
         if dt_s > 0.0:
-            self._advance_along_track(float(self.tm.velocity) * float(dt_s))
+            self._advance_along_track(float(self.tm.velocity) * float(dt_s)) # distance = speed * time
 
     # UI/report 
     def report_state(self) -> dict:

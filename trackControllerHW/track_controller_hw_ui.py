@@ -20,6 +20,8 @@ except ModuleNotFoundError:
         SignalState,
     )
 
+from universal.global_clock import clock as global_clock
+
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -68,6 +70,13 @@ class TrackControllerHWUI(QWidget):
             pass
 
         self.refresh_all()
+        
+        # ---- Global clock hookup ----
+        try:
+            global_clock.register_listener(self._update_clock_display)
+            self._update_clock_display(global_clock.get_time())
+        except Exception:
+            logger.exception("Failed to hook HW UI into global clock")
 
     def _apply_stylesheet(self) -> None:
         """Apply modern, clean styling to the entire UI"""
@@ -235,6 +244,24 @@ class TrackControllerHWUI(QWidget):
 
         # --- PLC upload section ---
         plc_container = QWidget()
+        
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(24, 24, 24, 24)
+        content_layout.setSpacing(16)
+
+        # --- Top bar: clock display ---
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(12)
+        self.clock_label = QLabel("Time: --")
+        self.clock_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top_bar.addStretch(1)
+        top_bar.addWidget(self.clock_label)
+        content_layout.addLayout(top_bar)
+
+        # --- PLC upload section ---
+        plc_container = QWidget()
+
         plc_container.setStyleSheet("""
             QWidget {
                 background-color: white;
@@ -327,6 +354,24 @@ class TrackControllerHWUI(QWidget):
         if self.maintenance_enabled and item and (item.flags() & Qt.ItemFlag.ItemIsEditable):
             self._hb_timer.stop()
             QTimer.singleShot(2000, lambda: self._hb_timer.start(1000))
+
+    def _update_clock_display(self, current_time) -> None:
+        """
+        Listener for the global clock; updates label and pushes time to backends.
+        """
+        try:
+            time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+            self.clock_label.setText(f"Time: {time_str}")
+
+            # Push time into all hardware controllers
+            for controller in self.controllers.values():
+                try:
+                    controller.set_time(current_time)
+                except Exception:
+                    logger.exception("Failed to set time on a HW controller")
+        except Exception:
+            logger.exception("cant update clock display (HW)")
+
 
     # -------------- Actions --------------
     def _on_line_changed(self, name: str) -> None:

@@ -1,10 +1,6 @@
 from __future__ import annotations
 """ 
- This is the Train Controller Back End.
-
-"""
-
-""" 
+Train Controller Backend - CLEANED VERSION (No Grade/Beacon)
 
 This module implements the core Train Controller logic according to the Use Case Model.
 
@@ -12,8 +8,6 @@ INPUTS (from Train Model via Frontend):
 - commanded_speed_mps: Speed command from CTC/Track Circuit (m/s)
 - commanded_authority_m: Authority distance from CTC/Track Circuit (meters)
 - actual_speed_mps: Current train velocity from tachometer (m/s)
-- grade_percent: Track grade from Track Model (%)
-- beacon_info: Station/stop information from beacons (string)
 
 OUTPUTS (to Train Model):
 - power_kw: Power command to train motor (kW)
@@ -32,6 +26,9 @@ DRIVER INPUTS (from Driver via UI):
 ENGINEER INPUTS (from Engineer via UI):
 - kp, ki: PI controller gains (float)
 - speed_limit_mps: Line speed limit (m/s)
+
+NOTE: Grade and beacon data are NOT part of Train Controller.
+They flow directly: Track Model → Train Model (for physics simulation).
 """
 
 from dataclasses import dataclass
@@ -62,34 +59,30 @@ class TrainState:
     # Speed Limits (Safety constraints)
     MAX_SPEED_MPS: float = mph_to_mps(70.0)  # Absolute maximum speed
     speed_limit_mps: float = mph_to_mps(70.0)  # Line speed limit from track
-
+    
     # === INPUTS FROM TRAIN MODEL (via Track Circuit/CTC) ===
     commanded_speed_mps: float = 0.0     # Speed command from CTC
     commanded_authority_m: float = 0.0   # Authority from CTC (distance allowed to travel)
     actual_speed_mps: float = 0.0        # Actual velocity from train tachometer
-    
-    # === INPUTS FROM TRAIN MODEL (environmental) ===
-    grade_percent: float = 0.0           # Current track grade
-    beacon_info: str = "None"            # Beacon data (stations, stops)
     
     # === DRIVER INPUTS ===
     auto_mode: bool = True               # True=Auto (follow CTC), False=Manual (follow driver)
     driver_set_speed_mps: float = 0.0    # Driver's manual speed setpoint
     service_brake_cmd: bool = False      # Driver service brake command
     emergency_brake_cmd: bool = False    # Driver emergency brake command
-
+    
     # === DRIVER CONTROLS (passed through to Train Model) ===
     doors_left_open: bool = False        # Left door control
     doors_right_open: bool = False       # Right door control
     headlights_on: bool = False          # Headlight control
     cabin_lights_on: bool = False        # Cabin light control
     temp_setpoint_c: float = 20.0        # Cabin temperature setpoint (°C)
-
+    
     # === OUTPUTS TO TRAIN MODEL ===
     power_kw: float = 0.0                # Power command to motor (kW)
     service_brake_out: bool = False      # Service brake activation
     emergency_brake_out: bool = False    # Emergency brake activation
-
+    
     # === INTERNAL STATE ===
     _i_err: float = 0.0  # Integral error accumulator for PI controller
 
@@ -114,11 +107,11 @@ class TrainControllerBackend:
     - UC 4.7: Train lights on and off
     - UC 4.8: Train doors open and close
     """
-
+    
     def __init__(self, train_id: str = "T1") -> None:
         """Initialize the Train Controller with a unique train ID"""
         self.state = TrainState(train_id=train_id)
-
+    
     # ======================================================================
     # SETTERS - INPUTS FROM TRAIN MODEL (received via Frontend)
     # ======================================================================
@@ -134,7 +127,7 @@ class TrainControllerBackend:
             speed_mps: Commanded speed in meters per second
         """
         self.state.commanded_speed_mps = max(0.0, float(speed_mps))
-
+    
     def set_commanded_authority(self, authority_m: float) -> None:
         """
         Set commanded authority from CTC/Track Circuit
@@ -146,7 +139,7 @@ class TrainControllerBackend:
             authority_m: Authority distance in meters
         """
         self.state.commanded_authority_m = max(0.0, float(authority_m))
-
+    
     def set_actual_speed(self, speed_mps: float) -> None:
         """
         Set actual speed from Train Model tachometer
@@ -158,26 +151,6 @@ class TrainControllerBackend:
         """
         self.state.actual_speed_mps = max(0.0, float(speed_mps))
     
-    def set_grade(self, grade_percent: float) -> None:
-        """
-        Set current track grade from Track Model
-        
-        Args:
-            grade_percent: Grade as percentage (positive = uphill, negative = downhill)
-        """
-        self.state.grade_percent = float(grade_percent)
-    
-    def set_beacon_info(self, beacon_info: str) -> None:
-        """
-        Set beacon information from Track Model
-        
-        Beacons provide station names, stop information, etc.
-        
-        Args:
-            beacon_info: Beacon data string
-        """
-        self.state.beacon_info = str(beacon_info)
-
     # ======================================================================
     # SETTERS - DRIVER INPUTS (from UI)
     # ======================================================================
@@ -224,7 +197,7 @@ class TrainControllerBackend:
             active: True to activate emergency brake
         """
         self.state.emergency_brake_cmd = bool(active)
-
+    
     # ======================================================================
     # SETTERS - ENGINEER INPUTS (from UI)
     # ======================================================================
@@ -257,7 +230,7 @@ class TrainControllerBackend:
             ki: Integral gain (typically 0.0 - 10.0)
         """
         self.state.ki = max(0.0, float(ki))
-
+    
     # ======================================================================
     # SETTERS - PASS-THROUGH CONTROLS (Driver to Train Model)
     # ======================================================================
@@ -286,7 +259,7 @@ class TrainControllerBackend:
             temp_c: Desired temperature in Celsius
         """
         self.state.temp_setpoint_c = float(temp_c)
-
+    
     # ======================================================================
     # MAIN UPDATE LOOP - Core Control Algorithm
     # ======================================================================
@@ -307,7 +280,7 @@ class TrainControllerBackend:
             dt_s: Time step in seconds (typically 0.1 for 10 Hz)
         """
         s = self.state
-
+        
         # ========== SAFETY LAYER 1: EMERGENCY BRAKE ==========
         # Emergency brake has absolute priority - stops everything immediately
         if s.emergency_brake_cmd:
@@ -318,7 +291,7 @@ class TrainControllerBackend:
             return
         else:
             s.emergency_brake_out = False
-
+        
         # ========== SAFETY LAYER 2: AUTHORITY GUARD ==========
         # If authority is 0 or negative, must stop with service brake
         # (Authority = distance allowed to travel; 0 means "stop here")
@@ -327,7 +300,7 @@ class TrainControllerBackend:
             s.power_kw = 0.0
             self._reset_integrator()
             return
-
+        
         # ========== SAFETY LAYER 3: MANUAL SERVICE BRAKE ==========
         # Driver can manually activate service brake
         if s.service_brake_cmd:
@@ -337,7 +310,7 @@ class TrainControllerBackend:
             return
         else:
             s.service_brake_out = False
-
+        
         # ========== COMPUTE TARGET SPEED ==========
         # In Auto mode: use commanded speed from CTC
         # In Manual mode: use driver's setpoint
@@ -349,7 +322,7 @@ class TrainControllerBackend:
         # Apply speed limits (never exceed line limit or controller maximum)
         target = min(target, s.speed_limit_mps, s.MAX_SPEED_MPS)
         target = max(0.0, target)  # Never negative
-
+        
         # ========== PI CONTROLLER ==========
         # Compute error: target speed - actual speed
         err = target - s.actual_speed_mps
@@ -360,13 +333,13 @@ class TrainControllerBackend:
         
         # PI control law: u = Kp * error + Ki * integral(error)
         u = s.kp * err + s.ki * s._i_err
-
+        
         # ========== CONVERT CONTROL SIGNAL TO POWER ==========
         # Map control signal to power in kW
         # Scale factor of 50.0 is tuned for this system
         # Clamp between 0 and 120 kW (max train power)
         s.power_kw = max(0.0, min(120.0, u * 50.0))
-
+    
     def _reset_integrator(self) -> None:
         """
         Reset the PI controller's integral term
@@ -374,7 +347,7 @@ class TrainControllerBackend:
         Called when brakes are applied to prevent integral windup
         """
         self.state._i_err = 0.0
-
+    
     # ======================================================================
     # TELEMETRY - Output current state for UI display
     # ======================================================================
@@ -398,10 +371,6 @@ class TrainControllerBackend:
             "cmd_speed_mph": mps_to_mph(s.commanded_speed_mps),
             "authority_m": s.commanded_authority_m,
             "actual_speed_mph": mps_to_mph(s.actual_speed_mps),
-            
-            # Environmental (INPUTS from Train Model)
-            "grade_percent": s.grade_percent,
-            "beacon_info": s.beacon_info,
             
             # Driver inputs
             "driver_set_mph": mps_to_mph(s.driver_set_speed_mps),

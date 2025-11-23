@@ -1,10 +1,9 @@
 from __future__ import annotations
 import sys,os,logging
-from typing import TYPE_CHECKING, Dict, NoReturn
+from typing import TYPE_CHECKING, Dict
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QApplication,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -26,7 +25,6 @@ if _pkg_root not in sys.path:
 from universal.global_clock import clock as global_clock
 from universal.universal import SignalState
 from track_controller_backend import TrackControllerBackend
-from trackModel.track_model_backend import TrackNetwork as TrackModelNetwork
 
 if TYPE_CHECKING:
     from track_controller_backend import TrackControllerBackend
@@ -113,7 +111,7 @@ class TrackControllerUI(QWidget):
         self.clock_label.setFont(font_clock)
         self.clock_label.setFixedHeight(bigboi.height() * 2)
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #ffffff; }") #will add to other parts of ui later for iteration 4
+        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000000; }") #will add to other parts of ui later for iteration 4
         bottom_row.addWidget(self.clock_label)
         #maintenace button
         self.manual_button = QPushButton("Maintenance Mode")

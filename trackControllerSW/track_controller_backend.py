@@ -1,8 +1,16 @@
+# wayside needs to have logic in the plc file
+# wayside needs to fix crossing states
+# wayside needs to infer if a rail is broken (if a train goes through a block and it doesnt display tha tit is occupied, it is a broken rail)
+# wayside needs to infer if a power failure (if switch/signal state doesnt change after a change, there is a power failure)
+# wayside needs to infer if there is a track circuit failure (when commanded speed and commanded authority is changed and a train doesnt follow it, it is a track circuit failure)
+# wayside needs to see hardware part so not cause collisions
+
+
 from __future__ import annotations
 import sys, os, logging, importlib.util, threading, time, math
-from typing import Callable, Dict, List, Tuple, Any
+from typing import Callable, Dict, List, Tuple, Any, Set
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 
 _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -38,6 +46,22 @@ class WaysideStatusUpdate:
     signal_state: SignalState
     switch_position: int | None = None
     crossing_status: bool | None = None
+
+@dataclass
+class FailureRecord:
+    failure_type: str
+    block_id: int
+    timestamp: datetime
+    details: str
+    resolved: bool = False
+
+@dataclass
+class CommandVerification:
+    block_id: int
+    command_type: str
+    expected_value: any
+    timestamp: datetime
+    verified: bool = False
 
 class TrackControllerBackend:
 
@@ -415,13 +439,10 @@ class TrackControllerBackend:
         for cid, status in self.crossings.items():
             crossings_display[cid] = {
                 "block": self.crossing_blocks.get(cid),
-                "status": "Active" if status else "Inactive"
-            }
-        return {
-            "line": self.line_name,
+                "status": "Active" if status else "Inactive"}
+        return {"line": self.line_name,
             "maintenance_mode": self.maintenance_mode,
-            "blocks": {
-                b: {
+            "blocks": {b: {
                     "occupied": d["occupied"],
                     "suggested_speed": d["suggested_speed"],
                     "suggested_auth": d["suggested_auth"],
@@ -430,13 +451,12 @@ class TrackControllerBackend:
                     "signal": (d["signal"].name.title() 
                              if isinstance(d["signal"], SignalState) 
                              else (d["signal"] if isinstance(d["signal"], str) else "N/A")),
-                } for b, d in self.blocks.items()
-            },
+                } for b, d in self.blocks.items()},
             "switches": switches_display,
             "switch_map": self.switch_map.copy(),
             "crossing": crossings_display,
-        }
-
+            "failures": self.get_failure_report()}
+    
     def _update_occupancy_from_model(self, block_id: int, occupied: bool) -> None:
         old_state = self._known_occupancy.get(block_id)
         self._known_occupancy[block_id] = occupied
@@ -461,6 +481,8 @@ class TrackControllerBackend:
             suggested_auth = self._suggested_auth_m.get(block_id, 50)
             self._commanded_auth_m[block_id] = int(suggested_auth)
             self._known_commanded_auth[block_id] = int(suggested_auth)
+        self._detect_broken_rail(block_id, occupied)
+        self._detect_track_circuit_failure(block_id)
 
     def start_live_link(self, poll_interval: float = 1.0) -> None:
         if self._live_thread_running:
@@ -542,6 +564,7 @@ class TrackControllerBackend:
         if state_changed:
             self._notify_listeners()
             self._send_status_to_ctc()
+        self._verify_commands()
 
     def _line_block_ids(self) -> List[int]:
         rng = LINE_BLOCK_MAP.get(self.line_name)
@@ -651,6 +674,7 @@ class TrackControllerBackend:
             logger.warning("Failed to set signal %d in Track Model: %s", block, e)
         self._notify_listeners()
         self._send_status_to_ctc()
+        self._detect_power_failure(block, "signal", state)
 
     def safe_set_switch(self, switch_id: int, position: int | str) -> None:
         if not self.maintenance_mode:
@@ -751,3 +775,196 @@ class TrackControllerBackend:
                 logger.info("PLC set crossing %d (block %d): %s", crossing_id, block, stat_bool)
             except Exception as e:
                 logger.warning("Failed to set crossing %d: %s", crossing_id, e)
+
+class Failures: 
+    def __init__(self, *args, **MaBallz):
+        super().__init__(*args, **MaBallz)
+        self.failures: Dict[int, FailureRecord] = {}
+        self.failure_history: list[FailureRecord] = []
+        self._previous_occupancy: Dict[int, bool] = {}
+        self._occupancy_changes: Dict[int, datetime] = {}
+        self._pending_verifications: Dict[str, CommandVerification] = {}
+        self._verification_timeout = timedelta(seconds=5)
+        self._train_positions: Dict[int, int] = {}
+        self._expected_occupancy: Set[int] = set()
+        self._last_command_attempt: Dict[int, datetime] = {}
+        self._command_retry_count: Dict[int, int] = {}
+
+    def _detect_broken_rail(self, block_id: int, occupied: bool) -> None:
+        if block_id in self._expected_occupancy and not occupied:
+            failure_key = f"broken_rail_{block_id}"
+            if failure_key not in self.failures:
+                failure = FailureRecord(
+                    failure_type="broken_rail",
+                    block_id=block_id,
+                    timestamp=self.time,
+                    details=f"Block {block_id} have no register occupancy when train passed")
+                self.failures[failure_key] = failure
+                self.failure_history.append(failure)
+                logger.error(f"Broken rail at block {block_id}")
+                self._handle_broken_rail(block_id)
+        prev_occupied = self._previous_occupancy.get(block_id, False)
+        if prev_occupied != occupied:
+            self._occupancy_changes[block_id] = self.time
+            self._previous_occupancy[block_id] = occupied
+            self._check_occupancy_consistency(block_id, occupied)
+    
+    def _check_occupancy_consistency(self, block_id: int, occupied: bool) -> None:
+        if not occupied:
+            return
+        adjacent_blocks = self._get_adjacent_blocks(block_id)
+        recent_threshold = timedelta(seconds=10)
+        has_recent_adjacent = False
+        for adj_block in adjacent_blocks:
+            if adj_block in self._occupancy_changes:
+                time_diff = self.time - self._occupancy_changes[adj_block]
+                if time_diff < recent_threshold:
+                    has_recent_adjacent = True
+                    break
+        if not has_recent_adjacent and block_id not in self._occupancy_changes:
+            logger.warning(f"Block {block_id} occupied with no adjacent block touch, rail could be broken")
+    
+    def _detect_power_failure(self, block_id: int, command_type: str, expected_value: any) -> None:
+        verification_key = f"{command_type}_{block_id}"
+        verification = CommandVerification(
+            block_id=block_id,
+            command_type=command_type,
+            expected_value=expected_value,
+            timestamp=self.time)
+        self._pending_verifications[verification_key] = verification
+        if verification_key not in self._command_retry_count:
+            self._command_retry_count[verification_key] = 0
+        self._command_retry_count[verification_key] += 1
+        if self._command_retry_count[verification_key] >= 3:
+            failure_key = f"power_failure_{command_type}_{block_id}"
+            if failure_key not in self.failures:
+                failure = FailureRecord(
+                    failure_type="power_failure",
+                    block_id=block_id,
+                    timestamp=self.time,
+                    details=f"Power failure for {command_type} at block {block_id}, it no respond")
+                self.failures[failure_key] = failure
+                self.failure_history.append(failure)
+                logger.error(f"Power failure at block {block_id} for {command_type}")
+                self._handle_power_failure(block_id, command_type)
+    
+    def _verify_commands(self) -> None:
+        current_time = self.time
+        expired_verifications = []
+        for key, verification in self._pending_verifications.items():
+            if verification.verified:
+                continue
+            time_since_command = current_time - verification.timestamp
+            if time_since_command > self._verification_timeout:
+                self._detect_power_failure(
+                    verification.block_id,
+                    verification.command_type,
+                    verification.expected_value)
+                expired_verifications.append(key)
+        for key in expired_verifications:
+            del self._pending_verifications[key]
+    def _detect_track_circuit_failure(self, block_id: int) -> None:
+        if not self._known_occupancy.get(block_id, False):
+            return
+        commanded_speed = self._commanded_speed_mps.get(block_id)
+        commanded_auth = self._commanded_auth_m.get(block_id)
+        if commanded_speed is None or commanded_auth is None:
+            return
+        if commanded_speed == 0:
+            if self._check_train_movement(block_id):
+                failure_key = f"track_circuit_{block_id}"
+                if failure_key not in self.failures:
+                    failure = FailureRecord(
+                        failure_type="track_circuit",
+                        block_id=block_id,
+                        timestamp=self.time,
+                        details=f"Track circuit failure: train no respond at {block_id}, fix NOW!!!!")
+                    self.failures[failure_key] = failure
+                    self.failure_history.append(failure)
+                    logger.error(f"Track circuit failure at block {block_id}, fix NOW!!!!")
+                    self._handle_track_circuit_failure(block_id)
+    
+    def _check_train_movement(self, block_id: int) -> bool:
+        if block_id not in self._occupancy_changes:
+            return False
+        if self._known_occupancy.get(block_id, False):
+            return False  
+        time_since_change = self.time - self._occupancy_changes[block_id]
+        return time_since_change < timedelta(seconds=5)
+    
+    def _handle_broken_rail(self, block_id: int) -> None:
+        logger.critical(f"Broken rail at block {block_id}, fix NYOW!!!!!")
+        try:
+            self.set_signal(block_id, SignalState.RED)
+            for adj_block in self._get_adjacent_blocks(block_id):
+                self.set_signal(adj_block, SignalState.RED)
+        except Exception as e:
+            logger.error(f"Signals no set for broken rail: {e}")
+        try:
+            self.set_commanded_speed(block_id, 0)
+            self.set_commanded_authority(block_id, 0)
+            for adj_block in self._get_adjacent_blocks(block_id):
+                self.set_commanded_speed(adj_block, 0)
+                self.set_commanded_authority(adj_block, 0)
+        except Exception as e:
+            logger.error(f"Trains no stop for broken rail: {e}")
+    
+    def _handle_power_failure(self, block_id: int, command_type: str) -> None:
+        logger.critical(f"Power failure at block {block_id} ({command_type}, fix the power NOW!!!!!")
+        if command_type == "signal":
+            logger.warning(f"Block {block_id} signal assumed RED from power failure")
+        elif command_type == "switch":
+            logger.warning(f"Block {block_id} switch no work")
+            self.set_commanded_speed(block_id, 0)
+    
+    def _handle_track_circuit_failure(self, block_id: int) -> None:
+        logger.critical(f"Track circuit failure at block {block_id}, fix the track NOW!!!!!")
+        try:
+            for nearby_block in range(max(1, block_id-2), min(block_id+3, self.num_blocks+1)):
+                if nearby_block in self._line_block_ids():
+                    self.set_signal(nearby_block, SignalState.RED)
+        except Exception as e:
+            logger.error(f"Failed to set the damn signals for track circuit failure: {e}")
+    
+    def _get_adjacent_blocks(self, block_id: int) -> list[int]:
+        adjacent = []
+        if block_id > 1:
+            adjacent.append(block_id - 1)
+        if block_id < self.num_blocks:
+            adjacent.append(block_id + 1)
+        return [b for b in adjacent if b in self._line_block_ids()]
+    
+    def get_failure_report(self) -> Dict[str, any]:
+        return {
+            "active_failures": [{
+                    "type": f.failure_type,
+                    "block": f.block_id,
+                    "time": f.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "details": f.details,
+                    "resolved": f.resolved}
+                for f in self.failures.values()],
+            "failure_history": [{
+                    "type": f.failure_type,
+                    "block": f.block_id,
+                    "time": f.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "details": f.details,
+                    "resolved": f.resolved}
+                for f in self.failure_history[-10:]],
+            "pending_verifications": len(self._pending_verifications),
+            "total_failures": len(self.failure_history)
+        }
+    
+    def resolve_failure(self, failure_key: str) -> None:
+        if failure_key in self.failures:
+            self.failures[failure_key].resolved = True
+            logger.info(f"Failure {failure_key} has been snapped")
+            del self.failures[failure_key]
+            self._command_retry_count.clear()
+    
+    def clear_all_failures(self) -> None:
+        if not self.maintenance_mode:
+            raise PermissionError("Be in maintenance mode to clear the failures")
+        self.failures.clear()
+        self._command_retry_count.clear()
+        self._pending_verifications.clear()
+        logger.info("Failures cleared yippee")

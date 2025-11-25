@@ -538,7 +538,110 @@ class TrackState:
         except Exception as e:
             print(f"[CTC] Error dispatching train: {e}")
 
+  
+
     # --------------------------------------------------------
+    # Maintenance control
+    # --------------------------------------------------------
+    def set_block_closed(self, block_id: int, closed: bool):
+        try:
+            if closed:
+                self.track_model.close_block(block_id)
+            else:
+                self.track_model.open_block(block_id)
+            print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
+        except Exception as e:
+            print(f"[CTC] Maintenance toggle failed: {e}")
+
+    # --------------------------------------------------------
+    # Status accessors for UI
+    # --------------------------------------------------------
+    def get_network_status(self) -> Dict:
+        try:
+            return {
+                "track_model": self.track_model.get_network_status(),
+                "track_controller": self.track_controller.report_state()
+                
+            }
+        except Exception as e:
+            print(f"[CTC] Network status error: {e}")
+            return {}
+
+    def get_trains(self) -> List[Dict]:
+        """Returns all active trains with current block + command data."""
+        trains_data = []
+
+        for train_id, train in self.track_model.trains.items():
+            seg = train.current_segment
+
+            # Pull speed/authority directly from CTC suggestions:
+            speed_mps, auth_m = self._train_suggestions.get(train_id, (0.0, 0.0))
+
+            trains_data.append({
+                "train_id": train_id,
+                "block": seg.block_id if seg else None,
+                "suggested_speed_mps": speed_mps,
+                "suggested_authority_m": auth_m,
+                "line": self.line_name,
+            })
+
+        return trains_data
+
+
+    # --------------------------------------------------------
+    # Wayside status callbacks (Track Controller → CTC)
+    # --------------------------------------------------------
+    def receive_wayside_status(self, line_name, status_updates):
+        for update in status_updates:
+            self.update_block_occupancy(line_name, update.block_id, update.occupied)
+            self.update_signal_state(line_name, update.block_id, update.signal_state)
+            if update.switch_position is not None:
+                self.update_switch_position(line_name, update.block_id, update.switch_position)
+            if update.crossing_status is not None:
+                self.update_crossing_status(line_name, update.block_id, update.crossing_status)
+
+    def update_block_occupancy(self, line_name, block_id, occupied):
+        if line_name in self._lines:
+            for b in self._lines[line_name]:
+                if b.block_id == block_id:
+                    b.set_occupancy(occupied)
+                    print(f"[CTC] {line_name} Block {block_id} occupancy → {occupied}")
+                    return
+
+    def update_signal_state(self, line_name, block_id, signal_state):
+        if line_name in self._lines:
+            for b in self._lines[line_name]:
+                if b.block_id == block_id:
+                    b.set_signal_state(signal_state)
+                    print(f"[CTC] {line_name} Block {block_id} signal → {signal_state}")
+                    return
+
+    def update_switch_position(self, line_name, block_id, position):
+        if line_name in self._lines:
+            for b in self._lines[line_name]:
+                if b.block_id == block_id:
+                    b.set_switch_position(position)
+                    print(f"[CTC] {line_name} Switch {block_id} position → {position}")
+                    return
+
+    def update_crossing_status(self, line_name, block_id, status):
+        if line_name in self._lines:
+            for b in self._lines[line_name]:
+                if b.block_id == block_id:
+                    b.set_crossing_status(status)
+                    print(f"[CTC] {line_name} Crossing {block_id} → {status}")
+                    return
+
+    def station_to_block(self, station_name: str) -> Optional[int]:
+        """
+        Given a station name, return the block_id from the UI mirror (self._lines).
+        """
+        for b in self._lines[self.line_name]:
+            if b.station.strip().lower() == station_name.strip().lower():
+                return b.block_id
+        return None
+
+      # --------------------------------------------------------
     # Manual tick: CTC drives time for all subsystems
     # --------------------------------------------------------
     def tick_all_modules(self):
@@ -584,97 +687,11 @@ class TrackState:
                 # Save updated authority
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
 
+                print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
+
                 print(f"[CTC] Suggestion → Train {train_id} in block {block}: "
                     f"{speed_mps:.2f} m/s, {new_auth:.1f} m authority")
 
-
-
-    # --------------------------------------------------------
-    # Maintenance control
-    # --------------------------------------------------------
-    def set_block_closed(self, block_id: int, closed: bool):
-        try:
-            if closed:
-                self.track_model.close_block(block_id)
-            else:
-                self.track_model.open_block(block_id)
-            print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
-        except Exception as e:
-            print(f"[CTC] Maintenance toggle failed: {e}")
-
-    # --------------------------------------------------------
-    # Status accessors for UI
-    # --------------------------------------------------------
-    def get_network_status(self) -> Dict:
-        try:
-            return {
-                "track_model": self.track_model.get_network_status(),
-                "track_controller": self.track_controller.report_state()
-                
-            }
-        except Exception as e:
-            print(f"[CTC] Network status error: {e}")
-            return {}
-
-    def get_trains(self) -> List[Dict]:
-        """Returns all active trains with current block + command data."""
-        trains_data = []
-        for train_id, train in self.track_model.trains.items():
-            seg = train.current_segment
-            trains_data.append({
-                "train_id": train_id,
-                "block": seg.block_id if seg else None,
-                "suggested_speed_mps": getattr(seg.active_command, "speed", 0.0)
-                    if seg and seg.active_command else 0.0,
-                "suggested_authority_m": getattr(seg.active_command, "authority", 0.0)
-                    if seg and seg.active_command else 0.0,
-                "line": self.line_name,
-            })
-        return trains_data
-
-    # --------------------------------------------------------
-    # Wayside status callbacks (Track Controller → CTC)
-    # --------------------------------------------------------
-    def receive_wayside_status(self, line_name, status_updates):
-        for update in status_updates:
-            self.update_block_occupancy(line_name, update.block_id, update.occupied)
-            self.update_signal_state(line_name, update.block_id, update.signal_state)
-            if update.switch_position is not None:
-                self.update_switch_position(line_name, update.block_id, update.switch_position)
-            if update.crossing_status is not None:
-                self.update_crossing_status(line_name, update.block_id, update.crossing_status)
-
-    def update_block_occupancy(self, line_name, block_id, occupied):
-        if line_name in self._lines:
-            for b in self._lines[line_name]:
-                if b.block_id == block_id:
-                    b.set_occupancy(occupied)
-                    print(f"[CTC] {line_name} Block {block_id} occupancy → {occupied}")
-                    return
-
-    def update_signal_state(self, line_name, block_id, signal_state):
-        if line_name in self._lines:
-            for b in self._lines[line_name]:
-                if b.block_id == block_id:
-                    b.set_signal_state(signal_state)
-                    print(f"[CTC] {line_name} Block {block_id} signal → {signal_state}")
-                    return
-
-    def update_switch_position(self, line_name, block_id, position):
-        if line_name in self._lines:
-            for b in self._lines[line_name]:
-                if b.block_id == block_id:
-                    b.set_switch_position(position)
-                    print(f"[CTC] {line_name} Switch {block_id} position → {position}")
-                    return
-
-    def update_crossing_status(self, line_name, block_id, status):
-        if line_name in self._lines:
-            for b in self._lines[line_name]:
-                if b.block_id == block_id:
-                    b.set_crossing_status(status)
-                    print(f"[CTC] {line_name} Crossing {block_id} → {status}")
-                    return
 
     # --------------------------------------------------------
     # Reset utilities

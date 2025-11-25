@@ -308,11 +308,95 @@ class CTCWindow(QtWidgets.QMainWindow):
 
 
     def _scheduled_dispatch(self):
-        """Opens schedule-based dispatch dialog."""
-        QtWidgets.QMessageBox.information(
-            self, "Scheduled Dispatch",
-            "Scheduled dispatch UI coming next — station dropdown + time selector."
-        )
+        """
+        Dispatcher wants to dispatch a train to a station with an arrival time.
+        This dialog gathers: train ID, start block, destination station, arrival time.
+        """
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Scheduled Dispatch")
+        dialog.setModal(True)
+
+        layout = QtWidgets.QFormLayout(dialog)
+
+        # --- Train ID ---
+        train_id_input = QtWidgets.QLineEdit()
+        train_id_input.setPlaceholderText("e.g., T1")
+        layout.addRow("Train ID:", train_id_input)
+
+        # --- Starting Block ---
+        start_block_input = QtWidgets.QSpinBox()
+        start_block_input.setRange(1, 150)
+        layout.addRow("Starting Block:", start_block_input)
+
+        # --- Destination Station (Dropdown) ---
+        station_dropdown = QtWidgets.QComboBox()
+        station_names = [b[3] for b in GREEN_LINE_DATA if b[3] != ""]
+        station_dropdown.addItems(station_names)
+        layout.addRow("Destination Station:", station_dropdown)
+
+        # --- Arrival Time ---
+        arrival_input = QtWidgets.QTimeEdit()
+        arrival_input.setDisplayFormat("HH:mm")
+        arrival_input.setTime(QtCore.QTime.currentTime())
+        layout.addRow("Arrival Time:", arrival_input)
+
+        # --- Buttons ---
+        btn_row = QtWidgets.QHBoxLayout()
+        confirm_btn = QtWidgets.QPushButton("Dispatch")
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        btn_row.addWidget(confirm_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addRow(btn_row)
+
+        # ---- BUTTON LOGIC ----
+        def confirm():
+            train_id = train_id_input.text().strip().upper()
+            start_block = int(start_block_input.value())
+            dest_station = station_dropdown.currentText()
+            arrival_time = arrival_input.time().toString("HH:mm")
+
+            if not train_id:
+                QtWidgets.QMessageBox.warning(dialog, "Error", "Train ID cannot be empty.")
+                return
+
+            # 1. Map station → block
+            dest_block = self.state.station_to_block(dest_station)
+            if dest_block is None:
+                QtWidgets.QMessageBox.warning(dialog, "Error", f"Station {dest_station} has no block.")
+                return
+
+            # 2. Compute suggestions (reuse your instant logic)
+            speed_mps, auth_m = self.state.compute_suggestions(start_block, dest_block)
+            speed_mph = speed_mps * 2.23693629
+            auth_yd = auth_m / 0.9144
+
+            # 3. Dispatch train exactly like instant dispatch
+            self.state.dispatch_train(train_id, start_block, speed_mph, auth_yd)
+
+            # 4. Feedback
+            QtWidgets.QMessageBox.information(
+                self, "Scheduled Train Dispatched",
+                f"{train_id} dispatched at block {start_block}\n"
+                f"Destination: {dest_station} (Block {dest_block})\n"
+                f"Arrival Time: {arrival_time}\n"
+                f"Speed: {speed_mph:.1f} mph\n"
+                f"Authority: {auth_yd:.1f} yd"
+            )
+
+            dialog.accept()
+
+            # 5. Show it in Train Info immediately
+            self._train_info()
+            self._reload_line(self.state.line_name)
+
+
+
+
+        confirm_btn.clicked.connect(confirm)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        dialog.exec()
+
 
     # ---------------------------------------------------------
     # Train Info Page

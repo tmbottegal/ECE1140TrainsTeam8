@@ -154,6 +154,8 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         self.state.set_mode(self.mode)
         self.dispatchBtn.setEnabled(self.mode == "manual")
+        self.uploadBtn.setEnabled(self.mode == "auto")
+        # self.addEntryBtn.setEnabled(self.mode == "auto")
         print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
 
     # ---------------------------------------------------------
@@ -198,52 +200,119 @@ class CTCWindow(QtWidgets.QMainWindow):
         if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
             self._populate_train_info_table()
 
+    def _show_dispatch_options(self):
+        """Modal dialog: choose Instant vs Scheduled dispatch."""
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Dispatch Options")
+        dialog.setModal(True)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        label = QtWidgets.QLabel("Choose dispatch type:")
+        label.setStyleSheet("font-size: 14pt; font-weight: bold;")
+        layout.addWidget(label)
+
+        # Buttons
+        instant_btn = QtWidgets.QPushButton("Instant Dispatch")
+        schedule_btn = QtWidgets.QPushButton("Schedule Dispatch")
+
+        instant_btn.setMinimumHeight(35)
+        schedule_btn.setMinimumHeight(35)
+
+        layout.addWidget(instant_btn)
+        layout.addWidget(schedule_btn)
+
+        # Close button
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        cancel_btn.setMinimumHeight(30)
+        layout.addWidget(cancel_btn)
+
+        # ---- Connections ----
+        instant_btn.clicked.connect(lambda: (dialog.accept(), self._instant_dispatch()))
+        schedule_btn.clicked.connect(lambda: (dialog.accept(), self._scheduled_dispatch()))
+        cancel_btn.clicked.connect(dialog.reject)
+
+        dialog.exec()
+
     # ---------------------------------------------------------
     # Dispatch Train
     # ---------------------------------------------------------
     def _dispatch_train(self):
         if self.mode != "manual":
-            QtWidgets.QMessageBox.warning(self, "Mode Error", "Switch to Manual Mode to dispatch a train.")
+            QtWidgets.QMessageBox.warning(self, "Mode Error",
+                                        "Switch to Manual Mode to dispatch a train.")
             return
 
-        train_id, ok_id = QtWidgets.QInputDialog.getText(
-            self, "Dispatch Train", "Enter Train ID (e.g., T1):"
-        )
-        if not ok_id or not train_id.strip():
-            return
-        train_id = train_id.strip().upper()
+        # SHOW THE OPTIONS POPUP
+        self._show_dispatch_options()
 
-        start_block, ok_block = QtWidgets.QInputDialog.getInt(
-            self, "Starting Block", "Enter starting block number:", 1, 1, 150
-        )
-        if not ok_block:
-            return
+    def _instant_dispatch(self):
+        """
+        Instant dispatch: dispatcher selects train ID, start block, dest block.
+        CTC computes speed + authority automatically.
+        """
+        try:
+            # === 1. Train ID ===
+            train_id, ok_id = QtWidgets.QInputDialog.getText(
+                self, "Instant Dispatch", "Enter Train ID (e.g., T1):"
+            )
+            if not ok_id or not train_id.strip():
+                return
+            train_id = train_id.strip().upper()
 
-        speed, ok_speed = QtWidgets.QInputDialog.getInt(
-            self, "Suggested Speed", "Enter suggested speed (mph):", 25, 0, 80
-        )
-        if not ok_speed:
-            return
+            # === 2. Starting Block ===
+            start_block, ok_block = QtWidgets.QInputDialog.getInt(
+                self, "Starting Block", "Enter starting block number:", 1, 1, 150
+            )
+            if not ok_block:
+                return
 
-        auth, ok_auth = QtWidgets.QInputDialog.getInt(
-            self, "Suggested Authority", "Enter suggested authority (yards):", 200, 50, 2000
-        )
-        if not ok_auth:
-            return
+            # === 3. Destination Block ===
+            dest_block, ok_dest = QtWidgets.QInputDialog.getInt(
+                self, "Destination Block", "Enter final block number:", 1, 1, 150
+            )
+            if not ok_dest:
+                return
 
-        self.state.dispatch_train(train_id, start_block, speed, auth)
+            # === 4. Compute the safe speed & authority ===
+            # backend function: compute_suggestions(start_block, dest_block)
+            speed_mps, auth_m = self.state.compute_suggestions(start_block, dest_block)
 
+            # Convert to mph/yards for user message ONLY
+            speed_mph = speed_mps * 2.23693629
+            auth_yd = auth_m / 0.9144
+
+            # === 5. Dispatch using backend — STILL IN METRIC ===
+            self.state.dispatch_train(
+                train_id,
+                start_block,
+                speed_mph,   # UI sends mph but backend immediately converts back to metric
+                auth_yd      # same (keeps interface consistent)
+            )
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Train Dispatched",
+                f"{train_id} dispatched at block {start_block}\n"
+                f"Destination: {dest_block}\n"
+                f"Computed Speed: {speed_mph:.1f} mph\n"
+                f"Computed Authority: {auth_yd:.1f} yd"
+            )
+
+            # Show train info screen
+            self._train_info()
+            self._reload_line(self.state.line_name)
+
+        except Exception as e:
+            print("[CTC UI] Instant dispatch error:", e)
+
+
+    def _scheduled_dispatch(self):
+        """Opens schedule-based dispatch dialog."""
         QtWidgets.QMessageBox.information(
-            self, "Train Dispatched",
-            f"{train_id} dispatched at block {start_block}\n"
-            f"Speed: {speed} mph\nAuthority: {auth} yd"
+            self, "Scheduled Dispatch",
+            "Scheduled dispatch UI coming next — station dropdown + time selector."
         )
-
-        
-        print("CTC UI FILE LOADED SUCCESSFULLY")
-
-        self._train_info()
-        self._reload_line(self.state.line_name)
 
     # ---------------------------------------------------------
     # Train Info Page
@@ -285,6 +354,60 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.trainInfoTable.setItem(r, 4, QtWidgets.QTableWidgetItem(line))
 
     # ---------------------------------------------------------
+    # Schedule helper: Refresh table
+    # ---------------------------------------------------------
+    def _refresh_schedule_table(self):
+        entries = self.state.schedule.get_schedule()
+        self.scheduleTable.setRowCount(len(entries))
+
+        for r, entry in enumerate(entries):
+            self.scheduleTable.setItem(r, 0, QtWidgets.QTableWidgetItem(entry["train_id"]))
+            self.scheduleTable.setItem(r, 1, QtWidgets.QTableWidgetItem(entry["destination"]))
+            self.scheduleTable.setItem(r, 2, QtWidgets.QTableWidgetItem(entry["arrival_time"]))
+
+    # ---------------------------------------------------------
+    # Add schedule entry
+    # ---------------------------------------------------------
+    def _add_schedule_entry(self):
+        # Train ID input
+        train_id, ok1 = QtWidgets.QInputDialog.getText(self, "Train ID", "Enter train ID (e.g., T1):")
+        if not ok1 or not train_id.strip():
+            return
+
+        # Destination input
+        destination, ok2 = QtWidgets.QInputDialog.getText(self, "Destination", "Enter destination (station name):")
+        if not ok2 or not destination.strip():
+            return
+
+        # Arrival time input (HH:MM)
+        arrival, ok3 = QtWidgets.QInputDialog.getText(self, "Arrival Time", "Enter arrival time (HH:MM):")
+        if not ok3 or not arrival.strip():
+            return
+
+        # Store in backend schedule manager
+        self.state.schedule.add_schedule_entry(train_id.strip(), destination.strip(), arrival.strip())
+
+        # Refresh table
+        self._refresh_schedule_table()
+
+    # ---------------------------------------------------------
+    # Load schedule from CSV
+    # ---------------------------------------------------------
+    def _load_schedule_csv(self):
+        filepath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open Schedule CSV",
+            "",
+            "CSV Files (*.csv)"
+        )
+        if not filepath:
+            return
+
+        self.state.schedule.load_from_csv(filepath)
+        self._refresh_schedule_table()
+
+
+    # ---------------------------------------------------------
     # Maintenance / Upload placeholders
     # ---------------------------------------------------------
     def _maintenance_inputs(self):
@@ -306,7 +429,52 @@ class CTCWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "Manual Override", "Manual Override page coming soon.")
 
     def _upload_schedule(self):
-        QtWidgets.QMessageBox.information(self, "Upload Schedule", "Schedule upload not yet implemented.")
+        """
+        Opens the schedule management page.
+        Allows:
+            - Viewing loaded schedule
+            - Adding entries manually
+            - Loading CSV into ScheduleManager
+        """
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+
+        title = QtWidgets.QLabel("Train Schedule Manager")
+        title.setStyleSheet("font-size:16px; font-weight:bold;")
+        layout.addWidget(title)
+
+        # -----------------------------
+        # Schedule table (read-only)
+        # -----------------------------
+        self.scheduleTable = QtWidgets.QTableWidget(0, 3)
+        self.scheduleTable.setHorizontalHeaderLabels(["Train ID", "Destination", "Arrival Time"])
+        self.scheduleTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.scheduleTable.verticalHeader().setVisible(False)
+        layout.addWidget(self.scheduleTable)
+
+        # -----------------------------
+        # Buttons row (Add + Load CSV)
+        # -----------------------------
+        btnRow = QtWidgets.QHBoxLayout()
+
+        #addBtn = QtWidgets.QPushButton("Add Entry")
+        #addBtn.clicked.connect(self._add_schedule_entry)
+        #btnRow.addWidget(addBtn)
+
+        loadBtn = QtWidgets.QPushButton("Load From CSV")
+        loadBtn.clicked.connect(self._load_schedule_csv)
+        btnRow.addWidget(loadBtn)
+
+        btnRow.addStretch(1)
+        layout.addLayout(btnRow)
+
+        # Display page
+        self.actionArea.addWidget(page)
+        self.actionArea.setCurrentWidget(page)
+
+        # Fill table with any existing schedule entries
+        self._refresh_schedule_table()
+
 
     # ---------------------------------------------------------
     # Global Tick — drives simulation + UI

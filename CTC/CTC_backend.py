@@ -304,6 +304,78 @@ class Block:
         self.crossing = bool(active)
 
 # ------------------------------------------------------------
+# Schedule Manager (Iteration 4 Foundation)
+# ------------------------------------------------------------
+class ScheduleManager:
+    """
+    Stores train schedules uploaded by the dispatcher.
+    Provides:
+        - schedule storage
+        - adding entries manually
+        - loading from CSV (empty placeholder for now)
+        - retrieving schedule for UI
+    NOTE: Does NOT handle routing, dispatching, or authority yet.
+          This is ONLY the storage layer.
+    """
+
+    def __init__(self):
+        # List of schedule entries
+        # Each entry will be a dict:
+        # {
+        #   "train_id": "T1",
+        #   "destination": "Edgebrook",
+        #   "arrival_time": "14:35",
+        #   "line": "Green Line"
+        # }
+        self.entries = []
+
+    # --------------------------------------------------------
+    # Add a single schedule entry (called from UI later)
+    # --------------------------------------------------------
+    def add_schedule_entry(self, train_id: str, destination: str, arrival_time: str, line: str = "Green Line"):
+        """
+        Add one schedule row. No routing or dispatching yet.
+        Pure storage.
+        """
+        entry = {
+            "train_id": train_id,
+            "destination": destination,
+            "arrival_time": arrival_time,
+            "line": line
+        }
+        self.entries.append(entry)
+
+    # --------------------------------------------------------
+    # Load schedule from CSV (placeholder for now)
+    # --------------------------------------------------------
+    def load_from_csv(self, filepath: str):
+        """
+        Accept a CSV file path and load schedule entries.
+        This is a placeholder — UI wiring will be done later.
+        """
+        try:
+            import csv
+            with open(filepath, "r") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Expect CSV columns: train_id, destination, arrival_time
+                    self.add_schedule_entry(
+                        row.get("train_id", "").strip(),
+                        row.get("destination", "").strip(),
+                        row.get("arrival_time", "").strip()
+                    )
+            print(f"[Schedule] Loaded schedule from {filepath}")
+        except Exception as e:
+            print(f"[Schedule] Failed to load CSV: {e}")
+
+    # --------------------------------------------------------
+    # Retrieve entries for UI table
+    # --------------------------------------------------------
+    def get_schedule(self):
+        """Return list of schedule entries for UI to display."""
+        return list(self.entries)
+
+# ------------------------------------------------------------
 # TrackState — the CTC backend interface
 # ------------------------------------------------------------
 class TrackState:
@@ -359,6 +431,7 @@ class TrackState:
 
 
         self.set_line(line_name, line_tuples)
+        self.schedule = ScheduleManager()
         print(f"[CTC Backend] Initialized for {self.line_name}")
 
     # --------------------------------------------------------
@@ -370,6 +443,33 @@ class TrackState:
             raise ValueError(f"Invalid mode '{mode}'")
         self.mode = mode
         print(f"[CTC Backend] Mode set to {mode.upper()}")
+
+    def compute_suggestions(self, start_block: int, dest_block: int):
+        """
+        Computes safe suggested speed (m/s) and authority (m)
+        using the CTC's UI block table (self._lines) instead of TrackNetwork.
+        """
+
+        # ---- 1. Get speed limit from the UI's mirrored block list ----
+        limit_mps = LINE_SPEED_LIMIT_MPS  # fallback
+
+        for b in self._lines[self.line_name]:
+            if b.block_id == start_block:
+                # b.speed_limit is in km/h (your UI label shows km/h)
+                # Convert km/h → m/s
+                limit_mps = b.speed_limit * (1000/3600)
+                break
+
+        # ---- 2. Compute authority distance based on number of blocks ----
+        if dest_block >= start_block:
+            num_blocks = dest_block - start_block
+        else:
+            num_blocks = start_block - dest_block
+
+        authority_m = num_blocks * BLOCK_LEN_M
+        authority_m = max(authority_m, 25.0)   # ensure > 0
+
+        return limit_mps, authority_m
 
     # --------------------------------------------------------
     # Line + block table setup for UI

@@ -348,6 +348,10 @@ class CTCWindow(QtWidgets.QMainWindow):
         btn_row.addWidget(cancel_btn)
         layout.addRow(btn_row)
 
+       
+
+
+
         # ---- BUTTON LOGIC ----
         def confirm():
             train_id = train_id_input.text().strip().upper()
@@ -365,10 +369,27 @@ class CTCWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.warning(dialog, "Error", f"Station {dest_station} has no block.")
                 return
 
+
             # 2. Compute suggestions (reuse your instant logic)
             speed_mps, auth_m = self.state.compute_suggestions(start_block, dest_block)
             speed_mph = speed_mps * 2.23693629
             auth_yd = auth_m / 0.9144
+
+            arrival_str = arrival_input.time().toString("HH:mm")
+            h, m = map(int, arrival_str.split(":"))
+            arrival_seconds = h*3600 + m*60
+
+                    # compute when the train must depart
+            travel_time_s = self.state.compute_travel_time(start_block, dest_block)
+
+            departure_seconds = arrival_seconds - travel_time_s
+            if departure_seconds < 0:
+                departure_seconds = 0
+            
+            dep_h = int(departure_seconds // 3600) % 24
+            dep_m = int((departure_seconds % 3600) // 60)
+            departure_time_str = f"{dep_h:02d}:{dep_m:02d}"
+
 
             # 3. Dispatch train exactly like instant dispatch
             self.state.dispatch_train(train_id, start_block, speed_mph, auth_yd)
@@ -379,6 +400,7 @@ class CTCWindow(QtWidgets.QMainWindow):
                 f"{train_id} dispatched at block {start_block}\n"
                 f"Destination: {dest_station} (Block {dest_block})\n"
                 f"Arrival Time: {arrival_time}\n"
+                f"DEPARTURE TIME NEEDED: {departure_time_str}\n"
                 f"Speed: {speed_mph:.1f} mph\n"
                 f"Authority: {auth_yd:.1f} yd"
             )

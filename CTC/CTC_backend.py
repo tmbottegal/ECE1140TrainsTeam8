@@ -289,6 +289,9 @@ class Block:
     light: str
     crossing: bool
     speed_limit: float
+    length_m: float      # NEW: real block length pulled from TrackModel
+    speed_limit_mps: float  # NEW: real speed limit (m/s)
+
 
     # --- helper methods for UI updates ---
     def set_occupancy(self, occupied: bool):
@@ -446,40 +449,104 @@ class TrackState:
 
     def compute_suggestions(self, start_block: int, dest_block: int):
         """
-        Computes safe suggested speed (m/s) and authority (m)
-        using the CTC's UI block table (self._lines) instead of TrackNetwork.
+        Compute suggested speed (m/s) and total authority (m)
+        using REAL block data from TrackModel:
+            - actual block length (m)
+            - official time-to-traverse (s)
+            - speed_limit (km/h)
+        And pick the SAFEST speed:
+            speed_mps = min(speed_from_limit, speed_from_traverse_time)
         """
 
-        # ---- 1. Get speed limit from the UI's mirrored block list ----
-        limit_mps = LINE_SPEED_LIMIT_MPS  # fallback
+        # --- 1) Pull track model segments ---
+        tm = self.track_model.segments
 
-        for b in self._lines[self.line_name]:
-            if b.block_id == start_block:
-                # b.speed_limit is in km/h (your UI label shows km/h)
-                # Convert km/h → m/s
-                limit_mps = b.speed_limit * (1000/3600)
-                break
+        # Ensure both blocks exist in TrackModel
+        if start_block not in tm or dest_block not in tm:
+            print("[CTC] Warning: compute_suggestions using fallback values")
+            return LINE_SPEED_LIMIT_MPS, 50.0
 
-        # ---- 2. Compute authority distance based on number of blocks ----
+        # --- 2) Determine direction ---
         if dest_block >= start_block:
-            num_blocks = dest_block - start_block
+            block_range = range(start_block, dest_block + 1)
         else:
-            num_blocks = start_block - dest_block
+            block_range = range(dest_block, start_block + 1)
 
-        authority_m = num_blocks * BLOCK_LEN_M
-        authority_m = max(authority_m, 25.0)   # ensure > 0
+        total_authority_m = 0.0
+        possible_speeds = []
 
-        return limit_mps, authority_m
+        for bid in block_range:
+            seg = tm.get(bid)
+            if not seg:
+                continue
+
+            # (A) Real block length from TrackModel
+            length_m = seg.length
+
+            # (B) Excel speed limit (km/h → m/s)
+            speed_from_limit = seg.speed_limit / 3.6  
+
+            # (C) Excel traverse time column
+            # We store traverse time inside the beacon_data, or you can
+            # store it elsewhere — adjust this line if needed.
+            try:
+                # EXAMPLE: beacon_data = "t=8.0" or "8.0"
+                traverse = float(seg.beacon_data.strip().replace("t=", ""))
+            except:
+                # default = time = length/speed_limit
+                traverse = length_m / max(speed_from_limit, 0.1)
+
+            # (D) Compute speed from traversal time
+            speed_from_traverse = length_m / max(traverse, 0.1)
+
+            # (E) Select SAFE speed
+            safe_speed = min(speed_from_limit, speed_from_traverse)
+            possible_speeds.append(safe_speed)
+
+            # (F) Accumulate authority
+            total_authority_m += length_m
+
+        # Final suggested speed = slowest safe speed on entire path
+        if possible_speeds:
+            suggested_speed_mps = min(possible_speeds)
+        else:
+            suggested_speed_mps = LINE_SPEED_LIMIT_MPS
+
+        return suggested_speed_mps, total_authority_m
+
+    def compute_travel_time(self, start_block: int, dest_block: int) -> float:
+        """
+        Returns travel time in seconds using real TrackModel lengths
+        and the computed safe speed from compute_suggestions().
+        """
+        speed_mps, authority_m = self.compute_suggestions(start_block, dest_block)
+
+        if speed_mps <= 0:
+            return float('inf')
+
+        return authority_m / speed_mps
 
     # --------------------------------------------------------
     # Line + block table setup for UI
     # --------------------------------------------------------
     def set_line(self, name: str, tuples: List[Tuple]):
-        """Rebuilds UI table of blocks."""
+        """
+        Rebuilds UI table of blocks.
+        Now loads REAL block length + REAL speed limit from TrackModel.
+        UI still shows km/h from LINE_DATA for consistency.
+        """
         self.line_name = name
         blocks: List[Block] = []
+
         for t in tuples:
-            section, bid, status, station, station_side, sw, light, crossing, _, speed_limit = t
+            section, bid, status, station, station_side, sw, light, crossing, _, ui_speed_kmh = t
+
+            # --- Pull true values from TrackModel ---
+            segment = self.track_model.segments.get(bid)
+
+            real_length = segment.length if segment else 0.0
+            real_speed_mps = segment.speed_limit if segment else (ui_speed_kmh / 3.6)
+
             blocks.append(
                 Block(
                     line=name,
@@ -491,11 +558,19 @@ class TrackState:
                     switch=sw,
                     light=light,
                     crossing=bool(crossing),
-                    speed_limit=float(speed_limit),
+
+                    # UI uses km/h — unchanged
+                    speed_limit=float(ui_speed_kmh),
+
+                    # NEW backend values (invisible to UI)
+                    length_m=real_length,
+                    speed_limit_mps=real_speed_mps,
                 )
             )
+
         self._lines[name] = blocks
         self._rebuild_index()
+
 
     def _rebuild_index(self):
         """Rebuilds quick block lookup by section+ID."""
@@ -587,7 +662,6 @@ class TrackState:
 
         return trains_data
 
-
     # --------------------------------------------------------
     # Wayside status callbacks (Track Controller → CTC)
     # --------------------------------------------------------
@@ -642,6 +716,7 @@ class TrackState:
         return None
 
       # --------------------------------------------------------
+    
     # Manual tick: CTC drives time for all subsystems
     # --------------------------------------------------------
     def tick_all_modules(self):
@@ -651,24 +726,36 @@ class TrackState:
         """
         current_time = clock.tick()
 
-        # --- Update Track Model (trains, occupancy) ---
+        # --- 1. Update Track Model (moves trains + occupancy) ---
         try:
             self.track_model.set_time(current_time)
         except Exception as e:
             print(f"[CTC] Track Model set_time error: {e}")
 
-        # --- Update Track Controller (signals, switches, crossings) ---
+        # --- 2. Update Track Controller (signals, switches, crossings) ---
         try:
             self.track_controller.set_time(current_time)
             self.track_controller_hw.set_time(current_time)
         except Exception:
             pass
 
-        # --- Re-send and update active train suggestions ---
-        # --- Re-send and update active train suggestions ---
-        # --- Re-send and update active train suggestions ---
-        if self.mode == "manual":
+        # ------------------------------------------------------------------
+        # --- 3. SYNC OCCUPANCY FROM TRACK MODEL TO CTC'S UI MIRROR -------
+        # ------------------------------------------------------------------
+        try:
+            blocks = self._lines[self.line_name]   # UI-side Block objects
+            for ui_block in blocks:
+                tm_segment = self.track_model.segments.get(ui_block.block_id)
+                if tm_segment:
+                    ui_block.set_occupancy(tm_segment.occupied)
+                    ui_block.set_signal_state(tm_segment.signal_state.value)
+        except Exception as e:
+            print(f"[CTC] Occupancy sync error: {e}")
 
+        # ------------------------------------------------------------------
+        # --- 4. Update suggested speed & authority every tick --------------
+        # ------------------------------------------------------------------
+        if self.mode == "manual":
             for train_id, (speed_mps, auth_m) in list(self._train_suggestions.items()):
                 train = self.track_model.trains.get(train_id)
                 if not train or not train.current_segment:
@@ -676,21 +763,30 @@ class TrackState:
 
                 block = train.current_segment.block_id
 
-                # Decrease authority based on actual distance traveled:
-                distance_per_tick = speed_mps * clock.tick_interval   # meters
+                # Distance train would travel this tick
+                distance_per_tick = speed_mps * clock.tick_interval
+
+                # Reduce authority
                 new_auth = max(0.0, auth_m - distance_per_tick)
 
-                # Send updated suggestion to Track Controller
-                self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
-                self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth )
+                # STOP train when out of authority
+                if new_auth <= 0.0:
+                    new_auth = 0.0
+                    speed_mps = 0.0
 
-                # Save updated authority
+                # Send updated suggestion to both controllers
+                self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+                self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth)
+
+                # Save updated suggestion
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
 
                 print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
-
                 print(f"[CTC] Suggestion → Train {train_id} in block {block}: "
                     f"{speed_mps:.2f} m/s, {new_auth:.1f} m authority")
+            
+                    
+            
 
 
     # --------------------------------------------------------

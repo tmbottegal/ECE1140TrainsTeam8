@@ -752,7 +752,12 @@ class TrackState:
                 tm_segment = self.track_model.segments.get(ui_block.block_id)
                 if tm_segment:
                     ui_block.set_occupancy(tm_segment.occupied)
-                    ui_block.set_signal_state(tm_segment.signal_state.value)
+                    signal = getattr(tm_segment, "signal_state", None)
+                    if signal is None:
+                        ui_block.set_signal_state("N/A")
+                    else:
+                        ui_block.set_signal_state(signal.value)
+
         except Exception as e:
             print(f"[CTC] Occupancy sync error: {e}")
 

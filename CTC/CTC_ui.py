@@ -44,6 +44,15 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mode_toggle_button.setStyleSheet("background-color: lightblue; font-weight: bold;")
         self.mode_toggle_button.toggled.connect(self.toggle_mode)
 
+        # === Maintenance Mode Toggle (independent from Auto/Manual) ===
+        self.maintenance_mode = False
+        self.maint_checkbox = QtWidgets.QCheckBox("Maintenance Mode")
+        self.maint_checkbox.setChecked(False)
+        self.maint_checkbox.toggled.connect(self._toggle_maintenance_mode)
+        toolbar.addSeparator()
+        toolbar.addWidget(self.maint_checkbox)
+
+
         toolbar.addWidget(self.mode_label)
         toolbar.addWidget(self.mode_toggle_button)
         toolbar.addSeparator()
@@ -415,6 +424,14 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         dialog.exec()
 
+
+    def _toggle_maintenance_mode(self, enabled: bool):
+        self.state.maintenance_enabled = enabled
+        print(f"[CTC UI] Maintenance mode {'ENABLED' if enabled else 'DISABLED'}")
+
+        # Disable/enable the maintenance controls
+        self.maintBtn.setEnabled(enabled)
+
     # ---------------------------------------------------------
     # Train Info Page
     # ---------------------------------------------------------
@@ -511,19 +528,31 @@ class CTCWindow(QtWidgets.QMainWindow):
     # Maintenance / Upload placeholders
     # ---------------------------------------------------------
     def _maintenance_inputs(self):
+        # Only allowed in maintenance mode
+        if not self.maint_checkbox.isChecked():
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Enable Maintenance Mode",
+                "Enable Maintenance Mode to modify blocks."
+            )
+            return
+
         row = self.mapTable.currentRow()
         if row < 0:
             QtWidgets.QMessageBox.warning(self, "No Selection", "Select a block first.")
             return
+
         blk_id = self.mapTable.item(row, 1).text()
         choice, ok = QtWidgets.QInputDialog.getItem(
             self, "Maintenance", f"Toggle status for block {blk_id}:",
             ["Open (free)", "Closed"], 0, False
         )
+
         if ok:
             closed = "Closed" in choice
             self.state.set_block_closed(int(blk_id), closed)
             self._reload_line(self.state.line_name)
+
 
     def _manual_override(self):
         QtWidgets.QMessageBox.information(self, "Manual Override", "Manual Override page coming soon.")

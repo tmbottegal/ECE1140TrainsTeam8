@@ -434,6 +434,8 @@ class TrackState:
         self._train_suggestions: Dict[str, Tuple[float, float]] = {}
         self._train_progress: Dict[str, float] = {}   # cumulative distance per train
 
+        self.maintenance_enabled = False
+
 
         self.set_line(line_name, line_tuples)
         self.schedule = ScheduleManager()
@@ -628,6 +630,11 @@ class TrackState:
                 self.track_model.close_block(block_id)
             else:
                 self.track_model.open_block(block_id)
+
+                # 🔥 NEW: update UI mirror status
+            for b in self._lines[self.line_name]:
+                if b.block_id == block_id:
+                    b.status = "closed" if closed else "free"
             print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
         except Exception as e:
             print(f"[CTC] Maintenance toggle failed: {e}")
@@ -757,6 +764,9 @@ class TrackState:
                         ui_block.set_signal_state("N/A")
                     else:
                         ui_block.set_signal_state(signal.value)
+                    if tm_segment.closed:
+                        ui_block.status = "closed"
+
 
         except Exception as e:
             print(f"[CTC] Occupancy sync error: {e}")
@@ -802,9 +812,7 @@ class TrackState:
                 print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
                 print(f"[CTC] Suggestion → Train {train_id} in block {block}: "
                     f"{speed_mps:.2f} m/s, {new_auth:.1f} m authority")
-            
-                    
-            
+                
 
 
     # --------------------------------------------------------

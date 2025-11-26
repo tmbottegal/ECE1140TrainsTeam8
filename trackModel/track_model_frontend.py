@@ -194,7 +194,7 @@ class NetworkStatusUI(QWidget):
         """Load the track layout from CSV file (called once on startup)"""
         try:
             # Load track layout with proper path
-            csv_path = os.path.join(os.path.dirname(__file__), "red_line.csv")
+            csv_path = os.path.join(os.path.dirname(__file__), "green_line.csv")
             self.status_display.append(
                 f"Loading track layout from {csv_path}...")
             self.track_network.load_track_layout(csv_path)
@@ -334,9 +334,9 @@ class NetworkStatusUI(QWidget):
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'signal_state', 'speed_limit', 'length', 'grade', 'active_command',
-            'previous_segment', 'next_segment', 'current_position',
-            'gate_status', 'beacon_data',
+            'block_id', 'type', 'occupied', 'signal_state', 'speed_limit', 'length', 'grade', 
+            'elevation', 'direction', 'active_command', 'previous_segment', 'next_segment', 
+            'current_position', 'gate_status', 'beacon_data',
         ]
         
         # Check if this is being called for segments (based on table widget 
@@ -416,6 +416,37 @@ class NetworkStatusUI(QWidget):
                                         cell_value)
                                     display_value = f"{mph_value:.1f} mph"
                                     item = QTableWidgetItem(display_value)
+                                elif (col_name == 'grade' and 
+                                      isinstance(cell_value, (int, float))):
+                                    # Convert grade from decimal to percentage
+                                    display_value = f"{cell_value:.2f} %"
+                                    item = QTableWidgetItem(display_value)
+                                elif (col_name == 'elevation' and 
+                                      isinstance(cell_value, (int, float))):
+                                    # Convert elevation from meters to yards
+                                    yards_value = (
+                                        ConversionFunctions.meters_to_yards(
+                                            cell_value))
+                                    display_value = f"{yards_value:.2f} yds"
+                                    item = QTableWidgetItem(display_value)
+                                elif col_name == 'direction':
+                                    # Convert direction to user-friendly display with arrows
+                                    direction_str = str(cell_value).upper()
+                                    
+                                    if direction_str in ['DIRECTION.BIDIRECTIONAL']:
+                                        display_value = "↔️ Bidirectional"
+                                        color = QColor(230, 230, 255)  # Light purple
+                                    elif direction_str in ['DIRECTION.FORWARD']:
+                                        display_value = "➡️ Forward"
+                                        color = QColor(200, 255, 200)  # Light green
+                                    elif direction_str in ['DIRECTION.BACKWARD']:
+                                        display_value = "⬅️ Backward"
+                                        color = QColor(255, 220, 200)  # Light red
+                                    else:
+                                        display_value = str(cell_value)
+                                    
+                                    item = QTableWidgetItem(display_value)
+                                    item.setBackground(color)
                                 elif col_name == 'signal_state':
                                     # Convert signal state to user-friendly 
                                     # display with colors

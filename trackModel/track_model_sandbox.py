@@ -34,8 +34,8 @@ if __name__ == "__main__":
     network.load_track_layout('trackModel/green_line.csv')
     train = Train(1)
     network.add_train(train)
-    network.connect_train(1, 63, 0.0)
-    network.broadcast_train_command(63, 100, 100)
+    network.connect_train(1, 12, 0.0)
+    network.broadcast_train_command(12, 100, 100)
     
     #window = NetworkStatusUI(network)
     #window.show()

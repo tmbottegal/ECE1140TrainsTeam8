@@ -120,6 +120,14 @@ class StationSide(Enum):
     RIGHT = "right"
     BOTH = "both"
 
+class Direction(Enum):
+    """Enumeration of allowed track directions.
+    Forward is defined as increasing displacement (towards next segment),
+    and Backwards is decreasing displacement (towards previous segment)."""
+    FORWARD = "forward"
+    BACKWARD = "backward"
+    BIDIRECTIONAL = "bidirectional"
+
 class TrackSegment:
     """Base class for all track segments in the railway network.
     
@@ -130,22 +138,23 @@ class TrackSegment:
         block_id: Unique identifier for the track block.
         length: Length of the segment in meters.
         grade: Grade percentage.
+        speed_limit: Speed limit of the segment in m/s.
+        elevation: Cumulative elevation in meters.
+        underground: Whether the segment is underground (tunnel).
+        direction: Allowed travel direction on this segment.
         connected_segments: List of segments directly reachable from this one.
         previous_segments: List of segments that lead into this one.
         occupied: Whether the block is currently occupied.
         failures: Set of current failure conditions on this block.
-        signal_state: Current signal state for this block.
-        is_station: Whether this block is a station.
-        station_name: Name of the station if applicable.
-        passengers_waiting: Number of passengers currently waiting at the
-          station if applicable.
         beacon_data: Beacon information for trains entering this block.
         closed: Whether the block is closed for maintenance.
+        active_command: Current active TrainCommand for this block.
 
     """
     
     def __init__(self, block_id: int, length: float, speed_limit: float,
-                 grade: float, underground: bool) -> None:
+                 grade: float, elevation: float, underground: bool,
+                 direction: Direction) -> None:
         """Initialize a track segment.
         
         Args:
@@ -153,15 +162,19 @@ class TrackSegment:
             length: Length of the segment in meters.
             speed_limit: Speed limit of the segment in m/s.
             grade: Grade percentage (+ is uphill, - is downhill).
+            elevation: Cumulative elevation in meters.
             underground: Whether the segment is underground (tunnel).
+            direction: Allowed travel direction on this segment.
         """
         # Basic track properties
         self.block_id = block_id
         self.length = length            # meters
         self.speed_limit = speed_limit  # m/s
         self.grade = grade
+        self.elevation = elevation      # meters
         self.underground = underground
         self.closed = False
+        self.direction = direction
         
         # Graph connections
         self.next_segment: Optional['TrackSegment'] = None
@@ -293,15 +306,20 @@ class TrackSwitch(TrackSegment):
     """
 
     def __init__(self, block_id: int, length: float, speed_limit: float, 
-                 grade: float, underground: bool) -> None:
+                 grade: float, elevation: float, underground: bool,
+                 direction: Direction) -> None:
         """Initialize a track switch.
         
         Args:
             block_id: Unique identifier for the switch block.
             length: Length of the switch in meters.
             grade: Grade percentage (+ is uphill, - is downhill).
-        """
-        super().__init__(block_id, length, speed_limit, grade, underground)
+            elevation: Cumulative elevation in meters.
+            underground: Whether the switch is underground.
+            direction: Allowed travel direction on this segment.
+
+            """
+        super().__init__(block_id, length, speed_limit, grade, elevation, underground, direction)
         
         self.straight_segment: Optional['TrackSegment'] = None
         self.diverging_segment: Optional['TrackSegment'] = None
@@ -389,8 +407,9 @@ class LevelCrossing(TrackSegment):
                 (True = closed, False = open).
     """
     
-    def __init__(self, block_id: int, length: float, speed_limit: float, 
-                 grade: float, underground: bool) -> None:
+    def __init__(self, block_id: int, length: float, 
+                 speed_limit: float, grade: float, elevation: float, 
+                 underground: bool, direction: Direction) -> None:
         """Initialize a level crossing segment.
         
         Args:
@@ -398,9 +417,11 @@ class LevelCrossing(TrackSegment):
             length: Length of the crossing in meters.
             speed_limit: Speed limit through the crossing in m/s.
             grade: Grade percentage (+ is uphill, - is downhill).
+            elevation: Cumulative elevation in meters.
             underground: Whether the crossing is underground.
+            direction: Allowed travel direction on this segment.
         """
-        super().__init__(block_id, length, speed_limit, grade, underground)
+        super().__init__(block_id, length, speed_limit, grade, elevation, underground, direction)
         
         # Level crossing specific properties
         self.gate_status = False  # False = open, True = closed
@@ -422,7 +443,7 @@ class Station(TrackSegment):
     Extends TrackSegment with functionality for managing passengers,
     ticket sales, and station-specific operations.
     
-    Attributes:
+    Additional attributes:
         station_name: Human-readable name of the station.
         passengers_waiting: Current number of passengers waiting.
         passengers_boarded_total: Total passengers boarded in total.
@@ -432,7 +453,8 @@ class Station(TrackSegment):
     """
     
     def __init__(self, block_id: int, length: float, speed_limit: float,
-                 grade: float, station_name: str,
+                 grade: float, elevation: float, underground: bool, 
+                 direction: Direction, station_name: str,
                  station_side: StationSide) -> None:
         """Initialize a station.
         
@@ -440,12 +462,14 @@ class Station(TrackSegment):
             block_id: Unique identifier for the station block.
             length: Length of the station segment in meters.
             grade: Grade percentage (+ is uphill, - is downhill).
+            elevation: Cumulative elevation in meters.
+            underground: Whether the station is underground.
+            direction: Allowed travel direction on this segment.
             station_name: Human-readable name of the station.
             station_side: Side(s) of the platform (left, right, both).
         """
-        super().__init__(block_id, length, speed_limit, grade,
-                         underground=False)
-       
+        super().__init__(block_id, length, speed_limit, grade, elevation, underground, direction)
+
         # Station-specific properties
         self.station_name = station_name
         self.station_side = station_side
@@ -680,6 +704,9 @@ class TrackNetwork:
             csvFile = csv.DictReader(file)
             current_line = 0
             for lines in csvFile:
+                if not lines["Type"].strip() and not lines["block_id"].strip():
+                    current_line += 1
+                    continue
                 if lines["block_id"] in self.segments:
                     raise ValueError(
                         f"Block ID {lines['block_id']} already exists in "
@@ -709,11 +736,23 @@ class TrackNetwork:
                     raise ValueError(
                         f"Invalid 'grade' field in layout file at row "
                         f"{current_line}.")
+                if ("elevation" not in lines or 
+                        not re.match("^[0-9.-]+$", lines["elevation"])):
+                    raise ValueError(
+                        f"Invalid 'elevation' field in layout file at row "
+                        f"{current_line}.")
                 if ("underground" not in lines or 
                         not re.match("^(TRUE|FALSE|true|false)$", 
                                    lines["underground"])):
+                
                     raise ValueError(
                         f"Invalid 'underground' field in layout file at row "
+                        f"{current_line}.")
+                if ("direction" not in lines or 
+                        not re.match("^(FORWARD|BACKWARD|BIDIRECTIONAL)$", 
+                                   lines["direction"], re.IGNORECASE)):
+                    raise ValueError(
+                        f"Invalid 'direction' field in layout file at row "
                         f"{current_line}.")
 
                 match lines["Type"]:
@@ -723,7 +762,9 @@ class TrackNetwork:
                             length=float(lines["length"]),
                             speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
-                            underground=lines["underground"].lower() == "true"
+                            elevation=float(lines["elevation"]),
+                            underground=lines["underground"].lower() == "true",
+                            direction=Direction(lines["direction"].lower())
                         )
                         if "beacon_data" in lines and lines["beacon_data"].strip():
                             segment.set_beacon_data(lines["beacon_data"])
@@ -734,7 +775,9 @@ class TrackNetwork:
                             length=float(lines["length"]),
                             speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
-                            underground=lines["underground"].lower() == "true"
+                            elevation=float(lines["elevation"]),
+                            underground=lines["underground"].lower() == "true",
+                            direction=Direction(lines["direction"].lower())
                         )
                         if "beacon_data" in lines and lines["beacon_data"].strip():
                             switch.set_beacon_data(lines["beacon_data"])
@@ -745,7 +788,9 @@ class TrackNetwork:
                             length=float(lines["length"]),
                             speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
-                            underground=lines["underground"].lower() == "true"
+                            elevation=float(lines["elevation"]),
+                            underground=lines["underground"].lower() == "true",
+                            direction=Direction(lines["direction"].lower())
                         )
                         if "beacon_data" in lines and lines["beacon_data"].strip():
                             crossing.set_beacon_data(lines["beacon_data"])
@@ -769,6 +814,9 @@ class TrackNetwork:
                             length=float(lines["length"]),
                             speed_limit=float(lines["speed_limit"]),
                             grade=float(lines["grade"]),
+                            elevation=float(lines["elevation"]),
+                            underground=lines["underground"].lower() == "true",
+                            direction=Direction(lines["direction"].lower()),
                             station_name=lines["station_name"],
                             station_side=StationSide(
                                 lines["station_side"].lower()))
@@ -786,6 +834,9 @@ class TrackNetwork:
         with open(layout_file, mode='r') as file:
             csvFile = csv.DictReader(file)
             for lines in csvFile:
+                if not lines["Type"].strip() and not lines["block_id"].strip():
+                    current_line += 1
+                    continue
                 if (lines["previous_segment"] is not None and 
                         not re.match("(^[0-9]+$|^$)", 
                                    lines["previous_segment"])):
@@ -1220,7 +1271,9 @@ class TrackNetwork:
             "length": segment.length,
             "speed_limit": segment.speed_limit,
             "grade": segment.grade,
+            "elevation": segment.elevation,
             "underground": segment.underground,
+            "direction": segment.direction,
             "occupied": segment.occupied,
             "failures": list(segment.failures),
             "beacon_data": segment.beacon_data,

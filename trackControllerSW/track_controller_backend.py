@@ -1,8 +1,4 @@
-# wayside needs to have logic in the plc file
 # wayside needs to fix crossing states
-# wayside needs to infer if a rail is broken (if a train goes through a block and it doesnt display tha tit is occupied, it is a broken rail)
-# wayside needs to infer if a power failure (if switch/signal state doesnt change after a change, there is a power failure)
-# wayside needs to infer if there is a track circuit failure (when commanded speed and commanded authority is changed and a train doesnt follow it, it is a track circuit failure)
 # wayside needs to see hardware part so not cause collisions
 
 
@@ -968,3 +964,153 @@ class Failures:
         self._command_retry_count.clear()
         self._pending_verifications.clear()
         logger.info("Failures cleared yippee")
+
+    def _apply_dynamic_plc_logic(self, plc_module) -> None:
+        logger.info("Applying dynamic PLC logic for %s", self.line_name)
+        get_speed_for_signal = getattr(plc_module, 'get_speed_for_signal', None)
+        get_authority_for_signal = getattr(plc_module, 'get_authority_for_signal', None)
+        adjust_for_crossing = getattr(plc_module, 'adjust_for_crossing', None)
+        adjust_for_switch = getattr(plc_module, 'adjust_for_switch', None)
+        check_ahead_occupancy = getattr(plc_module, 'check_ahead_occupancy', None)
+        check_proximity_occupancy = getattr(plc_module, 'check_proximity_occupancy', None)
+        speed_limit = getattr(plc_module, 'SPEED_LIMIT', 70)
+        yellow_factor = getattr(plc_module, 'YELLOW_SPEED_FACTOR', 0.5)
+        approach_factor = getattr(plc_module, 'APPROACH_SPEED_FACTOR', 0.7)
+        for block_id in self._line_block_ids():
+            try:
+                base_speed = getattr(plc_module, f'commanded_speed_{block_id}', None)
+                base_auth = getattr(plc_module, f'commanded_auth_{block_id}', None)
+                if base_speed is None or base_auth is None:
+                    continue
+                signal_state = self._known_signal.get(block_id, SignalState.RED)
+                if isinstance(signal_state, SignalState):
+                    signal_str = signal_state.name
+                else:
+                    signal_str = str(signal_state)
+                occupied = self._known_occupancy.get(block_id, False)
+                adjusted_speed = base_speed
+                adjusted_auth = base_auth
+                if get_speed_for_signal:
+                    adjusted_speed = get_speed_for_signal(base_speed, signal_str)
+                else:
+                    if signal_str == "RED":
+                        adjusted_speed = 0
+                    elif signal_str == "YELLOW":
+                        adjusted_speed = int(base_speed * yellow_factor)
+                    elif signal_str == "SUPERGREEN":
+                        adjusted_speed = min(base_speed, speed_limit)
+                if get_authority_for_signal:
+                    adjusted_auth = get_authority_for_signal(base_auth, signal_str, occupied)
+                else:
+                    if signal_str == "RED":
+                        adjusted_auth = 0
+                    elif occupied:
+                        adjusted_auth = max(int(base_auth * 0.5), 50)
+                if check_ahead_occupancy:
+                    next_blocks = self._get_next_blocks(block_id)
+                    next_occupied = [self._known_occupancy.get(nb, False) for nb in next_blocks]
+                    occupancy_factor = check_ahead_occupancy(block_id, next_occupied)
+                    adjusted_speed = int(adjusted_speed * occupancy_factor)
+                else:
+                    next_block = block_id + 1
+                    if next_block in self._line_block_ids():
+                        if self._known_occupancy.get(next_block, False):
+                            adjusted_speed = int(adjusted_speed * approach_factor)
+                if check_proximity_occupancy:
+                    proximity_factor = check_proximity_occupancy(block_id, self._known_occupancy)
+                    adjusted_speed = int(adjusted_speed * proximity_factor)
+                else:
+                        for distance in [1, 2]:
+                            prev_block = block_id - distance
+                            next_block = block_id + distance
+                            prev_occupied = self._known_occupancy.get(prev_block, False) if prev_block in self._line_block_ids() else False
+                            next_occupied = self._known_occupancy.get(next_block, False) if next_block in self._line_block_ids() else False
+                            if prev_occupied or next_occupied:
+                                adjusted_speed = int(adjusted_speed * 0.5)
+                                break
+                for cid, cblock in self.crossing_blocks.items():
+                    crossing_active = self.crossings.get(cid, False)
+                    blocks_to_crossing = abs(block_id - cblock)
+                    if adjust_for_crossing:
+                        adjusted_speed, adjusted_auth = adjust_for_crossing(adjusted_speed, adjusted_auth, crossing_active, blocks_to_crossing)
+                    else:
+                        if crossing_active and blocks_to_crossing <= 2:
+                            adjusted_speed = min(adjusted_speed, 25)
+                            adjusted_auth = min(adjusted_auth, 75)
+                for sid, spos in self.switches.items():
+                    blocks_to_switch = abs(block_id - sid)
+                    if adjust_for_switch:
+                        adjusted_speed, adjusted_auth = adjust_for_switch(adjusted_speed, adjusted_auth, spos, blocks_to_switch)
+                    else:
+                        if blocks_to_switch <= 1 and spos == 1:
+                            adjusted_speed = int(adjusted_speed * 0.7)
+                            adjusted_auth = min(adjusted_auth, 100)
+                speed_mps = ConversionFunctions.mph_to_mps(adjusted_speed)
+                auth_m = ConversionFunctions.yards_to_meters(adjusted_auth)
+                self.set_commanded_speed(block_id, int(speed_mps))
+                self.set_commanded_authority(block_id, int(auth_m))
+                logger.debug("Block %d: base_speed=%d mph -> adjusted=%d mph (%.1f m/s), base_auth=%d yd -> adjusted=%d yd (%.1f m), signal=%s, occupied=%s",
+                            block_id, base_speed, adjusted_speed, speed_mps,base_auth, adjusted_auth, auth_m, signal_str, occupied)
+            except Exception:
+                logger.exception("Failed to apply dynamic logic for block %d", block_id)
+                continue
+        logger.info("Dynamic PLC logic applied to %d blocks", len(self._line_block_ids()))
+
+    def _get_next_blocks(self, block_id: int) -> List[int]:
+        next_blocks = []
+        if block_id in self.switch_map:
+            next_blocks.extend(self.switch_map[block_id])
+        else:
+            next_block = block_id + 1
+            if next_block in self._line_block_ids():
+                next_blocks.append(next_block)
+        return next_blocks
+
+    def _upload_plc_python_enhanced(self, filepath: str) -> None:
+        spec = importlib.util.spec_from_file_location("plc_module", filepath)
+        if spec is None or spec.loader is None:
+            logger.error("Could not load PLC module from %s", filepath)
+            return
+        plc_module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(plc_module)
+        except Exception:
+            logger.exception("Failed to execute PLC Python file %s", filepath)
+            return
+        for name, value in vars(plc_module).items():
+            lname = name.lower()
+            try:
+                if lname.startswith("switch_"):
+                    sid = int(lname.split("_")[1])
+                    if sid in self.switches:
+                        if isinstance(value, bool):
+                            pos = 0 if value else 1
+                        elif isinstance(value, int):
+                            pos = value
+                        else:
+                            pos_str = str(value).title()
+                            pos = 0 if pos_str == "Normal" else 1
+                        self._plc_set_switch(sid, pos)
+                    continue
+                if lname.startswith("crossing_"):
+                    cid = int(lname.split("_")[1])
+                    if cid in self.crossings:
+                        if isinstance(value, bool):
+                            status = value
+                        else:
+                            status_str = str(value).title()
+                            status = True if status_str == "Active" else False
+                        self._plc_set_crossing(cid, status)
+                    continue
+                if lname.startswith("signal_"):
+                    block_id = int(lname.split("_")[1])
+                    if block_id in self._line_block_ids():
+                        if isinstance(value, SignalState):
+                            self.set_signal(block_id, value)
+                        else:
+                            self.set_signal(block_id, str(value))
+                    continue
+            except Exception:
+                logger.exception("PLC variable handling failed for %s=%r", name, value)
+                continue
+        self._apply_dynamic_plc_logic(plc_module)

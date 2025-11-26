@@ -1,24 +1,71 @@
-"""
-PLC file for green line with predictive logic
-This PLC automatically sets commanded speed and authority based on:
-- Suggested values from CTC
-- Block occupancy status
-- Signal states
-- Safety constraints
-"""
-# temp variables
-speed_limit = 0
+# green plc logic 
 
+SPEED_LIMIT = 70  #placeholder till i feel like adding the real speed limits
+YELLOW_SPEED_FACTOR = 0.5
+MIN_SAFE_AUTHORITY = 50  #placeholder till i feel like adding the real stuff
+CROSSING_APPROACH_SPEED = 25  #placeholder for thing
 
-# switches
+# switch
 switch_1 = 0
 switch_2 = 0
 switch_3 = 0
 
-# crossing
+# cross
 crossing_1 = False
 
-# signals - will need to change after tim changes his thing
+def get_speed_for_signal(base_speed, signal_state):
+    if signal_state == "RED":
+        return 0
+    elif signal_state == "YELLOW":
+        return int(base_speed * YELLOW_SPEED_FACTOR)
+    elif signal_state == "SUPERGREEN":
+        return min(base_speed, SPEED_LIMIT)
+    else:  # GREEN
+        return base_speed
+
+
+def get_authority_for_signal(base_authority, signal_state, block_occupied):
+    if signal_state == "RED":
+        return 0
+    elif block_occupied:
+        return max(int(base_authority * 0.5), MIN_SAFE_AUTHORITY)
+    else:
+        return base_authority
+
+
+def adjust_for_crossing(speed, authority, crossing_active, blocks_to_crossing):
+    if crossing_active and blocks_to_crossing <= 2:
+        speed = min(speed, CROSSING_APPROACH_SPEED)
+        authority = min(authority, 75)
+    return speed, authority
+
+
+def adjust_for_switch(speed, authority, switch_position, blocks_to_switch):
+    if blocks_to_switch <= 1:
+        if switch_position == 1:
+            speed = int(speed * 0.7)
+            authority = min(authority, 100)
+    return speed, authority
+
+
+def check_ahead_occupancy(current_block, next_blocks_occupied):
+    if any(next_blocks_occupied):
+        return YELLOW_SPEED_FACTOR
+    return 1.0
+
+
+def check_proximity_occupancy(block_id, all_occupancy):
+    if not all_occupancy.get(block_id, False):
+        return 1.0
+    for distance in [1, 2]:
+        prev_block = block_id - distance
+        next_block = block_id + distance
+        if all_occupancy.get(prev_block, False) or all_occupancy.get(next_block, False):
+            return 0.5
+    return 1.0
+
+
+# lights
 signal_1  = "GREEN"
 signal_2  = "GREEN"
 signal_3  = "GREEN"
@@ -112,29 +159,7 @@ signal_148 = "GREEN"
 signal_149 = "GREEN"
 signal_150 = "GREEN"
 
-# start of some helper functions
-
-def calculate_commanded_speed(suggested_speed, signal_state, block_occupied):
-    if block_occupied:
-        if signal_state == "RED":
-            return 0
-        elif signal_state == "YELLOW":
-            return int(suggested_speed * 0.5)
-        elif signal_state == "SUPERGREEN":
-            return speed_limit
-        else:
-            return suggested_speed
-
-
-def calculate_commanded_authority(suggested_authority, signal_state, block_occupied):
-    if block_occupied:
-        if signal_state == "RED":
-            return 0
-        else:
-            return suggested_authority
-
-
-# commanded speed
+# sped
 commanded_speed_1  = 45
 commanded_speed_2  = 45
 commanded_speed_3  = 45
@@ -228,7 +253,7 @@ commanded_speed_148 = 20
 commanded_speed_149 = 20
 commanded_speed_150 = 20
 
-# commanded authority
+# authority
 commanded_auth_1  = 100
 commanded_auth_2  = 100
 commanded_auth_3  = 100
@@ -291,7 +316,6 @@ commanded_auth_59 = 50
 commanded_auth_60 = 50
 commanded_auth_61 = 50
 commanded_auth_62 = 50
-
 commanded_auth_122 = 50
 commanded_auth_123 = 50
 commanded_auth_124 = 50
@@ -321,30 +345,3 @@ commanded_auth_147 = 50
 commanded_auth_148 = 184
 commanded_auth_149 = 40
 commanded_auth_150 = 35
-
-"""
-To use this PLC with predictive logic:
-
-1. The backend should maintain a dictionary of suggested speeds/authorities from CTC
-2. When uploading this PLC, the backend should:
-   - Read the default commanded values above
-   - Apply the predictive functions using current block state
-   - Update commanded values based on:
-     * suggested_speed_mps (from CTC)
-     * suggested_auth_m (from CTC)
-     * current signal state
-     * current occupancy
-
-Example backend logic to add:
-    for block_id in range(1, 63):
-        suggested_speed = self._suggested_speed_mps.get(block_id, 0)
-        suggested_auth = self._suggested_auth_m.get(block_id, 0)
-        signal_state = self._known_signal.get(block_id, SignalState.RED)
-        occupied = self._known_occupancy.get(block_id, False)
-        
-        commanded_speed = calculate_commanded_speed(suggested_speed, signal_state, occupied)
-        commanded_auth = calculate_commanded_authority(suggested_auth, signal_state, occupied)
-        
-        self.set_commanded_speed(block_id, commanded_speed)
-        self.set_commanded_authority(block_id, commanded_auth)
-"""

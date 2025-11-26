@@ -638,6 +638,31 @@ class TrackState:
             print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
         except Exception as e:
             print(f"[CTC] Maintenance toggle failed: {e}")
+            # NEW: When block is reopened, recalc pending train suggestions
+        # --- When a block is reopened, resume any train waiting before it ---
+        if not closed:
+            for train_id, train in self.track_model.trains.items():
+                seg = train.current_segment
+                if not seg:
+                    continue
+
+                next_seg = seg.get_next_segment()
+                if next_seg and next_seg.block_id == block_id:
+                    # Pull the destination stored at dispatch time
+                    dest_block = self._train_destinations.get(train_id)
+                    if dest_block is None:
+                        continue
+
+                    # Recompute new safe suggestions
+                    spd, auth = self.compute_suggestions(seg.block_id, dest_block)
+
+                    # Store & push back to both controllers
+                    self._train_suggestions[train_id] = (spd, auth)
+                    self.track_controller.receive_ctc_suggestion(seg.block_id, spd, auth)
+                    self.track_controller_hw.receive_ctc_suggestion(seg.block_id, spd, auth)
+
+                    print(f"[CTC] Block {block_id} reopened — resumed movement for train {train_id}")
+
 
     # --------------------------------------------------------
     # Status accessors for UI
@@ -784,6 +809,22 @@ class TrackState:
 
                 # Distance train would travel this tick
                 distance_per_tick = speed_mps * clock.tick_interval
+
+                # Look ahead 1 block to see if it's closed
+                next_seg = train.current_segment.get_next_segment()
+                if next_seg and next_seg.closed:
+                    # block ahead is closed → stop before entering it
+                    new_speed = 0.0
+                    new_auth = 0.0
+
+                    # Send updated hard-stop to controllers
+                    self.track_controller.receive_ctc_suggestion(block, new_speed, new_auth)
+                    self.track_controller_hw.receive_ctc_suggestion(block, new_speed, new_auth)
+
+                    self._train_suggestions[train_id] = (new_speed, new_auth)
+                    print(f"[CTC] Train {train_id} STOPPED — Block {next_seg.block_id} is CLOSED")
+                    continue
+
 
                 # --- NEW: Move train physically in TrackModel ---
                 # --- MOVE TRAIN IN TRACK MODEL ---

@@ -334,8 +334,7 @@ class NetworkStatusUI(QWidget):
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'signal_state', 
-            'speed_limit', 'length', 'grade', 'active_command',
+            'block_id', 'type', 'occupied', 'signal_state', 'speed_limit', 'length', 'grade', 'active_command',
             'previous_segment', 'next_segment', 'current_position',
             'gate_status', 'beacon_data',
         ]

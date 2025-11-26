@@ -173,9 +173,6 @@ class TrackSegment:
         
         # Failure states
         self.failures: set[TrackFailureType] = set()
-        
-        # Signal status
-        self.signal_state = SignalState.RED
 
         # Beacon and track circuit information
         self.beacon_data = ""
@@ -192,16 +189,6 @@ class TrackSegment:
         self.occupied = occupied
         if not occupied:
             self.active_command = None
-            
-    def set_signal_state(self, state: SignalState) -> None:
-        """Set the signal state for this track segment.
-        
-        Args:
-            state: The new signal state to set.
-        """
-        if TrackFailureType.POWER_FAILURE in self.failures:
-            return
-        self.signal_state = state
 
     def set_beacon_data(self, beacon_data: str) -> None:
         """Set beacon data for this track segment.
@@ -316,13 +303,22 @@ class TrackSwitch(TrackSegment):
         """
         super().__init__(block_id, length, speed_limit, grade, underground)
         
-        # Switch-specific properties
         self.straight_segment: Optional['TrackSegment'] = None
         self.diverging_segment: Optional['TrackSegment'] = None
         self.current_position = 0
-        self.straight_signal_state = SignalState.GREEN
-        self.diverging_signal_state = SignalState.RED
+
+        self.signal_state = SignalState.RED
+
+    def set_signal_state(self, state: SignalState) -> None:
+        """Set the signal state for this track segment.
         
+        Args:
+            state: The new signal state to set.
+        """
+        if TrackFailureType.POWER_FAILURE in self.failures:
+            return
+        self.signal_state = state
+
     def set_switch_paths(self, straight_segment: 'TrackSegment', 
                         diverging_segment: 'TrackSegment') -> None:
         """Set the two possible paths for this switch.
@@ -933,6 +929,8 @@ class TrackNetwork:
         segment = self.segments.get(block_id)
         if segment is None:
             raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, TrackSwitch):
+            raise ValueError(f"Block ID {block_id} is not a switch.")
         segment.set_signal_state(signal_state)
         pass
 
@@ -1224,7 +1222,6 @@ class TrackNetwork:
             "grade": segment.grade,
             "underground": segment.underground,
             "occupied": segment.occupied,
-            "signal_state": segment.signal_state,
             "failures": list(segment.failures),
             "beacon_data": segment.beacon_data,
             "active_command": segment.active_command,
@@ -1255,6 +1252,7 @@ class TrackNetwork:
             segment_status["tickets_sold_total"] = segment.tickets_sold_total
         
         if isinstance(segment, TrackSwitch):
+            segment_status["signal_state"] = segment.signal_state
             segment_status["current_position"] = segment.current_position
             segment_status["straight_segment"] = (
                 segment.straight_segment.block_id

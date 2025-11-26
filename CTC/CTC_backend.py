@@ -406,6 +406,8 @@ class TrackState:
             except Exception as e:
                 print(f"[CTC Backend] Warning: failed to load layout → {e}")
 
+        self._train_destinations: Dict[str, int] = {}
+
         #Build Track Controller backend and link both sides
         self.track_controller = TrackControllerBackend(self.track_model, line_name)
         self.track_controller.set_ctc_backend(self)  # Enables CTC ←→ Controller communication
@@ -584,7 +586,8 @@ class TrackState:
     # --------------------------------------------------------
     # Train dispatching
     # --------------------------------------------------------
-    def dispatch_train(self, train_id: str, start_block: int, suggested_speed_mph: float, suggested_auth_yd: float):
+    def dispatch_train(self, train_id: str, start_block: int, dest_block: int,
+                    suggested_speed_mph: float, suggested_auth_yd: float):
         """
         Dispatcher adds a train manually to TrackModel, with an initial
         suggested speed/authority sent to Track Controller.
@@ -599,21 +602,22 @@ class TrackState:
             start_block = int(start_block)
             self.track_model.connect_train(train_id, start_block, displacement=0.0)
 
+            # ⭐ STORE DESTINATION FOR AUTHORITY LOGIC
+            self._train_destinations[train_id] = dest_block
+
             # Send to Track Controller (in metric!)
             self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
-            self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps,auth_m )
+            self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
 
             # Save for per-tick resend
             self._train_suggestions[train_id] = (speed_mps, auth_m)
             self._train_progress[train_id] = 0.0
-
 
             print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed_mph} mph, {suggested_auth_yd} yd")
 
         except Exception as e:
             print(f"[CTC] Error dispatching train: {e}")
 
-  
 
     # --------------------------------------------------------
     # Maintenance control
@@ -765,6 +769,15 @@ class TrackState:
 
                 # Distance train would travel this tick
                 distance_per_tick = speed_mps * clock.tick_interval
+
+                # --- NEW: Move train physically in TrackModel ---
+                # --- MOVE TRAIN IN TRACK MODEL ---
+                try:
+                    self.track_model.mto(train_id, distance_per_tick)
+                except Exception as e:
+                    print(f"[CTC] Train move error: {e}")
+
+                
 
                 # Reduce authority
                 new_auth = max(0.0, auth_m - distance_per_tick)

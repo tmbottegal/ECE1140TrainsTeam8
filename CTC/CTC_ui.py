@@ -283,12 +283,8 @@ class CTCWindow(QtWidgets.QMainWindow):
             auth_yd = auth_m / 0.9144
 
             # === 5. Dispatch using backend — STILL IN METRIC ===
-            self.state.dispatch_train(
-                train_id,
-                start_block,
-                speed_mph,   # UI sends mph but backend immediately converts back to metric
-                auth_yd      # same (keeps interface consistent)
-            )
+            self.state.dispatch_train(train_id, start_block, dest_block, speed_mph, auth_yd)
+
 
             QtWidgets.QMessageBox.information(
                 self,
@@ -305,7 +301,6 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         except Exception as e:
             print("[CTC UI] Instant dispatch error:", e)
-
 
     def _scheduled_dispatch(self):
         """
@@ -392,7 +387,8 @@ class CTCWindow(QtWidgets.QMainWindow):
 
 
             # 3. Dispatch train exactly like instant dispatch
-            self.state.dispatch_train(train_id, start_block, speed_mph, auth_yd)
+            self.state.dispatch_train(train_id, start_block, dest_block, speed_mph, auth_yd)
+
 
             # 4. Feedback
             QtWidgets.QMessageBox.information(
@@ -418,7 +414,6 @@ class CTCWindow(QtWidgets.QMainWindow):
         cancel_btn.clicked.connect(dialog.reject)
 
         dialog.exec()
-
 
     # ---------------------------------------------------------
     # Train Info Page
@@ -511,7 +506,6 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         self.state.schedule.load_from_csv(filepath)
         self._refresh_schedule_table()
-
 
     # ---------------------------------------------------------
     # Maintenance / Upload placeholders

@@ -281,7 +281,6 @@ class TrackSegment:
             return
 
         self.active_command = TrainCommand(commanded_speed, authority)
-        #TODO: #106 for each train train_command_interrupt(block_id)
         for train in self.network.trains.values():
                 train.train_command_interrupt(self.block_id)
 
@@ -512,6 +511,8 @@ class Station(TrackSegment):
             (If no count argument, randomly generates a number
             between set range.)
         """
+        if train_id is not None and train_id not in self.network.trains:
+            raise ValueError(f"Train ID {train_id} not found in network.")
         if count is not None and count > self.passengers_waiting:
             raise ValueError("Cannot board more passengers than are waiting.")
         if count is not None and count < 0:
@@ -527,7 +528,9 @@ class Station(TrackSegment):
                 count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        # TODO: #105 find train on station block and pass to said train board_passengers(count)
+        train = self.network.trains.get(train_id)
+        if train is not None:
+            train.passengers_boarding(count)
         pass
         
     def passengers_exiting(self, count: int) -> None:
@@ -1337,7 +1340,6 @@ class TrackNetwork:
             "length": segment.length,
             "speed_limit": segment.speed_limit,
             "occupied": segment.occupied,
-            "signal_state": segment.signal_state,
             "beacon_data": segment.beacon_data,
             "active_command": segment.active_command,
             "closed": segment.closed,
@@ -1356,6 +1358,7 @@ class TrackNetwork:
         
         if isinstance(segment, TrackSwitch):
             segment_status["current_position"] = segment.current_position
+            segment_status["signal_state"] = segment.signal_state
 
         return segment_status
 

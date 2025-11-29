@@ -11,7 +11,7 @@ switch_2 = 0
 switch_3 = 0
 
 # cross
-crossing_1 = False
+crossing_1 = True
 
 def get_speed_for_signal(base_speed, signal_state):
     if signal_state == "RED":
@@ -20,7 +20,7 @@ def get_speed_for_signal(base_speed, signal_state):
         return int(base_speed * YELLOW_SPEED_FACTOR)
     elif signal_state == "SUPERGREEN":
         return min(base_speed, SPEED_LIMIT)
-    else:  # GREEN
+    else:  # GREEN aka the default
         return base_speed
 
 
@@ -66,98 +66,9 @@ def check_proximity_occupancy(block_id, all_occupancy):
 
 
 # lights
-signal_1  = "GREEN"
-signal_2  = "GREEN"
-signal_3  = "GREEN"
-signal_4  = "GREEN"
-signal_5  = "GREEN"
-signal_6  = "GREEN"
-signal_7  = "GREEN"
-signal_8  = "GREEN"
-signal_9  = "GREEN"
-signal_10 = "GREEN"
-signal_11 = "GREEN"
 signal_12 = "GREEN"
-signal_13 = "GREEN"
-signal_14 = "GREEN"
-signal_15 = "GREEN"
-signal_16 = "GREEN"
-signal_17 = "GREEN"
-signal_18 = "GREEN"
-signal_19 = "GREEN"
-signal_20 = "GREEN"
-signal_21 = "GREEN"
-signal_22 = "GREEN"
-signal_23 = "GREEN"
-signal_24 = "GREEN"
-signal_25 = "GREEN"
-signal_26 = "GREEN"
-signal_27 = "GREEN"
-signal_28 = "GREEN"
-signal_29 = "GREEN"
-signal_30 = "GREEN"
-signal_31 = "GREEN"
-signal_32 = "GREEN"
-signal_33 = "GREEN"
-signal_34 = "GREEN"
-signal_35 = "GREEN"
-signal_36 = "GREEN"
-signal_37 = "GREEN"
-signal_38 = "GREEN"
-signal_39 = "GREEN"
-signal_40 = "GREEN"
-signal_41 = "GREEN"
-signal_42 = "GREEN"
-signal_43 = "GREEN"
-signal_44 = "GREEN"
-signal_45 = "GREEN"
-signal_46 = "GREEN"
-signal_47 = "GREEN"
-signal_48 = "GREEN"
-signal_49 = "GREEN"
-signal_50 = "GREEN"
-signal_51 = "GREEN"
-signal_52 = "GREEN"
-signal_53 = "GREEN"
-signal_54 = "GREEN"
-signal_55 = "GREEN"
-signal_56 = "GREEN"
-signal_57 = "GREEN"
 signal_58 = "GREEN"
-signal_59 = "GREEN"
-signal_60 = "GREEN"
-signal_61 = "GREEN"
 signal_62 = "GREEN"
-
-signal_122 = "GREEN"
-signal_123 = "GREEN"
-signal_124 = "GREEN"
-signal_125 = "GREEN"
-signal_126 = "GREEN"
-signal_127 = "GREEN"
-signal_128 = "GREEN"
-signal_129 = "GREEN"
-signal_130 = "GREEN"
-signal_131 = "GREEN"
-signal_132 = "GREEN"
-signal_133 = "GREEN"
-signal_134 = "GREEN"
-signal_135 = "GREEN"
-signal_136 = "GREEN"
-signal_137 = "GREEN"
-signal_138 = "GREEN"
-signal_139 = "GREEN"
-signal_140 = "GREEN"
-signal_141 = "GREEN"
-signal_142 = "GREEN"
-signal_143 = "GREEN"
-signal_144 = "GREEN"
-signal_145 = "GREEN"
-signal_146 = "GREEN"
-signal_147 = "GREEN"
-signal_148 = "GREEN"
-signal_149 = "GREEN"
-signal_150 = "GREEN"
 
 # sped
 commanded_speed_1  = 45

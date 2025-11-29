@@ -1,5 +1,7 @@
-# wayside needs to fix crossing states
+# list of shit to do for me
 # wayside needs to see hardware part so not cause collisions
+# move signals to switch table(maybe)
+# make the ui not shit looking and make the logs less me coded(random shit)
 
 
 from __future__ import annotations
@@ -10,24 +12,18 @@ from datetime import datetime, timedelta
 from collections import deque
 
 _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _pkg_root not in sys.path:
-    sys.path.append(_pkg_root)
+if _pkg_root not in sys.path: sys.path.append(_pkg_root)
 
-
-from universal.universal import SignalState, TrainCommand, ConversionFunctions
+from universal.universal import SignalState, ConversionFunctions
 from trackModel.track_model_backend import TrackNetwork
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 class SafetyException(Exception):
-    """Raised when operation would violate safety rules."""
+    """this is here so shit works."""
 
-LINE_BLOCK_MAP: Dict[str, range] = {
-    "Red Line": range(1, 77),
-    "Green Line": range(1, 151),
-    "Blue Line": range(1, 16),
-}
+LINE_BLOCK_MAP: Dict[str, range] = {"Red Line": range(1, 77),"Green Line": range(1, 151),"Blue Line": range(1, 16),}
 
 @dataclass
 class TrackModelMessage:
@@ -60,7 +56,6 @@ class CommandVerification:
     verified: bool = False
 
 class TrackControllerBackend:
-
     def __init__(self, track_model: TrackNetwork, line_name: str = "Green Line") -> None:
         self.track_model = track_model
         self.line_name = line_name
@@ -80,6 +75,7 @@ class TrackControllerBackend:
         self._known_commanded_speed: Dict[int, int] = {}
         self._known_commanded_auth: Dict[int, int] = {}
         self.incoming_messages: deque[TrackModelMessage] = deque()
+        self.crossing_blocks = {1:19}
         self._live_thread_running: bool = False
         self.ctc_backend = None
         self._ctc_update_enabled: bool = True
@@ -88,29 +84,26 @@ class TrackControllerBackend:
     
     def set_ctc_backend(self, ctc_backend: Any) -> None:
         self.ctc_backend = ctc_backend
-        logger.info("%s: CTC backend connected", self.line_name)
+        logger.info("%s: CTC connected", self.line_name)
     
     def enable_ctc_updates(self, enabled: bool = True) -> None:
         self._ctc_update_enabled = enabled
-        logger.info("%s: CTC updates %s", self.line_name, 
-                   "enabled" if enabled else "disabled")
+        logger.info("%s: CTC updates %s", self.line_name, "enabled" if enabled else "disabled")
     
     def receive_ctc_suggestion(self, block: int, suggested_speed_mps: float, suggested_auth_m: float) -> None:
         if block not in self._line_block_ids():
-            logger.warning("CTC suggestion for invalid block %d on %s", block, self.line_name)
+            logger.warning("CTC invalid block %d on %s. fix pls.", block, self.line_name)
             return
         self._suggested_speed_mps[block] = suggested_speed_mps
         self._suggested_auth_m[block] = suggested_auth_m
-        logger.info("%s: CTC suggestion for block %d: %.2f m/s, %.2f m", self.line_name, block, suggested_speed_mps, suggested_auth_m)
+        logger.info("%s: CTC block %d: %.2f m/s, %.2f m. thx", self.line_name, block, suggested_speed_mps, suggested_auth_m)
         self._notify_listeners()
     
     def _send_status_to_ctc(self) -> None:
-        if not self._ctc_update_enabled or self.ctc_backend is None:
-            return
+        if not self._ctc_update_enabled or self.ctc_backend is None: return
         status_updates: List[WaysideStatusUpdate] = []
         for block_id in self._line_block_ids():
-            if block_id not in self.track_model.segments:
-                continue
+            if block_id not in self.track_model.segments: continue
             occupied = self._known_occupancy.get(block_id, False)
             signal = self._known_signal.get(block_id, SignalState.RED)
             switch_pos = None
@@ -121,172 +114,132 @@ class TrackControllerBackend:
                 if cblock == block_id:
                     crossing_status = self.crossings.get(cid)
                     break
-            status = WaysideStatusUpdate(
-                block_id=block_id,
-                occupied=occupied,
-                signal_state=signal,
-                switch_position=switch_pos,
-                crossing_status=crossing_status
-            )
+            status = WaysideStatusUpdate(block_id=block_id, occupied=occupied, signal_state=signal, switch_position=switch_pos, crossing_status=crossing_status) # sue me, idc :D
             status_updates.append(status)
         try:
             if hasattr(self.ctc_backend, 'receive_wayside_status'):
                 self.ctc_backend.receive_wayside_status(self.line_name, status_updates)
-                logger.debug("%s: Sent %d status updates to CTC", self.line_name, len(status_updates))
+                logger.debug("%s: sent %d status updates to CTC", self.line_name, len(status_updates))
             else:
                 for status in status_updates:
                     self._send_single_status_to_ctc(status)
-        except Exception:
-            logger.exception("%s: Failed to send status to CTC", self.line_name)
+        except Exception: logger.exception("%s: failed to send status to CTC", self.line_name)
     
     def _send_single_status_to_ctc(self, status: WaysideStatusUpdate) -> None:
-        if self.ctc_backend is None:
-            return
+        if self.ctc_backend is None: return
         try:
-            if hasattr(self.ctc_backend, 'update_block_occupancy'):
-                self.ctc_backend.update_block_occupancy(self.line_name, status.block_id, status.occupied)
-            
-            if hasattr(self.ctc_backend, 'update_signal_state'):
-                self.ctc_backend.update_signal_state(self.line_name, status.block_id, status.signal_state)
-            
-            if status.switch_position is not None and hasattr(self.ctc_backend, 'update_switch_position'):
-                self.ctc_backend.update_switch_position(self.line_name, status.block_id, status.switch_position)
-            
-            if status.crossing_status is not None and hasattr(self.ctc_backend, 'update_crossing_status'):
-                self.ctc_backend.update_crossing_status(self.line_name, status.block_id, status.crossing_status)
-        except Exception:
-            logger.exception("%s: Failed to send single status for block %d", 
-                           self.line_name, status.block_id)
+            if hasattr(self.ctc_backend, 'update_block_occupancy'): self.ctc_backend.update_block_occupancy(self.line_name, status.block_id, status.occupied)
+            if hasattr(self.ctc_backend, 'update_signal_state'): self.ctc_backend.update_signal_state(self.line_name, status.block_id, status.signal_state)
+            if status.switch_position is not None and hasattr(self.ctc_backend, 'update_switch_position'):self.ctc_backend.update_switch_position(self.line_name, status.block_id, status.switch_position) # ngl this one is bad, fr sue me on this one lol
+            if status.crossing_status is not None and hasattr(self.ctc_backend, 'update_crossing_status'): self.ctc_backend.update_crossing_status(self.line_name, status.block_id, status.crossing_status)
+        except Exception: logger.exception("%s: failed to send status for block %d. pls fix.", self.line_name, status.block_id)
 
     def _initialize_infrastructure(self) -> None:
-        for sid in self.switch_map:
-            self.switches[sid] = 0
-        for cid in self.crossing_blocks:
-            self.crossings[cid] = False
+        for sid in self.switch_map: self.switches[sid] = 0
+        for cid in self.crossing_blocks: self.crossings[cid] = False
 
     def _initial_sync(self) -> None:
-        logger.info("Starting initial sync with Track Model for %s", self.line_name)
+        logger.info("sync with Track Model for %s", self.line_name)
         try:
-            if not hasattr(self.track_model, "get_wayside_status"):
-                logger.warning("Track Model does not have get_wayside_status(), skipping sync")
-                return  
             status = self.track_model.get_wayside_status()
             if isinstance(status, dict) and "segments" in status:
                 segments = status.get("segments", {})
                 for block_id, info in segments.items():
-                    try:
-                        bid = int(block_id)
-                    except:
-                        continue
-                    if bid not in self._line_block_ids():
-                        continue
-                    if not isinstance(info, dict):
-                        continue
+                    try: bid = int(block_id)
+                    except: continue
+                    if bid not in self._line_block_ids(): continue
+                    if not isinstance(info, dict): continue
                     if "occupied" in info:
                         self._known_occupancy[bid] = bool(info["occupied"])
-                        logger.debug("Synced block %d occupancy: %s", bid, info["occupied"])
+                        logger.debug("block %d occupancy: %s", bid, info["occupied"])
                     if "signal_state" in info:
                         self._known_signal[bid] = info["signal_state"]
-                        logger.debug("Synced block %d signal: %s", bid, info["signal_state"])
+                        logger.debug("block %d signal: %s", bid, info["signal_state"])
                     if "current_position" in info and bid in self.switches:
                         self.switches[bid] = int(info["current_position"])
-                        logger.debug("Synced switch %d position: %d", bid, self.switches[bid])
+                        logger.debug("switch %d position: %d", bid, self.switches[bid])
                     if "gate_status" in info:
                         for cid, cblock in self.crossing_blocks.items():
                             if cblock == bid:
                                 self.crossings[cid] = bool(info["gate_status"])
                                 logger.debug("Synced crossing %d status: %s", cid, self.crossings[cid])
-            logger.info("Initial sync completed for %s", self.line_name)
-        except Exception:
-            logger.exception("Failed to perform initial sync with track model")
+            logger.info("sync completed for %s", self.line_name)
+        except Exception: logger.exception("failed to sync with track model. pls fix")
 
     def receive_model_update(self, block_id: int, attribute: str, value: Any) -> None:
         msg = TrackModelMessage(block_id, attribute, value)
         self.incoming_messages.append(msg)
-        logger.info("Received Track Model update: block=%d, attr=%s, value=%s", block_id, attribute, value)
+        logger.info("received Track Model update: block=%d, attr=%s, value=%s. yippee", block_id, attribute, value)
         self._process_next_model_message()
 
     def _process_next_model_message(self) -> None:
-        if not self.incoming_messages:
-            return
+        if not self.incoming_messages: return
         msg = self.incoming_messages.popleft()
-        match msg.attribute.lower():
-            case "occupancy":
+        match msg.attribute.lower(): # if you need to to explain how this work to anyone reading the code who doesnt know python(the match and case stuff), ask me on discord. in a nutshell it is if/elif/else but fancier. i just wanted to test it
+            case "occupancy": 
                 self._update_occupancy_from_model(msg.block_id, bool(msg.value))
             case "signal":
                 self._known_signal[msg.block_id] = msg.value
-                logger.info("Signal %d state updated from model -> %s", msg.block_id, msg.value)
+                logger.info("signal %d state updated: %s", msg.block_id, msg.value)
             case "switch":
                 self.switches[msg.block_id] = int(msg.value)
-                logger.info("Switch %d position updated from model -> %d", msg.block_id, msg.value)
+                logger.info("switch %d position updated: %d", msg.block_id, msg.value)
             case "crossing":
                 for cid, cblock in self.crossing_blocks.items():
-                    if cblock == msg.block_id:
-                        self.crossings[cid] = bool(msg.value)
-                logger.info("Crossing at block %d status updated from model -> %s", msg.block_id, msg.value)
-            case _:
-                logger.warning("Unknown Track Model attribute: %s", msg.attribute)
+                    if cblock == msg.block_id: self.crossings[cid] = bool(msg.value)
+                logger.info("crossing %d status updated: %s", msg.block_id, msg.value)
+            case _: logger.warning("unknown Track Model attribute: %s", msg.attribute)
         self._notify_listeners()
         self._send_status_to_ctc()
 
     def set_commanded_speed(self, block_id: int, speed_mps: int) -> None:
         if block_id not in self._line_block_ids():
-            logger.warning("Cannot set commanded speed: block %d not in %s", block_id, self.line_name)
+            logger.warning("cannot set commanded speed: block %d not in %s", block_id, self.line_name)
             return
         self._commanded_speed_mps[block_id] = speed_mps
         self._known_commanded_speed[block_id] = speed_mps
-        logger.info("[%s] Commanded speed -> block %d = %d m/s", 
-                self.line_name, block_id, speed_mps)
+        logger.info("[%s] commanded speed: block %d = %d m/s", self.line_name, block_id, speed_mps)
         try:
             auth_m = self._commanded_auth_m.get(block_id, 0)
-            self.track_model.broadcast_train_command(
-                block_id, int(speed_mps), int(auth_m))
-            logger.info("Sent to Track Model: block %d, speed=%d m/s, auth=%d m", 
-                    block_id, int(speed_mps), int(auth_m))
-        except Exception as e:
-            logger.warning("Track Model rejected commanded speed for block %d: %s", block_id, e)
+            self.track_model.broadcast_train_command(block_id, int(speed_mps), int(auth_m))
+            logger.info("sent to Track Model: block %d, speed=%d m/s, auth=%d m", block_id, int(speed_mps), int(auth_m))
+        except Exception as e: logger.warning("Track Model dont like commanded speed for block %d: %s", block_id, e)
         self._notify_listeners()
 
     def set_commanded_authority(self, block_id: int, authority_m: int) -> None:
         if block_id not in self._line_block_ids():
-            logger.warning("Cannot set commanded authority: block %d not in %s", block_id, self.line_name)
+            logger.warning("cannot set commanded authority: block %d not in %s", block_id, self.line_name)
             return
         self._commanded_auth_m[block_id] = authority_m
         self._known_commanded_auth[block_id] = authority_m
-        logger.info("[%s] Commanded authority -> block %d = %d m", 
-                self.line_name, block_id, authority_m)
+        logger.info("[%s] commanded authority -> block %d = %d m", self.line_name, block_id, authority_m)
         try:
             speed_mps = self._commanded_speed_mps.get(block_id, 0)
             self.track_model.broadcast_train_command(block_id, int(speed_mps), int(authority_m))
-            logger.info("Sent to Track Model: block %d, speed=%d m/s, auth=%d m", block_id, int(speed_mps), int(authority_m))
-        except Exception as e:
-            logger.warning("Track Model rejected commanded authority for block %d: %s", block_id, e)
+            logger.info("sent to Track Model: block %d, speed=%d m/s, auth=%d m", block_id, int(speed_mps), int(authority_m))
+        except Exception as e: logger.warning("Track Model rejected commanded authority for block %d: %s", block_id, e)
         self._notify_listeners()
 
     def upload_plc(self, filepath: str) -> None:
-        if not self.maintenance_mode:
-            raise PermissionError("Must be in maintenance mode to upload PLC")
+        if not self.maintenance_mode: raise PermissionError("be in maintenance mode to upload PLC")
         ext = os.path.splitext(filepath)[1].lower()
-        logger.info("Uploading PLC file: %s", filepath)
-        if ext == ".py":
-            self._upload_plc_python(filepath)
-        else:
-            self._upload_plc_text(filepath)
+        logger.info("uploading PLC file: %s", filepath)
+        if ext == ".py": self._upload_plc_python(filepath)
+        else: self._upload_plc_text(filepath)
         self._sync_after_plc_upload()
         self._notify_listeners()
         self._send_status_to_ctc()
-        logger.info("PLC upload completed for %s", self.line_name)
+        logger.info("PLC uploaded for %s", self.line_name)
 
     def _upload_plc_python(self, filepath: str) -> None:
         spec = importlib.util.spec_from_file_location("plc_module", filepath)
         if spec is None or spec.loader is None:
-            logger.error("Could not load PLC module from %s", filepath)
+            logger.error("could not load PLC module from %s", filepath)
             return
         plc_module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(plc_module)
+        try: spec.loader.exec_module(plc_module)
         except Exception:
-            logger.exception("Failed to execute PLC Python file %s", filepath)
+            logger.exception("failed to execute PLC Python file %s", filepath)
             return
         for name, value in vars(plc_module).items():
             lname = name.lower()
@@ -295,16 +248,13 @@ class TrackControllerBackend:
                     parts = lname.split("_")
                     if len(parts) >= 3:
                         block_id = int(parts[1])
-                        if block_id in self._line_block_ids():
-                            self.set_block_occupancy(block_id, bool(value))
+                        if block_id in self._line_block_ids(): self.set_block_occupancy(block_id, bool(value))
                     continue
                 if lname.startswith("switch_"):
                     sid = int(lname.split("_")[1])
                     if sid in self.switches:
-                        if isinstance(value, bool):
-                            pos = 0 if value else 1
-                        elif isinstance(value, int):
-                            pos = value
+                        if isinstance(value, bool): pos = 0 if value else 1
+                        elif isinstance(value, int): pos = value
                         else:
                             pos_str = str(value).title()
                             pos = 0 if pos_str == "Normal" else 1
@@ -313,8 +263,7 @@ class TrackControllerBackend:
                 if lname.startswith("crossing_"):
                     cid = int(lname.split("_")[1])
                     if cid in self.crossings:
-                        if isinstance(value, bool):
-                            status = value
+                        if isinstance(value, bool): status = value
                         else:
                             status_str = str(value).title()
                             status = True if status_str == "Active" else False
@@ -328,9 +277,7 @@ class TrackControllerBackend:
                         self.set_commanded_speed(block_id, int(speed_mps))
                         logger.info("PLC: Set block %d speed: %d mph -> %d m/s", block_id, int(speed_mph), int(speed_mps))
                     continue
-                if (lname.startswith("commanded_auth_") or 
-                    lname.startswith("cmd_auth_") or 
-                    lname.startswith("commanded_authority_")):
+                if (lname.startswith("commanded_auth_") or lname.startswith("cmd_auth_") or lname.startswith("commanded_authority_")):
                     block_id = int(lname.split("_")[-1])
                     if block_id in self._line_block_ids():
                         auth_yd = float(value)
@@ -341,10 +288,8 @@ class TrackControllerBackend:
                 if lname.startswith("signal_"):
                     block_id = int(lname.split("_")[1])
                     if block_id in self._line_block_ids():
-                        if isinstance(value, SignalState):
-                            self.set_signal(block_id, value)
-                        else:
-                            self.set_signal(block_id, str(value))
+                        if isinstance(value, SignalState): self.set_signal(block_id, value)
+                        else: self.set_signal(block_id, str(value))
                     continue
             except Exception:
                 logger.exception("PLC variable handling failed for %s=%r", name, value)
@@ -352,15 +297,13 @@ class TrackControllerBackend:
 
     def _upload_plc_text(self, filepath: str) -> None:
         try:
-            with open(filepath, "r") as f:
-                lines = f.read().splitlines()
+            with open(filepath, "r") as f: lines = f.read().splitlines()
         except FileNotFoundError:
             logger.error("PLC file not found: %s", filepath)
             return
         for line_num, line in enumerate(lines, 1):
             parts = line.split()
-            if not parts or line.strip().startswith("#"):
-                continue
+            if not parts or line.strip().startswith("#"): continue
             cmd = parts[0].upper()
             try:
                 if cmd == "SWITCH" and len(parts) >= 3:
@@ -375,18 +318,15 @@ class TrackControllerBackend:
                 elif cmd == "CROSSING" and len(parts) >= 3:
                     cid = int(parts[1])
                     if cid in self.crossings:
-                        if parts[2].lower() in ('true', 'false'):
-                            status = parts[2].lower() == 'true'
+                        if parts[2].lower() in ('true', 'false'): status = parts[2].lower() == 'true'
                         else:
                             status_str = parts[2].title()
                             status = True if status_str == "Active" else False
                         self._plc_set_crossing(cid, status)
                 elif cmd == "SIGNAL" and len(parts) >= 3:
                     bid = int(parts[1])
-                    if bid in self._line_block_ids():
-                        self.set_signal(bid, parts[2])
-                    else:
-                        logger.debug("TXT PLC SIGNAL for block %d ignored (not part of %s)", bid, self.line_name)
+                    if bid in self._line_block_ids(): self.set_signal(bid, parts[2])
+                    else: logger.debug("TXT PLC SIGNAL for block %d ignored (not part of %s)", bid, self.line_name)
                 elif cmd == "CMD_SPEED" and len(parts) >= 3:
                     bid = int(parts[1])
                     if bid in self._line_block_ids():
@@ -394,8 +334,7 @@ class TrackControllerBackend:
                         speed_mps = ConversionFunctions.mph_to_mps(speed_mph)
                         self.set_commanded_speed(bid, int(speed_mps))
                         logger.info("TXT PLC: Set block %d speed: %d mph -> %d m/s", bid, int(speed_mph), int(speed_mps))
-                    else:
-                        logger.debug("TXT PLC CMD_SPEED for block %d ignored (not part of %s)", bid, self.line_name)
+                    else: logger.debug("TXT PLC CMD_SPEED for block %d ignored (not part of %s)", bid, self.line_name)
                 elif cmd == "CMD_AUTH" and len(parts) >= 3:
                     bid = int(parts[1])
                     if bid in self._line_block_ids():
@@ -403,8 +342,7 @@ class TrackControllerBackend:
                         auth_m = ConversionFunctions.yards_to_meters(auth_yd)
                         self.set_commanded_authority(bid, int(auth_m))
                         logger.info("TXT PLC: Set block %d auth: %d yd -> %d m", bid, int(auth_yd), int(auth_m))
-                    else:
-                        logger.debug("TXT PLC CMD_AUTH for block %d ignored (not part of %s)", bid, self.line_name)                        
+                    else: logger.debug("TXT PLC CMD_AUTH for block %d ignored (not part of %s)", bid, self.line_name)                        
             except Exception:
                 logger.exception("PLC line %d failed: %s", line_num, line)
                 continue
@@ -463,10 +401,11 @@ class TrackControllerBackend:
             if cblock == block_id:
                 try:
                     seg = self.track_model.segments.get(block_id)
-                    if seg and isinstance(seg, TrackNetwork):
+                    if seg and hasattr(seg, 'set_gate_status'):
                         seg.set_gate_status(occupied)
                         self.crossings[cid] = occupied
-                        logger.info("Auto-managed crossing %d gates: %s (block %d occupancy=%s)", cid, self.crossings[cid], block_id, occupied)
+                        logger.info("Auto-managed crossing %d gates: %s (block %d occupancy=%s)", 
+                                cid, self.crossings[cid], block_id, occupied)
                 except Exception:
                     logger.exception("Failed to auto-update crossing gate for block %d", block_id)
         if occupied:
@@ -538,6 +477,7 @@ class TrackControllerBackend:
                                 self.crossings[cid] = current_gate
                                 logger.info("Crossing %d status updated from model -> %s", cid, current_gate)
                                 state_changed = True
+                                break 
                 if hasattr(segment, 'active_command') and segment.active_command:
                     cmd = segment.active_command
                     if hasattr(cmd, 'commanded_speed') and cmd.commanded_speed:
@@ -725,14 +665,20 @@ class TrackControllerBackend:
         if block and block in self.track_model.segments:
             if getattr(self.track_model.segments[block], 'occupied', False):
                 if not stat_bool:
-                    raise SafetyException(f"Cannot set crossing {crossing_id} inactive you dumb ass: block {block} occupied")
+                    raise SafetyException(
+                        f"Cannot set crossing {crossing_id} inactive: block {block} occupied")
         self.crossings[crossing_id] = stat_bool
         if block:
             try:
-                self.track_model.set_gate_status(block, stat_bool)
-                logger.info("Track Model: Crossing %d (block %d): %s", crossing_id, block, stat_bool)
+                seg = self.track_model.segments[block]
+                if hasattr(seg, 'set_gate_status'):
+                    seg.set_gate_status(stat_bool)
+                    logger.info("Track Model: Crossing %d (block %d) gate status set to: %s", 
+                            crossing_id, block, stat_bool)
+                else:
+                    logger.warning("Block %d does not have set_gate_status method", block)
             except Exception as e:
-                logger.warning("Failed to set crossing %d: %s", crossing_id, e)
+                logger.warning("Failed to set crossing %d in track model: %s", crossing_id, e)
         self._notify_listeners()
         self._send_status_to_ctc()
 
@@ -765,14 +711,19 @@ class TrackControllerBackend:
             stat_bool = bool(status)
         self.crossings[crossing_id] = stat_bool
         block = self.crossing_blocks.get(crossing_id)
-        if block:
+        if block and block in self.track_model.segments:
             try:
-                self.track_model.set_gate_status(block, stat_bool)
-                logger.info("PLC set crossing %d (block %d): %s", crossing_id, block, stat_bool)
+                seg = self.track_model.segments[block]
+                if hasattr(seg, 'set_gate_status'):
+                    seg.set_gate_status(stat_bool)
+                    logger.info("PLC set crossing %d (block %d): %s", crossing_id, block, stat_bool)
+                else:
+                    logger.warning("Block %d is not a level crossing", block)
             except Exception as e:
                 logger.warning("Failed to set crossing %d: %s", crossing_id, e)
+        else: logger.warning("Crossing %d has no valid block mapping or block not in track model", crossing_id)
 
-class Failures: 
+class FailuresShit: 
     def __init__(self, *args, **MaBallz):
         super().__init__(*args, **MaBallz)
         self.failures: Dict[int, FailureRecord] = {}

@@ -295,6 +295,7 @@ if __name__ == "__main__":
     # trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed
     controllers = {
         "Green Line": TrackControllerBackend(network, "Green Line"),
+        "Red Line": TrackControllerBackend(network, "Red Line")
         }
     for ctrl in controllers.values(): 
         ctrl.start_live_link(poll_interval=1.0)

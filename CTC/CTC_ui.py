@@ -174,18 +174,40 @@ class CTCWindow(QtWidgets.QMainWindow):
         """Refresh occupancy + signals from backend."""
         if line_name != self.state.line_name:
             self.state.set_line(line_name, LINE_DATA[line_name])
+
         blocks = self.state.get_blocks()
         self.mapTable.setRowCount(len(blocks))
 
         for r, b in enumerate(blocks):
+            # --- Pull real segment from TrackModel ---
+            seg = self.state.track_model.segments.get(b.block_id)
+            
+            # --- Determine switch display text ---
+            if seg and seg.__class__.__name__ == "TrackSwitch":
+                if seg.current_position == 0:
+                    switch_text = "Straight"
+                else:
+                    switch_text = "Diverging"
+            else:
+                switch_text = ""  # Non-switch blocks
+
             rowdata = [
-                b.section, b.block_id, b.status, b.station,
-                b.station_side, b.switch, b.light,
-                ("Yes" if b.crossing else ""), f"{b.speed_limit:.0f} km/h"
+                b.section,
+                b.block_id,
+                b.status,
+                b.station,
+                b.station_side,
+                switch_text,                     # ⭐ FIXED SWITCH COLUMN
+                b.light,
+                ("Yes" if b.crossing else ""),
+                f"{b.speed_limit * 0.621371:.0f} mph"
             ]
+
             for c, value in enumerate(rowdata):
                 item = QtWidgets.QTableWidgetItem(str(value))
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+                # --- STATUS COLORING ---
                 if c == 2:
                     if b.status == "occupied":
                         item.setBackground(QtGui.QColor("red"))
@@ -193,9 +215,14 @@ class CTCWindow(QtWidgets.QMainWindow):
                     elif b.status == "closed":
                         item.setBackground(QtGui.QColor("gray"))
                         item.setForeground(QtGui.QColor("white"))
+
+                # --- SIGNAL LIGHT COLORING ---
                 if c == 6:
                     light = str(value).upper()
-                    if light == "RED":
+
+                    if light == "N/A":
+                        item.setText("")  # hide N/A
+                    elif light == "RED":
                         item.setBackground(QtGui.QColor("#b00020"))
                         item.setForeground(QtGui.QColor("white"))
                     elif light == "YELLOW":
@@ -204,10 +231,14 @@ class CTCWindow(QtWidgets.QMainWindow):
                     elif light == "GREEN":
                         item.setBackground(QtGui.QColor("#1b5e20"))
                         item.setForeground(QtGui.QColor("white"))
+
                 self.mapTable.setItem(r, c, item)
 
+        # Update train info if needed
         if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
             self._populate_train_info_table()
+
+
 
     def _show_dispatch_options(self):
         """Modal dialog: choose Instant vs Scheduled dispatch."""
@@ -287,7 +318,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             # backend function: compute_suggestions(start_block, dest_block)
             speed_mps, auth_m = self.state.compute_suggestions(start_block, dest_block)
 
-            # Convert to mph/yards for user message ONLY
+        
             speed_mph = speed_mps * 2.23693629
             auth_yd = auth_m / 0.9144
 
@@ -426,11 +457,26 @@ class CTCWindow(QtWidgets.QMainWindow):
 
 
     def _toggle_maintenance_mode(self, enabled: bool):
-        self.state.maintenance_enabled = enabled
         print(f"[CTC UI] Maintenance mode {'ENABLED' if enabled else 'DISABLED'}")
 
-        # Disable/enable the maintenance controls
+        # 1️⃣ Update CTC backend internal flag (if you use it)
+        self.state.maintenance_enabled = enabled
+
+        # 2️⃣ Notify software track controller
+        try:
+            self.state.track_controller.set_maintenance_mode(enabled)
+        except Exception as e:
+            print(f"[CTC UI] Failed to notify TrackControllerBackend: {e}")
+
+        # 3️⃣ Notify hardware controller (if exists)
+        try:
+            self.state.track_controller_hw.set_maintenance_mode(enabled)
+        except Exception:
+            pass
+
+        # 4️⃣ Enable maintenance button
         self.maintBtn.setEnabled(enabled)
+
 
     # ---------------------------------------------------------
     # Train Info Page
@@ -443,7 +489,7 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         self.trainInfoTable = QtWidgets.QTableWidget(0, 5)
         self.trainInfoTable.setHorizontalHeaderLabels(
-            ["Train ID", "Current Block", "Speed (mph)", "Authority (m)", "Line"]
+            ["Train ID", "Current Block", "Suggested Speed (mph)", "Suggested Authority (yd)", "Line"]
         )
         self.trainInfoTable.verticalHeader().setVisible(False)
         self.trainInfoTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
@@ -463,12 +509,13 @@ class CTCWindow(QtWidgets.QMainWindow):
             spd_mps = float(t.get("suggested_speed_mps", 0.0))
             mph = spd_mps * MPS_TO_MPH
             auth_m = float(t.get("suggested_authority_m", 0.0))
+            auth_yd = auth_m / 0.9144   
             line = t.get("line", self.state.line_name)
 
             self.trainInfoTable.setItem(r, 0, QtWidgets.QTableWidgetItem(str(tid)))
             self.trainInfoTable.setItem(r, 1, QtWidgets.QTableWidgetItem(str(block)))
             self.trainInfoTable.setItem(r, 2, QtWidgets.QTableWidgetItem(f"{mph:.1f}"))
-            self.trainInfoTable.setItem(r, 3, QtWidgets.QTableWidgetItem(f"{auth_m:.1f}"))
+            self.trainInfoTable.setItem(r, 3, QtWidgets.QTableWidgetItem(f"{auth_yd:.1f}"))
             self.trainInfoTable.setItem(r, 4, QtWidgets.QTableWidgetItem(line))
 
     # ---------------------------------------------------------
@@ -542,15 +589,64 @@ class CTCWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "No Selection", "Select a block first.")
             return
 
-        blk_id = self.mapTable.item(row, 1).text()
+        blk_id = int(self.mapTable.item(row, 1).text())
+
+        # ---- Check if this block is a switch ----
+        seg = self.state.track_model.segments.get(blk_id)
+        is_switch = seg.__class__.__name__ == "TrackSwitch"
+
+        # ============================================================
+        # CASE 1: SWITCH — use TrackControllerBackend.safe_set_switch()
+        # ============================================================
+        if is_switch:
+
+            # Ask the dispatcher for the new position
+            choice, ok = QtWidgets.QInputDialog.getItem(
+                self,
+                f"Switch {blk_id}",
+                "Select switch position:",
+                ["Straight (0)", "Diverging (1)"],
+                0,
+                False
+            )
+
+            if not ok:
+                return
+
+            pos = 0 if "0" in choice else 1
+
+            try:
+                # ⭐⭐ The ONLY correct call ⭐⭐
+                self.state.track_controller.safe_set_switch(blk_id, pos)
+
+                print(f"[CTC] Switch {blk_id} set to position {pos}")
+
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Switch Error",
+                    f"Failed to change switch: {e}"
+                )
+
+            # Refresh UI
+            self._reload_line(self.state.line_name)
+            return
+
+        # ============================================================
+        # CASE 2: NOT A SWITCH → block open/close toggle
+        # ============================================================
         choice, ok = QtWidgets.QInputDialog.getItem(
-            self, "Maintenance", f"Toggle status for block {blk_id}:",
-            ["Open (free)", "Closed"], 0, False
+            self,
+            "Maintenance",
+            f"Toggle status for block {blk_id}:",
+            ["Open (free)", "Closed"],
+            0,
+            False
         )
 
         if ok:
             closed = "Closed" in choice
-            self.state.set_block_closed(int(blk_id), closed)
+            self.state.set_block_closed(blk_id, closed)
             self._reload_line(self.state.line_name)
 
 

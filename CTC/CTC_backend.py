@@ -433,6 +433,8 @@ class TrackState:
         #Store per train suggestion state for resend
         self._train_suggestions: Dict[str, Tuple[float, float]] = {}
         self._train_progress: Dict[str, float] = {}   # cumulative distance per train
+        self._pending_dispatches = []   # stores scheduled manual dispatches
+
 
         self.maintenance_enabled = False
 
@@ -529,6 +531,24 @@ class TrackState:
             return float('inf')
 
         return authority_m / speed_mps
+
+    def schedule_manual_dispatch(self, train_id, start_block, dest_block,
+                                departure_seconds, speed_mph, auth_yd):
+        """
+        Store a scheduled manual dispatch to execute later when the time comes.
+        """
+        entry = {
+            "train_id": train_id,
+            "start_block": start_block,
+            "dest_block": dest_block,
+            "departure_seconds": departure_seconds,
+            "speed_mph": speed_mph,
+            "auth_yd": auth_yd
+        }
+
+        self._pending_dispatches.append(entry)
+
+        print(f"[CTC] Scheduled dispatch added → {train_id} at {departure_seconds}s")
 
     # --------------------------------------------------------
     # Line + block table setup for UI
@@ -761,6 +781,31 @@ class TrackState:
         CTC manually synchronizes Track Model + Track Controller.
         """
         current_time = clock.tick()
+
+        # ----------------------------------------------------------
+        #  Scheduled manual dispatches: fire when time is reached
+        # ----------------------------------------------------------
+        current_seconds = clock.get_seconds_since_midnight()
+
+        to_dispatch = []
+        for entry in self._pending_dispatches:
+            if current_seconds >= entry["departure_seconds"]:
+                to_dispatch.append(entry)
+
+        # Perform dispatches
+        for entry in to_dispatch:
+            print(f"[CTC] Executing scheduled dispatch → {entry['train_id']}")
+
+            self.dispatch_train(
+                entry["train_id"],
+                entry["start_block"],
+                entry["dest_block"],
+                entry["speed_mph"],
+                entry["auth_yd"]
+            )
+
+            self._pending_dispatches.remove(entry)
+
 
         # --- 1. Update Track Model (moves trains + occupancy) ---
         try:

@@ -66,6 +66,14 @@ class GlobalClock:
     def get_time_string(self) -> str:
         return self.current_time.strftime("%I:%M:%S %p")
 
+    def get_seconds_since_midnight(self) -> int:
+        """
+        Returns total seconds since 00:00 of the simulated day.
+        Useful for scheduled dispatch logic.
+        """
+        t = self.current_time
+        return t.hour * 3600 + t.minute * 60 + t.second
+
     def register_listener(self, callback: Callable[[datetime.datetime], None]):
         """Module (like Track Model) calls once to receive time updates."""
         if callback not in self._listeners:

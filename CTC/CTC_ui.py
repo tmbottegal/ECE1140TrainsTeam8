@@ -427,19 +427,27 @@ class CTCWindow(QtWidgets.QMainWindow):
 
 
             # 3. Dispatch train exactly like instant dispatch
-            self.state.dispatch_train(train_id, start_block, dest_block, speed_mph, auth_yd)
+            self.state.schedule_manual_dispatch(
+                train_id,
+                start_block,
+                dest_block,
+                departure_seconds,
+                speed_mph,
+                auth_yd
+            )
+
 
 
             # 4. Feedback
             QtWidgets.QMessageBox.information(
-                self, "Scheduled Train Dispatched",
-                f"{train_id} dispatched at block {start_block}\n"
+                self, "Scheduled Train Added",
+                f"{train_id} scheduled for dispatch at {departure_time_str}\n"
                 f"Destination: {dest_station} (Block {dest_block})\n"
                 f"Arrival Time: {arrival_time}\n"
-                f"DEPARTURE TIME NEEDED: {departure_time_str}\n"
                 f"Speed: {speed_mph:.1f} mph\n"
                 f"Authority: {auth_yd:.1f} yd"
             )
+
 
             dialog.accept()
 

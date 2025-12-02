@@ -40,13 +40,13 @@ class GlobalClock:
             except Exception as e:
                 print(f"[GlobalClock] listener error: {e}")
 
-    def run(self):
+    #def run(self):
         """Continuously tick every real second."""
-        self.running = True
-        while self.running:
-            self.tick()
-            # Real-time sleep (UI stays smooth)
-            time.sleep(1 / max(self.time_multiplier, 1e-6))
+        #self.running = True
+        #while self.running:
+         #   self.tick()
+         #   # Real-time sleep (UI stays smooth)
+         #   time.sleep(1 / max(self.time_multiplier, 1e-6))
 
 
     def stop(self):

@@ -44,6 +44,47 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mode_toggle_button.setStyleSheet("background-color: lightblue; font-weight: bold;")
         self.mode_toggle_button.toggled.connect(self.toggle_mode)
 
+                # === CLOCK CONTROL TOOLBAR ===
+        clock_toolbar = QtWidgets.QToolBar("Clock Control")
+        clock_toolbar.setMovable(False)
+        clock_toolbar.setStyleSheet("QToolBar { spacing: 10px; }")
+
+        # Buttons
+        self.clock_start_btn = QtWidgets.QPushButton("Start")
+        self.clock_pause_btn = QtWidgets.QPushButton("Pause")
+        self.clock_normal_btn = QtWidgets.QPushButton("1× Speed")
+        self.clock_fast_btn = QtWidgets.QPushButton("10× Speed")
+
+        
+    
+
+
+        for btn in (self.clock_start_btn, self.clock_pause_btn, self.clock_normal_btn, self.clock_fast_btn):
+            btn.setMinimumWidth(90)
+            btn.setStyleSheet("font-weight:bold; font-size:12px;")
+
+        # Add to toolbar
+        clock_toolbar.addWidget(self.clock_start_btn)
+        clock_toolbar.addWidget(self.clock_pause_btn)
+        clock_toolbar.addSeparator()
+        clock_toolbar.addWidget(self.clock_normal_btn)
+        clock_toolbar.addWidget(self.clock_fast_btn)
+
+        # Add toolbar to window
+        self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, clock_toolbar)
+
+        # === CONNECT BUTTONS TO GLOBAL CLOCK ===
+        self.clock_start_btn.clicked.connect(lambda: clock.resume())
+        self.clock_pause_btn.clicked.connect(lambda: clock.pause())
+        self.clock_normal_btn.clicked.connect(lambda: clock.set_speed(1.0))
+        self.clock_fast_btn.clicked.connect(lambda: clock.set_speed(10.0))
+
+        self.clock_start_btn.clicked.connect(self._resume_sim)
+        self.clock_pause_btn.clicked.connect(self._pause_sim)
+        self.clock_normal_btn.clicked.connect(lambda: clock.set_speed(1.0))
+        self.clock_fast_btn.clicked.connect(lambda: clock.set_speed(10.0))
+
+
         # === Maintenance Mode Toggle (independent from Auto/Manual) ===
         self.maintenance_mode = False
         self.maint_checkbox = QtWidgets.QCheckBox("Maintenance Mode")
@@ -485,6 +526,19 @@ class CTCWindow(QtWidgets.QMainWindow):
         # 4️⃣ Enable maintenance button
         self.maintBtn.setEnabled(enabled)
 
+        # ---------------------------------------------------------
+    # Simulation Pause / Resume
+    # ---------------------------------------------------------
+    def _pause_sim(self):
+        print("[UI] Simulation paused")
+        self.timer.stop()
+        clock.running = False
+
+    def _resume_sim(self):
+        print("[UI] Simulation resumed")
+        clock.running = True
+        self.timer.start(1000)
+
 
     # ---------------------------------------------------------
     # Train Info Page
@@ -713,7 +767,8 @@ class CTCWindow(QtWidgets.QMainWindow):
     # Global Tick — drives simulation + UI
     # ---------------------------------------------------------
     def _tick(self):
-        """Main simulation tick (runs every second)."""
+
+       
         try:
             # 1️⃣ Advance simulation time (CTC controls all modules)
             self.state.tick_all_modules()

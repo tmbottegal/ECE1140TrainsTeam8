@@ -45,11 +45,34 @@ class GlobalClock:
         self.running = True
         while self.running:
             self.tick()
-            time.sleep(1)
+            # Real-time sleep (UI stays smooth)
+            time.sleep(1 / max(self.time_multiplier, 1e-6))
+
 
     def stop(self):
         """Pause the continuous run loop."""
         self.running = False
+
+        # --------------------------------------------------
+    # New Control Methods
+    # --------------------------------------------------
+    def pause(self):
+        self.running = False
+
+    def resume(self):
+        self.running = True
+
+    def set_speed(self, multiplier: float):
+        """
+        Set how fast simulation time advances.
+        multiplier = 1.0 → real time
+        multiplier = 10.0 → 10× faster
+        multiplier = 0.0 → frozen (same as pause)
+        """
+        if multiplier < 0:
+            multiplier = 0.0
+        self.time_multiplier = multiplier
+        print(f"[GlobalClock] Speed set to {multiplier}×")
 
     # ---- manual + info ----
     def set_time(self, hour: int, minute: int, second: int = 0):

@@ -272,6 +272,15 @@ LINE_DATA = {
 
 GREEN_LINE_DATA = LINE_DATA["Green Line"]
 
+SW_RANGES = list(range(1, 63)) + list(range(122, 151))
+HW_RANGES = list(range(63, 122))
+
+def controller_for_block(block_id: int, sw, hw):
+    """Return the correct controller (SW or HW) for a given block ID."""
+    if block_id in SW_RANGES:
+        return sw
+    return hw
+
 
 
 # ------------------------------------------------------------
@@ -452,71 +461,66 @@ class TrackState:
             raise ValueError(f"Invalid mode '{mode}'")
         self.mode = mode
         print(f"[CTC Backend] Mode set to {mode.upper()}")
-
+   
     def compute_suggestions(self, start_block: int, dest_block: int):
         """
-        Compute suggested speed (m/s) and total authority (m)
-        using REAL block data from TrackModel:
-            - actual block length (m)
-            - official time-to-traverse (s)
-            - speed_limit (km/h)
-        And pick the SAFEST speed:
-            speed_mps = min(speed_from_limit, speed_from_traverse_time)
+        Compute suggested speed (m/s) and total authority (m) using the REAL graph path,
+        not block-number ranges.
         """
 
-        # --- 1) Pull track model segments ---
         tm = self.track_model.segments
 
-        # Ensure both blocks exist in TrackModel
+        # --- Validate blocks exist ---
         if start_block not in tm or dest_block not in tm:
             print("[CTC] Warning: compute_suggestions using fallback values")
             return LINE_SPEED_LIMIT_MPS, 50.0
 
-        # --- 2) Determine direction ---
-        if dest_block >= start_block:
-            block_range = range(start_block, dest_block + 1)
-        else:
-            block_range = range(dest_block, start_block + 1)
+        # --- NEW: use real graph traversal ---
+        path = self.find_path(start_block, dest_block)
+        print(f"[DEBUG] Path for {start_block} → {dest_block}: {path}")
+        # If start and destination are the same block → no authority needed
+        if start_block == dest_block:
+            return LINE_SPEED_LIMIT_MPS, 0.0
+
+
+
+        if not path:
+            print(f"[CTC] No path {start_block} → {dest_block}, fallback used.")
+            return LINE_SPEED_LIMIT_MPS, 50.0
 
         total_authority_m = 0.0
         possible_speeds = []
 
-        for bid in block_range:
+        # Iterate actual path blocks, NOT a numeric range
+        for bid in path[:-1]:
             seg = tm.get(bid)
             if not seg:
                 continue
 
-            # (A) Real block length from TrackModel
+            # (A) Real length (meters)
             length_m = seg.length
 
-            # (B) Excel speed limit (km/h → m/s)
-            speed_from_limit = seg.speed_limit / 3.6  
+            # (B) TrackModel’s speed limit (already m/s)
+            speed_from_limit = seg.speed_limit
 
-            # (C) Excel traverse time column
-            # We store traverse time inside the beacon_data, or you can
-            # store it elsewhere — adjust this line if needed.
+            # (C) Traverse time
             try:
-                # EXAMPLE: beacon_data = "t=8.0" or "8.0"
                 traverse = float(seg.beacon_data.strip().replace("t=", ""))
             except:
-                # default = time = length/speed_limit
                 traverse = length_m / max(speed_from_limit, 0.1)
 
-            # (D) Compute speed from traversal time
+            # (D) Speed from traverse time
             speed_from_traverse = length_m / max(traverse, 0.1)
 
-            # (E) Select SAFE speed
+            # (E) Choose SAFEST (slowest)
             safe_speed = min(speed_from_limit, speed_from_traverse)
             possible_speeds.append(safe_speed)
 
             # (F) Accumulate authority
             total_authority_m += length_m
 
-        # Final suggested speed = slowest safe speed on entire path
-        if possible_speeds:
-            suggested_speed_mps = min(possible_speeds)
-        else:
-            suggested_speed_mps = LINE_SPEED_LIMIT_MPS
+        # Final speed = bottleneck speed
+        suggested_speed_mps = min(possible_speeds) if possible_speeds else LINE_SPEED_LIMIT_MPS
 
         return suggested_speed_mps, total_authority_m
 
@@ -531,6 +535,51 @@ class TrackState:
             return float('inf')
 
         return authority_m / speed_mps
+
+    def find_path(self, start_block: int, dest_block: int) -> List[int]:
+        """Return the actual connected block path using the track model graph."""
+        from collections import deque
+        
+        tm = self.track_model.segments
+        visited = set()
+        queue = deque([(start_block, [start_block])])
+
+        while queue:
+            block, path = queue.popleft()
+            if block == dest_block:
+                return path
+
+            if block in visited:
+                continue
+            visited.add(block)
+
+            seg = tm.get(block)
+            if not seg:
+                continue
+
+            neighbors = []
+
+            # Straight next
+            if seg.next_segment:
+                neighbors.append(seg.next_segment.block_id)
+
+            # Diverging path (switch)
+            if hasattr(seg, "diverging_segment") and seg.diverging_segment:
+                neighbors.append(seg.diverging_segment.block_id)
+
+            # Previous (reverse direction)
+            if hasattr(seg, "previous_segment") and seg.previous_segment:
+                neighbors.append(seg.previous_segment.block_id)
+
+            for nb in neighbors:
+                if nb not in visited:
+                    queue.append((nb, path + [nb]))
+
+            
+
+        
+
+        return []  # no path found
 
     def schedule_manual_dispatch(self, train_id, start_block, dest_block,
                                 departure_seconds, speed_mph, auth_yd):
@@ -628,8 +677,12 @@ class TrackState:
             self._train_destinations[train_id] = dest_block
 
             # Send to Track Controller (in metric!)
-            self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
-            self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+            #self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+            #self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+
+            controller = controller_for_block(start_block, self.track_controller, self.track_controller_hw)
+            controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+
 
             # Save for per-tick resend
             self._train_suggestions[train_id] = (speed_mps, auth_m)
@@ -678,8 +731,11 @@ class TrackState:
 
                     # Store & push back to both controllers
                     self._train_suggestions[train_id] = (spd, auth)
-                    self.track_controller.receive_ctc_suggestion(seg.block_id, spd, auth)
-                    self.track_controller_hw.receive_ctc_suggestion(seg.block_id, spd, auth)
+                    #self.track_controller.receive_ctc_suggestion(seg.block_id, spd, auth)
+                    #self.track_controller_hw.receive_ctc_suggestion(seg.block_id, spd, auth)
+                    controller = controller_for_block(seg.block_id, self.track_controller, self.track_controller_hw)
+                    controller.receive_ctc_suggestion(seg.block_id, spd, auth)
+
 
                     print(f"[CTC] Block {block_id} reopened — resumed movement for train {train_id}")
 
@@ -721,14 +777,26 @@ class TrackState:
     # --------------------------------------------------------
     # Wayside status callbacks (Track Controller → CTC)
     # --------------------------------------------------------
-    def receive_wayside_status(self, line_name, status_updates):
+    def receive_wayside_status(self, line_name, status_updates, source=None):
         for update in status_updates:
-            self.update_block_occupancy(line_name, update.block_id, update.occupied)
-            self.update_signal_state(line_name, update.block_id, update.signal_state)
+            bid = update.block_id
+
+            # If SW is reporting HW territory → ignore
+            if source == "SW" and bid in HW_RANGES:
+                continue
+
+            # If HW is reporting SW territory → ignore
+            if source == "HW" and bid in SW_RANGES:
+                continue
+
+            # Otherwise accept the update
+            self.update_block_occupancy(line_name, bid, update.occupied)
+            self.update_signal_state(line_name, bid, update.signal_state)
             if update.switch_position is not None:
-                self.update_switch_position(line_name, update.block_id, update.switch_position)
+                self.update_switch_position(line_name, bid, update.switch_position)
             if update.crossing_status is not None:
-                self.update_crossing_status(line_name, update.block_id, update.crossing_status)
+                self.update_crossing_status(line_name, bid, update.crossing_status)
+
 
     def update_block_occupancy(self, line_name, block_id, occupied):
         if line_name in self._lines:
@@ -889,8 +957,12 @@ class TrackState:
                     speed_mps = 0.0
 
                 # Send updated suggestion to both controllers
-                self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
-                self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth)
+                #self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+                #self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth)
+
+                controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+
 
                 # Save updated suggestion
                 self._train_suggestions[train_id] = (speed_mps, new_auth)

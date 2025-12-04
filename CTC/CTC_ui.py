@@ -405,7 +405,12 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         # --- Destination Station (Dropdown) ---
         station_dropdown = QtWidgets.QComboBox()
-        station_names = [b[3] for b in GREEN_LINE_DATA if b[3] != ""]
+        station_names = [
+            seg.station_name 
+            for seg in self.state.track_model.segments.values()
+            if hasattr(seg, "station_name") and seg.station_name
+        ]
+
         station_dropdown.addItems(station_names)
         layout.addRow("Destination Station:", station_dropdown)
 

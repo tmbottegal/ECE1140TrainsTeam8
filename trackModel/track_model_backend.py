@@ -500,7 +500,7 @@ class Station(TrackSegment):
         self.passengers_waiting += count
         pass
 
-    def passengers_boarding(self, train_id: int = -1, 
+    def passengers_boarding(self, train_id: int, 
                           count: Optional[int] = None) -> None:
         """Record passengers boarding. Adds to total number, and passes
         to the Train Model.
@@ -511,8 +511,9 @@ class Station(TrackSegment):
             (If no count argument, randomly generates a number
             between set range.)
         """
-        if train_id is not None and train_id not in self.network.trains:
-            raise ValueError(f"Train ID {train_id} not found in network.")
+        if self.network is not None:
+            if train_id is not None and train_id not in self.network.trains:
+                raise ValueError(f"Train ID {train_id} not found in network.")
         if count is not None and count > self.passengers_waiting:
             raise ValueError("Cannot board more passengers than are waiting.")
         if count is not None and count < 0:
@@ -528,9 +529,10 @@ class Station(TrackSegment):
                 count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        train = self.network.trains.get(train_id)
-        if train is not None:
-            train.passengers_boarding(count)
+        if self.network is not None:
+            train = self.network.trains.get(train_id)
+            if train is not None:
+                train.board_passengers(count)
         pass
         
     def passengers_exiting(self, count: int) -> None:
@@ -1216,6 +1218,8 @@ class TrackNetwork:
         segment = self.segments.get(block_id)
         if segment is None:
             raise ValueError(f"Block ID {block_id} not found in track network.")
+        if not isinstance(segment, TrackSwitch):
+            raise ValueError(f"Block ID {block_id} is not a switch.")
         segment.set_signal_state(signal_state)
         pass
 

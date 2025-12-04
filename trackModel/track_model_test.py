@@ -19,8 +19,12 @@ from track_model_backend import (
     LevelCrossing,
     Station,
     StationSide,
-    TrackFailureType
+    TrackFailureType,
+    Direction
 )
+
+from trainModel.train_model_backend import Train
+
 from typing import List, Dict, Optional
 
 
@@ -28,48 +32,37 @@ from typing import List, Dict, Optional
 Track Segement Individual Testing
 """
 def test_segment_construction() -> None:
-    segment = TrackSegment(1, 100, 30, 2.5, False)
-    
+    segment = TrackSegment(1, 150, 25, 1.5, 25, False, Direction.FORWARD)
     assert segment.block_id == 1
-    assert segment.length == 100.0
-    assert segment.speed_limit == 30
-    assert segment.grade == 2.5
+    assert segment.length == 150.0
+    assert segment.grade == 1.5
+    assert segment.speed_limit == 25
+    assert segment.elevation == 25
     assert not segment.underground
+    assert segment.direction == Direction.FORWARD
     assert not segment.occupied
-    assert segment.signal_state == SignalState.RED
     assert segment.failures == set()
-    assert segment.next_segment is None
     assert segment.previous_segment is None
+    assert segment.next_segment is None
+
 
 def test_set_occupancy() -> None:
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 150, 25, 1.5, 25, False, Direction.FORWARD)
     assert segment.occupied == False
-    
     segment.set_occupancy(True)
     assert segment.occupied == True
-
-def test_set_signal_state() -> None:
-    segment = TrackSegment(1, 100, 30, 2.5, False)
-    assert segment.signal_state == SignalState.RED
-    
-    segment.set_signal_state(SignalState.YELLOW)
-    assert segment.signal_state == SignalState.YELLOW
-    
-    segment.set_signal_state(SignalState.GREEN)
-    assert segment.signal_state == SignalState.GREEN
-    
-    segment.set_signal_state(SignalState.SUPERGREEN)
-    assert segment.signal_state == SignalState.SUPERGREEN
+    segment.set_occupancy(False)
+    assert segment.occupied == False
 
 def test_set_beacon_data() -> None:
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     assert segment.beacon_data == ""
     
     segment.set_beacon_data("test")
     assert segment.beacon_data == "test"
 
 def test_segment_set_track_failure() -> None:
-    segment = TrackSegment(1, 199, 30, 2.5, False)
+    segment = TrackSegment(1, 199, 30, 2.5, 25, False, Direction.FORWARD)
     assert segment.failures == set()
     
     segment.set_track_failure(TrackFailureType.BROKEN_RAIL)
@@ -86,7 +79,7 @@ def test_segment_set_track_failure() -> None:
     assert segment.failures == {TrackFailureType.BROKEN_RAIL, TrackFailureType.POWER_FAILURE, TrackFailureType.TRACK_CIRCUIT_FAILURE}
 
 def test_segment_clear_track_failure() -> None:
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     
     segment.set_track_failure(TrackFailureType.BROKEN_RAIL)
     assert segment.failures == {TrackFailureType.BROKEN_RAIL}
@@ -98,7 +91,7 @@ def test_segment_clear_track_failure() -> None:
     assert segment.failures == set()
 
 def test_close_open() -> None:
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     assert segment.closed == False
     
     segment.close()
@@ -106,17 +99,20 @@ def test_close_open() -> None:
 
     segment.open()
     assert segment.closed == False
+
 """
 Switch Individual Testing
 """
 
 def test_switch_construction() -> None:
-    switch = TrackSwitch(1, 150, 25, 1.5, False)
+    switch = TrackSwitch(1, 150, 25, 2.5, 25, False, Direction.FORWARD)
     assert switch.block_id == 1
     assert switch.length == 150.0
-    assert switch.grade == 1.5
     assert switch.speed_limit == 25
+    assert switch.grade == 2.5
+    assert switch.elevation == 25
     assert not switch.underground
+    assert switch.direction == Direction.FORWARD
     assert not switch.occupied
     assert switch.signal_state == SignalState.RED
     assert switch.failures == set()
@@ -127,18 +123,18 @@ def test_switch_construction() -> None:
     assert switch.previous_segment is None
 
 def test_set_switch_paths() -> None:
-    switch = TrackSwitch(1, 150, 25, 1.5, False)
-    straight_segment = TrackSegment(2, 100, 25, 0, False)
-    diverging_segment = TrackSegment(3, 100, 25, 0, False)
+    switch = TrackSwitch(1, 150, 25, 2.5, 25, False, Direction.FORWARD)
+    straight_segment = TrackSegment(2, 100, 25, 0, 25, False, Direction.FORWARD)
+    diverging_segment = TrackSegment(3, 100, 25, 0, 25, False, Direction.FORWARD)
     
     switch.set_switch_paths(straight_segment, diverging_segment)
     assert switch.straight_segment == straight_segment
     assert switch.diverging_segment == diverging_segment
 
 def test_set_switch_position() -> None:
-    switch = TrackSwitch(1, 150, 25, 1.5, False)
-    straight_segment = TrackSegment(2, 100, 25, 0, False)
-    diverging_segment = TrackSegment(3, 100, 25, 0, False)
+    switch = TrackSwitch(1, 150, 25, 2.5, 25, False, Direction.FORWARD)
+    straight_segment = TrackSegment(2, 100, 25, 0, 25, False, Direction.FORWARD)
+    diverging_segment = TrackSegment(3, 100, 25, 0, 25, False, Direction.FORWARD)
     switch.set_switch_paths(straight_segment, diverging_segment)
 
     assert switch.current_position == 0
@@ -159,7 +155,7 @@ def test_set_switch_position() -> None:
     assert switch.diverging_signal_state == SignalState.RED
 
 def test_is_straight() -> None:
-    switch = TrackSwitch(1, 150, 25, 1.5, False)
+    switch = TrackSwitch(1, 150, 25, 2.5, 25, False, Direction.FORWARD)
     
     assert switch.is_straight() == True
     
@@ -173,22 +169,23 @@ def test_is_straight() -> None:
 Level Crossing Individual Testing
 """
 def test_level_crossing_construction() -> None:
-    crossing = LevelCrossing(1, 200, 20, 2.5, False)
+    crossing = LevelCrossing(1, 200, 20, 2.5, 25, False, Direction.FORWARD)
     
     assert crossing.block_id == 1
     assert crossing.length == 200.0
     assert crossing.grade == 2.5
+    assert crossing.elevation == 25
     assert crossing.speed_limit == 20
     assert not crossing.underground
     assert not crossing.occupied
-    assert crossing.signal_state == SignalState.RED
+    assert crossing.direction == Direction.FORWARD
     assert crossing.failures == set()
     assert crossing.gate_status == False
     assert crossing.next_segment is None
     assert crossing.previous_segment is None
 
 def test_set_gate_status() -> None:
-    crossing = LevelCrossing(1, 200, 20, 2.5, False)
+    crossing = LevelCrossing(1, 200, 20, 2.5, 25, False, Direction.FORWARD)
     assert crossing.gate_status == False
     
     crossing.set_gate_status(True)
@@ -201,12 +198,15 @@ def test_set_gate_status() -> None:
 Station Individual Testing
 """
 def test_station_construction() -> None:
-    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
     
     assert station.block_id == 2
     assert station.length == 300
     assert station.speed_limit == 69
     assert station.grade == 0
+    assert station.elevation == 0
+    assert not station.underground
+    assert station.direction == Direction.FORWARD
     assert station.station_name == "test"
     assert station.station_side == StationSide.BOTH
     assert station.passengers_waiting == 0
@@ -217,7 +217,7 @@ def test_station_construction() -> None:
     assert station.previous_segment is None
 
 def test_sell_tickets() -> None:
-    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
     assert station.passengers_waiting == 0
     assert station.tickets_sold_total == 0
 
@@ -230,7 +230,7 @@ def test_sell_tickets() -> None:
     assert station.tickets_sold_total > 10
 
 def test_passengers_boarding_valid() -> None:
-    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
     station.sell_tickets(50)
     assert station.passengers_waiting == 50
     assert station.tickets_sold_total == 50
@@ -242,7 +242,7 @@ def test_passengers_boarding_valid() -> None:
     assert station.passengers_waiting < 10
 
 def test_passengers_boarding_invalid() -> None:
-    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
     station.sell_tickets(30)
     assert station.passengers_waiting == 30
     assert station.tickets_sold_total == 30
@@ -256,7 +256,7 @@ def test_passengers_boarding_invalid() -> None:
     assert station.passengers_waiting == 30
 
 def test_passengers_exiting() -> None:
-    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
     assert station.passengers_exited_total == 0
     
     station.passengers_exiting(20)
@@ -266,10 +266,10 @@ Track Network Testing
 """
 def test_add_segment_valid() -> None:
     network = TrackNetwork()
-    segment = TrackSegment(1, 100, 30, 2.5, False)
-    switch = TrackSwitch(2, 150, 25, 1.5, False)
-    crossing = LevelCrossing(3, 200, 20, 2.5, False)
-    station = Station(4, 300, 69, 0, "test", StationSide.BOTH)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
+    switch = TrackSwitch(2, 150, 25, 2.5, 25, False, Direction.FORWARD)
+    crossing = LevelCrossing(3, 200, 20, 2.5, 25, False, Direction.FORWARD)
+    station = Station(4, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
     
     network.add_segment(segment)
     assert network.segments[1] == segment
@@ -289,8 +289,8 @@ def test_add_segment_valid() -> None:
 
 def test_add_segment_invalid() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 2.5, False)
-    segment2 = TrackSegment(1, 150, 25, 1.5, False)  # Duplicate block_id
+    segment1 = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
+    segment2 = TrackSegment(1, 150, 25, 1.5, 25, False, Direction.FORWARD)  # Duplicate block_id
 
     network.add_segment(segment1)
     assert len(network.segments) == 1
@@ -301,12 +301,11 @@ def test_add_segment_invalid() -> None:
 
 def test_connect_segments_segments_valid_single_straight() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
-    segment3 = TrackSegment(3, 100, 30, 0, False)
-    segment4 = TrackSegment(4, 100, 30, 0, False)
-    segment5 = TrackSegment(5, 100, 30, 0, False)
-
+    segment1 = TrackSegment(1, 100, 30, 0, 25, False, Direction.FORWARD)
+    segment2 = TrackSegment(2, 100, 30, 0, 25, False, Direction.FORWARD)
+    segment3 = TrackSegment(3, 100, 30, 0, 25, False, Direction.FORWARD)
+    segment4 = TrackSegment(4, 100, 30, 0, 25, False, Direction.FORWARD)
+    segment5 = TrackSegment(5, 100, 30, 0, 25, False, Direction.FORWARD)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.add_segment(segment3)
@@ -333,12 +332,11 @@ def test_connect_segments_segments_valid_single_straight() -> None:
 
 def test_connect_segments_segments_valid_bi_straight() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
-    segment3 = TrackSegment(3, 100, 30, 0, False)
-    segment4 = TrackSegment(4, 100, 30, 0, False)
-    segment5 = TrackSegment(5, 100, 30, 0, False)
-
+    segment1 = TrackSegment(1, 100, 30, 0, 25, False, Direction.BIDIRECTIONAL)
+    segment2 = TrackSegment(2, 100, 30, 0, 25, False, Direction.BIDIRECTIONAL)
+    segment3 = TrackSegment(3, 100, 30, 0, 25, False, Direction.BIDIRECTIONAL)
+    segment4 = TrackSegment(4, 100, 30, 0, 25, False, Direction.BIDIRECTIONAL)
+    segment5 = TrackSegment(5, 100, 30, 0, 25, False, Direction.BIDIRECTIONAL)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.add_segment(segment3)
@@ -365,12 +363,11 @@ def test_connect_segments_segments_valid_bi_straight() -> None:
 
 def test_connect_segments_segments_valid_single_loop() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
-    segment3 = TrackSegment(3, 100, 30, 0, False)
-    segment4 = TrackSegment(4, 100, 30, 0, False)
-    segment5 = TrackSegment(5, 100, 30, 0, False)
-
+    segment1 = TrackSegment(1, 100, 30, 0, 0, False, Direction.FORWARD)
+    segment2 = TrackSegment(2, 100, 30, 0, 0, False, Direction.FORWARD)
+    segment3 = TrackSegment(3, 100, 30, 0, 0, False, Direction.FORWARD)
+    segment4 = TrackSegment(4, 100, 30, 0, 0, False, Direction.FORWARD)
+    segment5 = TrackSegment(5, 100, 30, 0, 0, False, Direction.FORWARD)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.add_segment(segment3)
@@ -399,12 +396,11 @@ def test_connect_segments_segments_valid_single_loop() -> None:
 
 def test_connect_segments_segments_valid_bi_loop() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
-    segment3 = TrackSegment(3, 100, 30, 0, False)
-    segment4 = TrackSegment(4, 100, 30, 0, False)
-    segment5 = TrackSegment(5, 100, 30, 0, False)
-
+    segment1 = TrackSegment(1, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment2 = TrackSegment(2, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment3 = TrackSegment(3, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment4 = TrackSegment(4, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment5 = TrackSegment(5, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.add_segment(segment3)
@@ -433,9 +429,9 @@ def test_connect_segments_segments_valid_bi_loop() -> None:
 
 def test_connect_segments_switch_valid() -> None:
     network = TrackNetwork()
-    switch = TrackSwitch(1, 150, 25, 1.5, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
-    segment3 = TrackSegment(3, 100, 30, 0, False)
+    switch = TrackSwitch(1, 150, 25, 1.5, 0, False, Direction.BIDIRECTIONAL)
+    segment2 = TrackSegment(2, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment3 = TrackSegment(3, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
 
     network.add_segment(switch)
     network.add_segment(segment2)
@@ -451,10 +447,9 @@ def test_connect_segments_switch_valid() -> None:
 
 def test_connect_segments_invalid() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
-    switch = TrackSwitch(3, 150, 25, 1.5, False)
-
+    segment1 = TrackSegment(1, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment2 = TrackSegment(2, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    switch = TrackSwitch(3, 150, 25, 1.5, 0, False, Direction.BIDIRECTIONAL)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.add_segment(switch)
@@ -474,14 +469,6 @@ def test_connect_segments_invalid() -> None:
     # Invalid connections (to non-switch with diverging segment)
     with pytest.raises(ValueError):
         network.connect_segments(1, 2, diverging_seg_block_id=3, bidirectional=False)
-
-def test_load_track_layout_valid() -> None:
-    #TODO: Implement function before test
-    pass
-
-def test_load_track_layout_invalid() -> None:
-    #TODO: Implement function before test
-    pass
 
 def test_set_environmental_temperature() -> None:
     network = TrackNetwork()
@@ -511,7 +498,7 @@ def test_get_heater_status() -> None:
 
 def test_network_set_track_failure_valid() -> None:
     network = TrackNetwork()
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.BIDIRECTIONAL)
     network.add_segment(segment)
     
     assert segment.failures == set()
@@ -530,7 +517,7 @@ def test_network_set_track_failure_invalid() -> None:
 
 def test_network_clear_track_failure_valid() -> None:
     network = TrackNetwork()
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     network.add_segment(segment)
     network.set_track_failure(block_id=1, failure_type=TrackFailureType.BROKEN_RAIL)
     network.set_track_failure(block_id=1, failure_type=TrackFailureType.POWER_FAILURE)
@@ -550,8 +537,8 @@ def test_network_clear_track_failure_invalid() -> None:
 
 def test_add_failure_log_entry_valid() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
+    segment1 = TrackSegment(1, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment2 = TrackSegment(2, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
     network.add_segment(segment1)
     network.add_segment(segment2)
     assert len(network.failure_log) == 0
@@ -583,8 +570,8 @@ def test_get_failure_log() -> None:
     network = TrackNetwork()
     assert len(network.get_failure_log()) == 0
 
-    segment1 = TrackSegment(1, 100, 30, 0, False)
-    segment2 = TrackSegment(2, 100, 30, 0, False)
+    segment1 = TrackSegment(1, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
+    segment2 = TrackSegment(2, 100, 30, 0, 0, False, Direction.BIDIRECTIONAL)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.add_failure_log_entry(block_id=1, failure_type=TrackFailureType.BROKEN_RAIL, active=True)
@@ -595,7 +582,7 @@ def test_get_failure_log() -> None:
 
 def test_close_open_block_valid() -> None:
     network = TrackNetwork()
-    segment = TrackSegment(1, 100, 30, 2.5, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     network.add_segment(segment)
     
     assert segment.closed == False
@@ -617,30 +604,46 @@ def test_close_open_block_invalid() -> None:
 
 def test_network_set_signal_state_valid() -> None:
     network = TrackNetwork()
-    segment = TrackSegment(1, 100, 30, 2.5, False)
-    network.add_segment(segment)
+    switch = TrackSwitch(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
+    network.add_segment(switch)
     
-    assert segment.signal_state == SignalState.RED
+    assert switch.signal_state == SignalState.RED
     
     network.set_signal_state(block_id=1, signal_state=SignalState.GREEN)
-    assert segment.signal_state == SignalState.GREEN
+    assert switch.signal_state == SignalState.GREEN
     
     network.set_signal_state(block_id=1, signal_state=SignalState.YELLOW)
-    assert segment.signal_state == SignalState.YELLOW
+    assert switch.signal_state == SignalState.YELLOW
     
     network.set_signal_state(block_id=1, signal_state=SignalState.SUPERGREEN)
-    assert segment.signal_state == SignalState.SUPERGREEN
+    assert switch.signal_state == SignalState.SUPERGREEN
 
 def test_network_set_signal_state_invalid() -> None:
     network = TrackNetwork()
-    
+
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
+    network.add_segment(segment)
+    level_crossing = LevelCrossing(2, 150, 25, 1.5, 25, False, Direction.FORWARD)
+    network.add_segment(level_crossing)
+    station = Station(3, 300, 69, 0, 0, False, Direction.FORWARD,"test", StationSide.BOTH)
+    network.add_segment(station)
+
     with pytest.raises(ValueError):
         network.set_signal_state(block_id=99, signal_state=SignalState.GREEN)
 
+    with pytest.raises(ValueError):
+        network.set_signal_state(block_id=1, signal_state=SignalState.GREEN)
+
+    with pytest.raises(ValueError):
+        network.set_signal_state(block_id=2, signal_state=SignalState.GREEN)
+    
+    with pytest.raises(ValueError):
+        network.set_signal_state(block_id=3, signal_state=SignalState.GREEN)
+
 def test_get_network_status() -> None:
     network = TrackNetwork()
-    segment1 = TrackSegment(1, 100, 30, 2.5, False)
-    segment2 = TrackSegment(2, 150, 25, 1.5, False)
+    segment1 = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
+    segment2 = TrackSegment(2, 150, 25, 1.5, 25, False, Direction.FORWARD)
     network.add_segment(segment1)
     network.add_segment(segment2)
     network.set_track_failure(block_id=1, failure_type=TrackFailureType.BROKEN_RAIL)
@@ -664,10 +667,10 @@ def test_get_network_status() -> None:
     
 def test_get_segment_status_valid() -> None:
     network = TrackNetwork()
-    segment = TrackSegment(1, 100, 30, 2.5, False)
-    level_crossing = LevelCrossing(2, 150, 25, 1.5, False)
-    station = Station(3, 300, 69, 0, "test", StationSide.BOTH)
-    switch = TrackSwitch(4, 200, 20, 2.0, False)
+    segment = TrackSegment(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
+    level_crossing = LevelCrossing(2, 150, 25, 1.5, 25, False, Direction.FORWARD)
+    station = Station(3, 300, 69, 0, 0, False, Direction.FORWARD,"test", StationSide.BOTH)
+    switch = TrackSwitch(4, 200, 20, 2.0, 25, False, Direction.FORWARD)
 
 
     network.add_segment(segment)
@@ -688,7 +691,6 @@ def test_get_segment_status_valid() -> None:
     assert status["grade"] == 2.5
     assert status["underground"] == False
     assert status["occupied"] == False
-    assert status["signal_state"] == SignalState.RED
     assert status["failures"] == []
     assert status["closed"] == False
     assert status["next_segment"] == 2
@@ -702,7 +704,6 @@ def test_get_segment_status_valid() -> None:
     assert status["grade"] == 1.5
     assert status["underground"] == False
     assert status["occupied"] == False
-    assert status["signal_state"] == SignalState.RED
     assert status["failures"] == []
     assert status["closed"] == False
     assert status["next_segment"] == 3
@@ -717,7 +718,6 @@ def test_get_segment_status_valid() -> None:
     assert status["grade"] == 0
     assert status["underground"] == False
     assert status["occupied"] == False
-    assert status["signal_state"] == SignalState.RED
     assert status["failures"] == []
     assert status["closed"] == False
     assert status["next_segment"] == 4
@@ -753,25 +753,25 @@ def test_get_segment_status_invalid() -> None:
 
 def test_everything_blueline() -> None:
     network = TrackNetwork()
-    yard = Station(0, 100, 15, 0, "Yard", StationSide.BOTH)
-    a1 = TrackSegment(1, 50, 50, 0, False)
-    a2 = TrackSegment(2, 50, 50, 0, False)
-    a3 = LevelCrossing(3, 50, 50, 0, False)
-    a4 = TrackSegment(4, 50, 50, 0, False)
-    a5 = TrackSwitch(5, 50, 50, 0, False)
+    yard = Station(0, 100, 15, 0, 0, False, Direction.BIDIRECTIONAL, "Yard", StationSide.BOTH)
+    a1 = TrackSegment(1, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    a2 = TrackSegment(2, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    a3 = LevelCrossing(3, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    a4 = TrackSegment(4, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    a5 = TrackSwitch(5, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
     a5.set_switch_position(0)
-    b6 = TrackSegment(6, 50, 50, 0, False)
-    b7 = TrackSegment(7, 50, 50, 0, False)
-    b8 = TrackSegment(8, 50, 50, 0, False)
-    b9 = TrackSegment(9, 50, 50, 0, False)
+    b6 = TrackSegment(6, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    b7 = TrackSegment(7, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    b8 = TrackSegment(8, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    b9 = TrackSegment(9, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
     b9.beacon_data = "NextStation: Station B"
-    b10 = Station(10, 50, 50, 0, "Station B", StationSide.RIGHT)
-    c11 = TrackSegment(11, 50, 50, 0, False)
-    c12 = TrackSegment(12, 50, 50, 0, False)
-    c13 = TrackSegment(13, 50, 50, 0, False)
-    c14 = TrackSegment(14, 50, 50, 0, False)
+    b10 = Station(10, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL, "Station B", StationSide.RIGHT)
+    c11 = TrackSegment(11, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    c12 = TrackSegment(12, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    c13 = TrackSegment(13, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
+    c14 = TrackSegment(14, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL)
     c14.beacon_data = "NextStation: Station C"
-    c15 = Station(15, 50, 50, 0, "Station C", StationSide.RIGHT)
+    c15 = Station(15, 50, 50, 0, 0, False, Direction.BIDIRECTIONAL, "Station C", StationSide.RIGHT)
     
     network.add_segment(yard)
     network.add_segment(a1)
@@ -836,7 +836,7 @@ def test_everything_blueline() -> None:
 
 def test_network_passengers_boarding_invalid() -> None:
     network = TrackNetwork()
-    station = Station(2, 300, 69, 0, "test", StationSide.BOTH)
+    station = Station(2, 300, 69, 0, 0, False, Direction.BIDIRECTIONAL, "test", StationSide.BOTH)
     network.add_segment(station)
 
     with pytest.raises(ValueError):
@@ -844,8 +844,6 @@ def test_network_passengers_boarding_invalid() -> None:
 
     with pytest.raises(ValueError):
         network.passengers_boarding(1, -5, 10)
-
-    #TODO #103 : Add unit tests for new functions in backend
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

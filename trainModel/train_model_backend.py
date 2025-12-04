@@ -586,7 +586,7 @@ class Train:
         """TrackModel calls this at stations to add riders"""
         return self.tm.board_passengers(n)
 
-    def notify_passengers_exiting(self, n: int, station_id: int | str | None = None) -> int:
+    def notify_passengers_exiting(self, n: int, station_id: int | str | None = None) -> int:  #BUG: #148 TrackModel dpes know when the doors are open and will not call this, just call the passengers_exiting function when doors open
         """
         TrackModel calls this when doors open so riders exit
         report throughput back to TrackModel if it exposes passengers_exiting(...).

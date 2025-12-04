@@ -25,7 +25,7 @@ from trackControllerHW.track_controller_hw_backend import build_backend_for_sim,
 
 # Track Model import
 from trackModel.track_model_backend import TrackNetwork
-from trackModel.track_model_frontend import NetworkStatusUI
+from trackModel.track_model_test_frontend import NetworkStatusUI
 
 # Train Model import
 from trainModel.train_model_backend import TrainModelBackend, Train
@@ -287,22 +287,26 @@ GREEN_LINE_DATA = LINE_DATA["Green Line"]
 if __name__ == "__main__":
     
     app = QApplication([])
-    network = TrackNetwork()
-    network.load_track_layout('trackModel/green_line.csv')
-    network.line_name = "MAIN"
+    network1 = TrackNetwork()
+    network1.load_track_layout('trackModel/green_line.csv')
+    network1.line_name = "GREEN LINE"
+    network2 = TrackNetwork()
+    network2.load_track_layout('trackModel/red_line.csv')
+    network2.line_name = "RED LINE"
+
 
     #------------------------------------------------------------------------------------------------
     # trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed
     controllers = {
-        "Green Line": TrackControllerBackend(network, "Green Line"),
-        "Red Line": TrackControllerBackend(network, "Red Line")
+        "Green Line": TrackControllerBackend(network1, "Green Line"),
+        "Red Line": TrackControllerBackend(network2, "Red Line")
         }
     for ctrl in controllers.values(): 
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
     # track controller hw
     hw_controllers = {
-    "Green Line": HardwareTrackControllerBackend(network, "Green Line"),
+    "Green Line": HardwareTrackControllerBackend(network1, "Green Line"),
     # Add Red Line if needed:
     # "Red Line": HardwareTrackControllerBackend(tm, "Red Line"),
 }
@@ -314,10 +318,11 @@ if __name__ == "__main__":
     hw_ui.setWindowTitle("Wayside Controller – Hardware UI")
     hw_ui.show()
     #-----------------------------------------------------------------------------------------------
-    TrackModelUI = NetworkStatusUI(network)
+    TrackModelUI = NetworkStatusUI(network1, network2)
     TrackModelUI.show()
     TrackModelUI.refresh_status()
-    clock.register_listener(network.set_time)
+    clock.register_listener(network1.set_time)
+    clock.register_listener(network2.set_time)
     #-----------------------------------------------------------------------------------------------
     TrackControllerUi = TrackControllerUI(controllers)
     TrackControllerUi.setWindowTitle("Wayside SW Module")
@@ -325,7 +330,7 @@ if __name__ == "__main__":
     TrackControllerUi.refresh_tables()
     #-----------------------------------------------------------------------------------------------
     # === CTC Backend + UI ===
-    ctc_state = TrackState("Green Line", GREEN_LINE_DATA, network)
+    ctc_state = TrackState("Green Line", GREEN_LINE_DATA, network1)
     # Replace its internal controller with the already-created one
     ctc_state.track_controller = controllers["Green Line"]
     controllers["Green Line"].set_ctc_backend(ctc_state)
@@ -339,8 +344,8 @@ if __name__ == "__main__":
     # train model backend + train wrapper + ui
     train_backend = TrainModelBackend() #backend
     train = Train(train_id=99, backend=train_backend) # train object wrapper so it can talk to TrackNetwork
-    network.add_train(train)
-    network.connect_train(99, block_id=1, displacement=0.0) 
+    network1.add_train(train)
+    network1.connect_train(99, block_id=1, displacement=0.0) 
     # choose a starting block for the train on Green Line (adjust block_id/displacement)
     train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
     train_ui.setWindowTitle("Train Model – T1 (Green Line)")

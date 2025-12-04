@@ -29,14 +29,15 @@ from track_model_backend import (
 from typing import List, Dict, Optional
 
 if __name__ == "__main__":
-    #app = QApplication([])
-    network = TrackNetwork()
-    network.load_track_layout('trackModel/green_line.csv')
+    app = QApplication([])
+    network1 = TrackNetwork()
+    network2 = TrackNetwork()
+    network1.load_track_layout('trackModel/red_line.csv')
+    network2.load_track_layout('trackModel/green_line.csv')
     train = Train(1)
-    network.add_train(train)
-    network.connect_train(1, 12, 0.0)
-    network.broadcast_train_command(12, 100, 100)
-    
-    #window = NetworkStatusUI(network)
-    #window.show()
-    #app.exec()
+    network1.add_train(train)
+    network1.connect_train(1, 12, 0.0)
+    network1.broadcast_train_command(12, 100, 100)
+    window = NetworkStatusUI(network1, network2)
+    window.show()
+    app.exec()

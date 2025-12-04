@@ -1321,6 +1321,29 @@ class TrackNetwork:
 
         return segment_status
     
+    def get_train_status(self, train_id: int) -> Dict[str, Any]:
+        """Get status information for a specific train.
+        
+        Args:
+            train_id: The ID of the train to get status for.
+        Returns:
+            Dictionary containing train status information.
+        """
+        train = self.trains.get(train_id)
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        
+        train_status = {
+            "train_id": train.train_id,
+            "current_segment": (
+                train.current_segment.block_id
+                if train.current_segment else None
+            ),
+            "segment_displacement": train.segment_displacement_m,
+        }
+        return train_status
+
+    
     def _get_wayside_segment_status(self, block_id: int) -> Dict[str, Any]:
         """Get status information for a single track segment relevant to wayside operations.
         
@@ -1391,6 +1414,10 @@ class TrackNetwork:
             "segments": {
                 block_id: self.get_segment_status(block_id)
                 for block_id in self.segments
+            },
+            "trains": {
+                train_id: self.get_train_status(train_id)
+                for train_id in self.trains
             },
             "line_name": self.line_name,
             "time": current_time,

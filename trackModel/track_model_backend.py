@@ -500,7 +500,7 @@ class Station(TrackSegment):
         self.passengers_waiting += count
         pass
 
-    def passengers_boarding(self, train_id: int, 
+    def passengers_boarding(self, train: 'Train', 
                           count: Optional[int] = None) -> None:
         """Record passengers boarding. Adds to total number, and passes
         to the Train Model.
@@ -511,9 +511,10 @@ class Station(TrackSegment):
             (If no count argument, randomly generates a number
             between set range.)
         """
-        if self.network is not None:
-            if train_id is not None and train_id not in self.network.trains:
-                raise ValueError(f"Train ID {train_id} not found in network.")
+        if train is None:
+            raise ValueError("Train must be provided for boarding.")
+        if train.current_segment != self:
+            raise ValueError("Train is not currently at this station.")
         if count is not None and count > self.passengers_waiting:
             raise ValueError("Cannot board more passengers than are waiting.")
         if count is not None and count < 0:
@@ -529,19 +530,21 @@ class Station(TrackSegment):
                 count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        if self.network is not None:
-            train = self.network.trains.get(train_id)
-            if train is not None:
-                train.board_passengers(count)
+        if train is not None:
+            train.board_passengers(count)
         pass
         
-    def passengers_exiting(self, count: int) -> None:
+    def passengers_exiting(self, train: 'Train', count: int) -> None:
         """Record passengers exiting and add them to the total.
         Called by the Train Model.
         
         Args:
             count: Number of passengers exiting the train.
        """
+        if train is None:
+            raise ValueError("Train must be provided for exiting.")
+        if train.current_segment != self:
+            raise ValueError("Train is not currently at this station.")
         if count < 0:
             raise ValueError("Passenger exit count cannot be negative.")
         self.passengers_exited_total += count
@@ -1141,7 +1144,7 @@ class TrackNetwork:
         segment.sell_tickets(count)
         pass
 
-    def passengers_boarding(self, block_id: int, train_id: int = -1, 
+    def passengers_boarding(self, block_id: int, train_id: int, 
                           count: int = None) -> None:
         """Record passengers boarding at a specific station.
         
@@ -1153,12 +1156,14 @@ class TrackNetwork:
             between set range.)
         """
         segment = self.segments.get(block_id)
+        train = self.trains.get(train_id)
         if segment is None:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
-        segment.passengers_boarding(train_id, count)
-        # TODO: remove -1 count when train model is integrated
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        segment.passengers_boarding(train, count)
         pass
 
     def get_throughput(self, block_id: int) -> List[int]:
@@ -1177,7 +1182,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} is not a station.")
         return segment.get_throughput()
 
-    def passengers_exiting(self, block_id: int, count: int) -> None:
+    def passengers_exiting(self, block_id: int, train_id: int, count: int) -> None:
         """Record passengers exiting at a specific station.
         
         Args:
@@ -1185,13 +1190,15 @@ class TrackNetwork:
             count: Number of passengers exiting the train.
         """
         segment = self.segments.get(block_id)
+        train = self.trains.get(train_id)
         if segment is None:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
-        segment.passengers_exiting(count)
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        segment.passengers_exiting(train, count)
         pass
-
     
     def set_switch_position(self, block_id: int, position: int) -> None:
         """Set the position of a specific track switch.
@@ -1242,7 +1249,12 @@ class TrackNetwork:
             new_time: The new time to set.
         """
         self.time = new_time
-        self.temperature_sim()
+        if new_time.second % 30 == 0:
+            for segment in self.segments.values():
+                if isinstance(segment, Station):
+                    segment.sell_tickets()
+        if new_time.second % 10 == 0:
+            self.temperature_sim()
 
     def manual_set_time(self, year: int, month: int, day: int,
                         hour: int, minute: int, second: int) -> None:

@@ -358,7 +358,6 @@ class NetworkStatusUI(QWidget):
     def refresh_status(self):
         """Refresh the network status display (without reloading CSV)"""
         try:
-            self.track_network.temperature_sim()
             # Get and display network status
             self.status_display.append("Refreshing network status...")
             network_status = self.track_network.get_network_status()

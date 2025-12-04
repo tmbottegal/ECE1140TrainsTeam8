@@ -289,11 +289,10 @@ if __name__ == "__main__":
     app = QApplication([])
     network1 = TrackNetwork()
     network1.load_track_layout('trackModel/green_line.csv')
-    network1.line_name = "GREEN LINE"
+    network1.line_name = "Green Line"
     network2 = TrackNetwork()
     network2.load_track_layout('trackModel/red_line.csv')
-    network2.line_name = "RED LINE"
-
+    network2.line_name = "Red Line"
 
     #------------------------------------------------------------------------------------------------
     # trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed

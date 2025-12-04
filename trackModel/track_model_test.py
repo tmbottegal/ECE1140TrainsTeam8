@@ -229,38 +229,6 @@ def test_sell_tickets() -> None:
     assert station.passengers_waiting > 10
     assert station.tickets_sold_total > 10
 
-def test_passengers_boarding_valid() -> None:
-    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
-    station.sell_tickets(50)
-    assert station.passengers_waiting == 50
-    assert station.tickets_sold_total == 50
-    
-    station.passengers_boarding(1, 40)
-    assert station.passengers_waiting == 10
-    
-    station.passengers_boarding(1, 5)
-    assert station.passengers_waiting < 10
-
-def test_passengers_boarding_invalid() -> None:
-    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
-    station.sell_tickets(30)
-    assert station.passengers_waiting == 30
-    assert station.tickets_sold_total == 30
-    
-    with pytest.raises(ValueError):
-        station.passengers_boarding(1, 40)
-    assert station.passengers_waiting == 30
-    
-    with pytest.raises(ValueError):
-        station.passengers_boarding(1, -5)
-    assert station.passengers_waiting == 30
-
-def test_passengers_exiting() -> None:
-    station = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
-    assert station.passengers_exited_total == 0
-    
-    station.passengers_exiting(20)
-    assert station.passengers_exited_total == 20
 """
 Track Network Testing
 """
@@ -639,6 +607,96 @@ def test_network_set_signal_state_invalid() -> None:
     
     with pytest.raises(ValueError):
         network.set_signal_state(block_id=3, signal_state=SignalState.GREEN)
+
+def test_network_board_passengers_valid() -> None:
+    network = TrackNetwork()
+    station = Station(1, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
+    train = Train(1)
+    network.add_segment(station)
+    network.add_train(train)
+    network.connect_train(1, 1, 1)
+    
+    station.sell_tickets(50)
+    assert station.passengers_waiting == 50
+    assert station.passengers_boarded_total == 0
+
+    network.passengers_boarding(1, 1, 25)
+    assert station.passengers_waiting == 25
+    assert station.passengers_boarded_total == 25
+
+    network.passengers_boarding(1, 1, 25)
+    assert station.passengers_waiting == 0
+    assert station.passengers_boarded_total == 50
+
+def test_network_board_passengers_invalid() -> None:
+    network = TrackNetwork()
+    station1 = Station(1, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
+    station2 = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test2", StationSide.BOTH)
+    train = Train(1)
+    network.add_segment(station1)
+    network.add_segment(station2)
+    network.add_train(train)
+    network.connect_train(1, 1, 1)
+
+    with pytest.raises(ValueError):
+        network.passengers_boarding(1, 1, 10) # No passengers waiting
+
+    station1.sell_tickets(100)
+    station2.sell_tickets(50)
+
+    with pytest.raises(ValueError):
+        network.passengers_boarding(99, 1, 10) # Invalid station block_id
+
+    with pytest.raises(ValueError):
+        network.passengers_boarding(1, 99, 10) # Invalid train_id
+
+    with pytest.raises(ValueError):
+        network.passengers_boarding(1, 1, -5) # Negative number of passengers
+
+    with pytest.raises(ValueError):
+        network.passengers_boarding(2, 1, 10) # Train not at station2
+
+def test_network_exit_passengers_valid() -> None:
+    network = TrackNetwork()
+    station = Station(1, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
+    train = Train(1)
+    network.add_segment(station)
+    network.add_train(train)
+    network.connect_train(1, 1, 1)
+
+    network.sell_tickets(1, 50)
+    network.passengers_boarding(1, 1, 50)
+    assert station.passengers_boarded_total == 50
+
+    assert station.passengers_exited_total == 0
+
+    network.passengers_exiting(1, 1, 25)
+    assert station.passengers_exited_total == 25
+
+    network.passengers_exiting(1, 1, 25)
+    assert station.passengers_exited_total == 50
+
+def test_network_exit_passengers_invalid() -> None:
+    network = TrackNetwork()
+    station1 = Station(1, 300, 69, 0, 0, False, Direction.FORWARD, "test", StationSide.BOTH)
+    station2 = Station(2, 300, 69, 0, 0, False, Direction.FORWARD, "test2", StationSide.BOTH)
+    train = Train(1)
+    network.add_segment(station1)
+    network.add_segment(station2)
+    network.add_train(train)
+    network.connect_train(1, 1, 1)
+
+    with pytest.raises(ValueError):
+        network.passengers_exiting(99, 1, 10) # Invalid station block_id
+
+    with pytest.raises(ValueError):
+        network.passengers_exiting(1, 99, 10) # Invalid train_id
+
+    with pytest.raises(ValueError):
+        network.passengers_exiting(1, 1, -5) # Negative number of passengers
+
+    with pytest.raises(ValueError):
+        network.passengers_exiting(2, 1, 10) # Train not at station2
 
 def test_get_network_status() -> None:
     network = TrackNetwork()

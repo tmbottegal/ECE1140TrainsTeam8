@@ -595,7 +595,7 @@ class Train:
         try:
             # signature: passengers_exiting(block_id, count)
             if hasattr(self.network, "passengers_exiting"):
-                self.network.passengers_exiting(station_id, exited)
+                self.network.passengers_exiting(station_id, self.train_id, exited)
         except Exception:
             pass
         return exited

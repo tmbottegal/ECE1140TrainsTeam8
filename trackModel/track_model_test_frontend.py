@@ -660,7 +660,6 @@ class NetworkStatusUI(QWidget):
     def refresh_status(self):
         """Refresh the network status display (without reloading CSV)"""
         try:
-            self.track_network.temperature_sim()
             # Get and display network status
             self.status_display.append("Refreshing network status...")
             network_status = self.track_network.get_network_status()
@@ -1560,7 +1559,7 @@ class NetworkStatusUI(QWidget):
                 return
             
             # Call backend method
-            self.track_network.passengers_exiting(station_block_id, count)
+            self.track_network.passengers_exiting(station_block_id, count)  # TODO: #156 Train ID is now required. Create a field for it.
             self.status_display.append(f"Exited {count} passengers at station {station_block_id}")
             
             # Clear input and refresh

@@ -31,7 +31,10 @@ class GlobalClock:
     # ---- core time control ----
     def tick(self):
         """Advance simulated time by (1 s × multiplier) and notify listeners."""
-        delta = datetime.timedelta(seconds=self.tick_interval * self.time_multiplier)
+        #delta = datetime.timedelta(seconds=self.tick_interval * self.time_multiplier)
+        delta = datetime.timedelta(seconds=self.tick_interval)
+        #delta = datetime.timedelta(seconds=self.tick_interval)
+
 
         self.current_time += delta
         for cb in self._listeners:
@@ -39,6 +42,8 @@ class GlobalClock:
                 cb(self.current_time)
             except Exception as e:
                 print(f"[GlobalClock] listener error: {e}")
+        return self.current_time
+
 
     #def run(self):
         """Continuously tick every real second."""

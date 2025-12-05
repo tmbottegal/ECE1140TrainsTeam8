@@ -73,13 +73,23 @@ class CTCWindow(QtWidgets.QMainWindow):
         # === CONNECT BUTTONS TO GLOBAL CLOCK ===
         self.clock_start_btn.clicked.connect(lambda: clock.resume())
         self.clock_pause_btn.clicked.connect(lambda: clock.pause())
-        self.clock_normal_btn.clicked.connect(lambda: clock.set_speed(1.0))
-        self.clock_fast_btn.clicked.connect(lambda: clock.set_speed(10.0))
+        self.clock_normal_btn.clicked.connect(
+            lambda: (clock.set_speed(1.0), self._apply_clock_speed())
+        )
+        self.clock_fast_btn.clicked.connect(
+            lambda: (clock.set_speed(10.0), self._apply_clock_speed())
+        )
+
 
         self.clock_start_btn.clicked.connect(self._resume_sim)
         self.clock_pause_btn.clicked.connect(self._pause_sim)
-        self.clock_normal_btn.clicked.connect(lambda: clock.set_speed(1.0))
-        self.clock_fast_btn.clicked.connect(lambda: clock.set_speed(10.0))
+        self.clock_normal_btn.clicked.connect(
+            lambda: (clock.set_speed(1.0), self._apply_clock_speed())
+        )
+        self.clock_fast_btn.clicked.connect(
+            lambda: (clock.set_speed(10.0), self._apply_clock_speed())
+        )
+
 
 
         # === Maintenance Mode Toggle (independent from Auto/Manual) ===
@@ -186,6 +196,9 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.timer.timeout.connect(self._tick)
         self.timer.start(1000)  # 1s per simulated tick
 
+        self._apply_clock_speed()
+
+
     # ---------------------------------------------------------
     # Mode Toggle
     # ---------------------------------------------------------
@@ -204,6 +217,19 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.uploadBtn.setEnabled(self.mode == "auto")
         # self.addEntryBtn.setEnabled(self.mode == "auto")
         print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
+
+    def _apply_clock_speed(self):
+        """
+        Adjust UI tick interval so simulation updates faster when speed increases.
+        """
+        # prevent divide-by-zero
+        multiplier = max(0.1, clock.time_multiplier)
+
+        # Determine new UI tick frequency
+        interval_ms = max(10, int(1000 / multiplier))  # min 10ms to stay safe
+
+        self.timer.start(interval_ms)
+        print(f"[UI] Timer interval set to {interval_ms} ms (speed={multiplier}×)")
 
     # ---------------------------------------------------------
     # Reload line table from backend
@@ -775,7 +801,14 @@ class CTCWindow(QtWidgets.QMainWindow):
        
         try:
             # 1️⃣ Advance simulation time (CTC controls all modules)
+            #self.state.tick_all_modules()
+            #speed = int(clock.time_multiplier)
+            #for _ in range(speed):
             self.state.tick_all_modules()
+                # update the label for each simulated tick
+            self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
+
+
 
             # 2️⃣ Refresh occupancy & train info
             self._reload_line(self.state.line_name)

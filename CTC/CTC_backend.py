@@ -662,7 +662,17 @@ class TrackState:
         Advances simulation by one global clock tick.
         CTC manually synchronizes Track Model + Track Controller.
         """
+        # Determine delta time (how many simulated seconds passed)
+        if not hasattr(self, "_last_time"):
+            self._last_time = clock.get_time()
+
+        prev_time = self._last_time
         current_time = clock.tick()
+        self._last_time = current_time
+
+        delta_s = (current_time - prev_time).total_seconds()
+
+        #current_time = clock.tick()
 
         # ----------------------------------------------------------
         #  Scheduled manual dispatches: fire when time is reached
@@ -691,14 +701,16 @@ class TrackState:
 
         # --- 1. Update Track Model (moves trains + occupancy) ---
         try:
+            #self.track_model.tick(current_time, delta_s)
             self.track_model.set_time(current_time)
+
         except Exception as e:
             print(f"[CTC] Track Model set_time error: {e}")
 
         # --- 2. Update Track Controller (signals, switches, crossings) ---
         try:
-            self.track_controller.set_time(current_time)
-            self.track_controller_hw.set_time(current_time)
+            self.track_controller.tick(current_time, delta_s)
+            self.track_controller_hw.tick(current_time, delta_s)
         except Exception:
             pass
 
@@ -735,7 +747,8 @@ class TrackState:
                 block = train.current_segment.block_id
 
                 # Distance train would travel this tick
-                distance_per_tick = speed_mps * clock.tick_interval
+                distance_per_tick = speed_mps * delta_s
+
 
                 # Look ahead 1 block to see if it's closed
                 next_seg = train.current_segment.get_next_segment()
@@ -764,6 +777,7 @@ class TrackState:
 
                 # Reduce authority
                 new_auth = max(0.0, auth_m - distance_per_tick)
+
 
                 # STOP train when out of authority
                 if new_auth <= 0.0:

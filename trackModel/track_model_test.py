@@ -115,7 +115,8 @@ def test_switch_construction() -> None:
     assert switch.direction == Direction.FORWARD
     assert not switch.occupied
     assert switch.previous_signal_state == SignalState.RED
-    assert switch.next_signal_state == SignalState.RED
+    assert switch.straight_signal_state == SignalState.RED
+    assert switch.diverging_signal_state == SignalState.RED
     assert switch.failures == set()
     assert switch.current_position == 0
     assert switch.straight_segment is None
@@ -140,20 +141,14 @@ def test_set_switch_position() -> None:
 
     assert switch.current_position == 0
     assert switch.next_segment == straight_segment
-    assert switch.straight_signal_state == SignalState.GREEN
-    assert switch.diverging_signal_state == SignalState.RED
     
     switch.set_switch_position(1)
     assert switch.current_position == 1
     assert switch.next_segment == diverging_segment
-    assert switch.straight_signal_state == SignalState.RED
-    assert switch.diverging_signal_state == SignalState.GREEN
-    
+
     switch.set_switch_position(0)
     assert switch.current_position == 0
     assert switch.next_segment == straight_segment
-    assert switch.straight_signal_state == SignalState.GREEN
-    assert switch.diverging_signal_state == SignalState.RED
 
 def test_is_straight() -> None:
     switch = TrackSwitch(1, 150, 25, 2.5, 25, False, Direction.FORWARD)
@@ -575,25 +570,25 @@ def test_network_set_signal_state_valid() -> None:
     network = TrackNetwork()
     switch = TrackSwitch(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     network.add_segment(switch)
+
+    assert switch.previous_signal_state == SignalState.RED
+    assert switch.straight_signal_state == SignalState.RED
+    assert switch.diverging_signal_state == SignalState.RED
     
-    assert switch.previous_signal_state == SignalState.RED
-    assert switch.next_signal_state == SignalState.RED
-    
-    network.set_signal_state(block_id=1, side=0, signal_state=SignalState.GREEN)
+    network.set_signal_state(block_id=1, signal_side=0, signal_state=SignalState.GREEN)
     assert switch.previous_signal_state == SignalState.GREEN
-    assert switch.next_signal_state == SignalState.RED
+    assert switch.straight_signal_state == SignalState.RED
+    assert switch.diverging_signal_state == SignalState.RED
 
-    network.set_signal_state(block_id=1, side=1, signal_state=SignalState.YELLOW)
+    network.set_signal_state(block_id=1, signal_side=1, signal_state=SignalState.YELLOW)
     assert switch.previous_signal_state == SignalState.GREEN
-    assert switch.next_signal_state == SignalState.YELLOW
+    assert switch.straight_signal_state == SignalState.YELLOW
+    assert switch.diverging_signal_state == SignalState.RED
 
-    network.set_signal_state(block_id=1, side=0, signal_state=SignalState.RED)
-    assert switch.previous_signal_state == SignalState.RED
-    assert switch.next_signal_state == SignalState.YELLOW
-
-    network.set_signal_state(block_id=1, side=1, signal_state=SignalState.SUPERGREEN)
-    assert switch.previous_signal_state == SignalState.RED
-    assert switch.next_signal_state == SignalState.SUPERGREEN
+    network.set_signal_state(block_id=1, signal_side=2, signal_state=SignalState.SUPERGREEN)
+    assert switch.previous_signal_state == SignalState.GREEN
+    assert switch.straight_signal_state == SignalState.YELLOW
+    assert switch.diverging_signal_state == SignalState.SUPERGREEN
 
 def test_network_set_signal_state_invalid() -> None:
     network = TrackNetwork()
@@ -606,18 +601,18 @@ def test_network_set_signal_state_invalid() -> None:
     network.add_segment(station)
 
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=99, side=0, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=99, signal_side=0, signal_state=SignalState.GREEN)
 
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=1, side=0, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=1, signal_side=0, signal_state=SignalState.GREEN)
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=2, side=0, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=2, signal_side=0, signal_state=SignalState.GREEN)
     
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=3, side=0, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=3, signal_side=0, signal_state=SignalState.GREEN)
 
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=1, side=2, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=1, signal_side=3, signal_state=SignalState.GREEN)
 
 def test_network_board_passengers_valid() -> None:
     network = TrackNetwork()
@@ -807,7 +802,8 @@ def test_get_segment_status_valid() -> None:
     assert status["underground"] == False
     assert status["occupied"] == False
     assert status["previous_signal_state"] == SignalState.RED
-    assert status["next_signal_state"] == SignalState.RED
+    assert status["straight_signal_state"] == SignalState.RED
+    assert status["diverging_signal_state"] == SignalState.RED
     assert status["failures"] == []
     assert status["closed"] == False
     assert status["next_segment"] == 1

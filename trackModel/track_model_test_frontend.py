@@ -363,6 +363,15 @@ class NetworkStatusUI(QWidget):
             ["0 (Straight)", "1 (Diverging)"])
         controls_layout.addWidget(self.switch_position_dropdown)
         
+        # Signal side dropdown
+        signal_side_label = QLabel("Signal Side:")
+        controls_layout.addWidget(signal_side_label)
+        
+        self.signal_side_dropdown = QComboBox()
+        self.signal_side_dropdown.addItems(
+            ["0 (Previous)", "1 (Straight)", "2 (Diverging)"])
+        controls_layout.addWidget(self.signal_side_dropdown)
+        
         # Signal state dropdown
         signal_label = QLabel("Signal State:")
         controls_layout.addWidget(signal_label)
@@ -373,9 +382,14 @@ class NetworkStatusUI(QWidget):
         controls_layout.addWidget(self.signal_state_dropdown)
         
         # Apply switch button
-        apply_switch_btn = QPushButton("Apply Switch Changes")
+        apply_switch_btn = QPushButton("Apply Switch Position")
         apply_switch_btn.clicked.connect(self.apply_switch_position)
         controls_layout.addWidget(apply_switch_btn)
+        
+        # Apply signal button
+        apply_signal_btn = QPushButton("Apply Signal State")
+        apply_signal_btn.clicked.connect(self.apply_signal_state)
+        controls_layout.addWidget(apply_signal_btn)
         
         # Add spacing to push controls to top
         controls_layout.addStretch()
@@ -804,10 +818,17 @@ class NetworkStatusUI(QWidget):
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'previous_signal_state', 'next_signal_state', 'speed_limit', 'length', 'grade', 
+            'block_id', 'type', 'occupied', 'prev_sig', 'str_sig', 'div_sig', 'speed_limit', 'length', 'grade', 
             'elevation', 'direction', 'active_command', 'previous_segment', 'next_segment', 
             'current_position', 'gate_status', 'beacon_data',
         ]
+        
+        # Define column aliases for display
+        column_aliases = {
+            'previous_signal_state': 'prev_sig',
+            'straight_signal_state': 'str_sig',
+            'diverging_signal_state': 'div_sig'
+        }
         
         # Check if this is being called for segments (based on table widget 
         # or column name)
@@ -837,9 +858,12 @@ class NetworkStatusUI(QWidget):
                 ordered_columns = []
                 # First add the columns in the specified order
                 for col in segment_column_order:
-                    if col in all_keys:
+                    # Check both original name and alias
+                    original_col = next((k for k, v in column_aliases.items() if v == col), col)
+                    if col in all_keys or original_col in all_keys:
                         ordered_columns.append(col)
-                        all_keys.remove(col)
+                        all_keys.discard(col)
+                        all_keys.discard(original_col)
                 # Add any remaining columns at the end
                 ordered_columns.extend(sorted(list(all_keys)))
                 columns = ordered_columns
@@ -860,13 +884,16 @@ class NetworkStatusUI(QWidget):
                     if is_segment_table:
                         # For segments, don't add ID column
                         for col_idx, col_name in enumerate(columns):
-                            if col_name in value:
+                            # Check if this is an alias, if so use the original name for data lookup
+                            original_col_name = next((k for k, v in column_aliases.items() if v == col_name), col_name)
+                            
+                            if original_col_name in value:
                                 # Apply unit conversions and formatting for 
                                 # segment display
-                                cell_value = value[col_name]
+                                cell_value = value[original_col_name]
                                 item = None
                                 
-                                if (col_name == 'length' and 
+                                if (original_col_name == 'length' and 
                                    isinstance(cell_value, (int, float))):
                                     # Convert length from meters to yards
                                     yards_value = ConversionFunctions.meters_to_yards(
@@ -874,17 +901,17 @@ class NetworkStatusUI(QWidget):
                                     )
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
-                                elif col_name == 'speed_limit' and isinstance(cell_value, (int, float)):
+                                elif original_col_name == 'speed_limit' and isinstance(cell_value, (int, float)):
                                     # Convert speed from m/s to mph
                                     mph_value = ConversionFunctions.mps_to_mph(cell_value)
                                     display_value = f"{mph_value:.1f} mph"
                                     item = QTableWidgetItem(display_value)
-                                elif (col_name == 'grade' and 
+                                elif (original_col_name == 'grade' and 
                                       isinstance(cell_value, (int, float))):
                                     # Convert grade from decimal to percentage
                                     display_value = f"{cell_value:.2f} %"
                                     item = QTableWidgetItem(display_value)
-                                elif (col_name == 'elevation' and 
+                                elif (original_col_name == 'elevation' and 
                                       isinstance(cell_value, (int, float))):
                                     # Convert elevation from meters to yards
                                     yards_value = (
@@ -892,7 +919,7 @@ class NetworkStatusUI(QWidget):
                                             cell_value))
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
-                                elif col_name == 'direction':
+                                elif original_col_name == 'direction':
                                     # Convert direction to user-friendly display with arrows
                                     direction_str = str(cell_value).upper()
                                     
@@ -909,7 +936,7 @@ class NetworkStatusUI(QWidget):
                                         display_value = str(cell_value)
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'previous_signal_state' or col_name == 'next_signal_state':
+                                elif original_col_name in ['previous_signal_state', 'straight_signal_state', 'diverging_signal_state']:
                                     # Convert signal state to user-friendly display with colors
                                     if hasattr(cell_value, 'name'):
                                         signal_name = cell_value.name
@@ -935,7 +962,7 @@ class NetworkStatusUI(QWidget):
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'occupied':
+                                elif original_col_name == 'occupied':
                                     # Convert occupied status to user-friendly display with colors
                                     if isinstance(cell_value, bool):
                                         if cell_value:  # True = occupied
@@ -956,7 +983,7 @@ class NetworkStatusUI(QWidget):
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'closed':
+                                elif original_col_name == 'closed':
                                     # Convert closed status to user-friendly display with colors
                                     if isinstance(cell_value, bool):
                                         if cell_value:  # True = closed
@@ -1396,7 +1423,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error applying segment changes: {str(e)}")
     
     def apply_switch_position(self):
-        """Apply the selected switch position and signal state"""
+        """Apply the selected switch position"""
         try:
             selected_switch = self.switch_dropdown.currentText()
             if not selected_switch:
@@ -1408,6 +1435,32 @@ class NetworkStatusUI(QWidget):
             # Get selected position
             position_text = self.switch_position_dropdown.currentText()
             position = 0 if position_text.startswith("0") else 1
+            
+            # Apply switch position
+            self.track_network.set_switch_position(switch_id, position)
+            position_name = "straight" if position == 0 else "diverging"
+            
+            self.status_display.append(f"Applied switch position to switch {switch_id}: {position} ({position_name})")
+            
+            # Auto-refresh after applying switch change
+            self.refresh_status()
+                
+        except Exception as e:
+            self.status_display.append(f"Error applying switch position: {str(e)}")
+    
+    def apply_signal_state(self):
+        """Apply the selected signal state to the selected switch"""
+        try:
+            selected_switch = self.switch_dropdown.currentText()
+            if not selected_switch:
+                self.status_display.append("Error: No switch selected")
+                return
+                
+            switch_id = int(selected_switch)
+            
+            # Get selected signal side
+            signal_side_text = self.signal_side_dropdown.currentText()
+            signal_side = int(signal_side_text[0])  # Extract number from "0 (Previous)" format
             
             # Get selected signal state
             signal_state_text = self.signal_state_dropdown.currentText()
@@ -1421,25 +1474,24 @@ class NetworkStatusUI(QWidget):
             }
             signal_state = signal_state_map.get(signal_state_text, SignalState.RED)
             
-            # Apply changes using backend methods
-            changes_made = []
-            
-            # Apply switch position
-            self.track_network.set_switch_position(switch_id, position)
-            position_name = "straight" if position == 0 else "diverging"
-            changes_made.append(f"position={position} ({position_name})")
+            # Convert signal side to friendly name
+            signal_side_names = {
+                0: "previous",
+                1: "straight", 
+                2: "diverging"
+            }
+            signal_side_name = signal_side_names.get(signal_side, "unknown")
             
             # Apply signal state
-            self.track_network.set_signal_state(switch_id, signal_state)
-            changes_made.append(f"signal_state={signal_state_text}")
+            self.track_network.set_signal_state(switch_id, signal_side, signal_state)
             
-            self.status_display.append(f"Applied changes to switch {switch_id}: {', '.join(changes_made)}")
+            self.status_display.append(f"Applied signal state to switch {switch_id}: {signal_side_name} signal = {signal_state_text}")
             
-            # Auto-refresh after applying switch change
+            # Auto-refresh after applying signal change
             self.refresh_status()
                 
         except Exception as e:
-            self.status_display.append(f"Error applying switch changes: {str(e)}")
+            self.status_display.append(f"Error applying signal state: {str(e)}")
     
     def sell_tickets(self):
         """Sell tickets at the selected station"""

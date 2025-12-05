@@ -325,9 +325,10 @@ class TrackSwitch(TrackSegment):
         self.current_position = 0
 
         self.previous_signal_state = SignalState.RED
-        self.next_signal_state = SignalState.RED
+        self.straight_signal_state = SignalState.RED
+        self.diverging_signal_state = SignalState.RED
 
-    def set_signal_state(self, side: int, state: SignalState) -> None:
+    def set_signal_state(self, signal_side: int, state: SignalState) -> None:
         """Set the signal state for this track segment.
         
         Args:
@@ -335,13 +336,15 @@ class TrackSwitch(TrackSegment):
         """
         if TrackFailureType.POWER_FAILURE in self.failures:
             return
-        match side:
+        match signal_side:
             case 0:
                 self.previous_signal_state = state
             case 1:
-                self.next_signal_state = state
+                self.straight_signal_state = state
+            case 2:
+                self.diverging_signal_state = state
             case _:
-                raise ValueError("Invalid signal side. Must be 0 (previous) or 1 (next).")
+                raise ValueError("Invalid signal side. Must be 0 (previous) or 1 (straight) or 2 (diverging).")
             
     def set_switch_paths(self, straight_segment: 'TrackSegment', 
                         diverging_segment: 'TrackSegment') -> None:
@@ -374,8 +377,6 @@ class TrackSwitch(TrackSegment):
         match self.current_position:
             case 0:
                 self.next_segment = self.straight_segment
-                self.straight_signal_state = SignalState.GREEN
-                self.diverging_signal_state = SignalState.RED
                 if self.straight_segment is not None:
                     self.straight_segment.previous_segment = self
                 if self.diverging_segment is not None:
@@ -385,8 +386,6 @@ class TrackSwitch(TrackSegment):
 
             case 1:
                 self.next_segment = self.diverging_segment
-                self.straight_signal_state = SignalState.RED
-                self.diverging_signal_state = SignalState.GREEN
                 if self.diverging_segment is not None:
                     self.diverging_segment.previous_segment = self
                 if self.straight_segment is not None:
@@ -984,7 +983,7 @@ class TrackNetwork:
         segment.set_occupancy(occupied)
         pass
     
-    def set_signal_state(self, block_id: int,
+    def set_signal_state(self, block_id: int, signal_side: int,
                          signal_state: SignalState) -> None:
         """Set the signal state for a specific block.
         
@@ -997,7 +996,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, TrackSwitch):
             raise ValueError(f"Block ID {block_id} is not a switch.")
-        segment.set_signal_state(signal_state)
+        segment.set_signal_state(signal_side, signal_state)
         pass
 
     def set_beacon_data(self, block_id: int, beacon_data: str) -> None:
@@ -1221,21 +1220,6 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} is not a switch.")
         segment.set_switch_position(position)
         pass
-    
-    def set_signal_state(self, block_id: int, side: int,
-                         signal_state: SignalState) -> None:
-        """Set the signal state for a specific block.
-        Args:
-            block_id: ID of the block to set signal for.
-            signal_state: The new signal state to set.
-        """
-        segment = self.segments.get(block_id)
-        if segment is None:
-            raise ValueError(f"Block ID {block_id} not found in track network.")
-        if not isinstance(segment, TrackSwitch):
-            raise ValueError(f"Block ID {block_id} is not a switch.")
-        segment.set_signal_state(side, signal_state)
-        pass
 
     def set_occupancy(self, block_id: int, occupied: bool) -> None:
         """Set occupancy status for a specific block.
@@ -1334,7 +1318,8 @@ class TrackNetwork:
         
         if isinstance(segment, TrackSwitch):
             segment_status["previous_signal_state"] = segment.previous_signal_state
-            segment_status["next_signal_state"] = segment.next_signal_state
+            segment_status["straight_signal_state"] = segment.straight_signal_state
+            segment_status["diverging_signal_state"] = segment.diverging_signal_state
             segment_status["current_position"] = segment.current_position
             segment_status["straight_segment"] = (
                 segment.straight_segment.block_id
@@ -1408,7 +1393,8 @@ class TrackNetwork:
         if isinstance(segment, TrackSwitch):
             segment_status["current_position"] = segment.current_position
             segment_status["previous_signal_state"] = segment.previous_signal_state
-            segment_status["next_signal_state"] = segment.next_signal_state
+            segment_status["straight_signal_state"] = segment.straight_signal_state
+            segment_status["diverging_signal_state"] = segment.diverging_signal_state
 
         return segment_status
 

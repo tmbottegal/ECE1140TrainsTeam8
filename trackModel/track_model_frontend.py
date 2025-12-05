@@ -495,10 +495,17 @@ class NetworkStatusUI(QWidget):
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'previous_signal_state', 'next_signal_state', 'speed_limit', 'length', 'grade', 
+            'block_id', 'type', 'occupied', 'prev_sig', 'str_sig', 'div_sig', 'speed_limit', 'length', 'grade', 
             'elevation', 'direction', 'active_command', 'previous_segment', 'next_segment', 
             'current_position', 'gate_status', 'beacon_data',
         ]
+        
+        # Define column aliases for display
+        column_aliases = {
+            'previous_signal_state': 'prev_sig',
+            'straight_signal_state': 'str_sig',
+            'diverging_signal_state': 'div_sig'
+        }
         
         # Check if this is being called for segments (based on table widget 
         # or column name)
@@ -528,9 +535,12 @@ class NetworkStatusUI(QWidget):
                 ordered_columns = []
                 # First add the columns in the specified order
                 for col in segment_column_order:
-                    if col in all_keys:
+                    # Check both original name and alias
+                    original_col = next((k for k, v in column_aliases.items() if v == col), col)
+                    if col in all_keys or original_col in all_keys:
                         ordered_columns.append(col)
-                        all_keys.remove(col)
+                        all_keys.discard(col)
+                        all_keys.discard(original_col)
                 # Add any remaining columns at the end
                 ordered_columns.extend(sorted(list(all_keys)))
                 columns = ordered_columns
@@ -551,13 +561,16 @@ class NetworkStatusUI(QWidget):
                     if is_segment_table:
                         # For segments, don't add ID column
                         for col_idx, col_name in enumerate(columns):
-                            if col_name in value:
+                            # Check if this is an alias, if so use the original name for data lookup
+                            original_col_name = next((k for k, v in column_aliases.items() if v == col_name), col_name)
+                            
+                            if original_col_name in value:
                                 # Apply unit conversions and formatting 
                                 # for segment display
-                                cell_value = value[col_name]
+                                cell_value = value[original_col_name]
                                 item = None
                                 
-                                if (col_name == 'length' and 
+                                if (original_col_name == 'length' and 
                                         isinstance(cell_value, (int, float))):
                                     # Convert length from meters to yards
                                     yards_value = (
@@ -565,19 +578,19 @@ class NetworkStatusUI(QWidget):
                                             cell_value))
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
-                                elif (col_name == 'speed_limit' and 
+                                elif (original_col_name == 'speed_limit' and 
                                       isinstance(cell_value, (int, float))):
                                     # Convert speed from m/s to mph
                                     mph_value = ConversionFunctions.mps_to_mph(
                                         cell_value)
                                     display_value = f"{mph_value:.1f} mph"
                                     item = QTableWidgetItem(display_value)
-                                elif (col_name == 'grade' and 
+                                elif (original_col_name == 'grade' and 
                                       isinstance(cell_value, (int, float))):
                                     # Convert grade from decimal to percentage
                                     display_value = f"{cell_value:.2f} %"
                                     item = QTableWidgetItem(display_value)
-                                elif (col_name == 'elevation' and 
+                                elif (original_col_name == 'elevation' and 
                                       isinstance(cell_value, (int, float))):
                                     # Convert elevation from meters to yards
                                     yards_value = (
@@ -585,7 +598,7 @@ class NetworkStatusUI(QWidget):
                                             cell_value))
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
-                                elif col_name == 'direction':
+                                elif original_col_name == 'direction':
                                     # Convert direction to user-friendly display with arrows
                                     direction_str = str(cell_value).upper()
                                     
@@ -603,7 +616,7 @@ class NetworkStatusUI(QWidget):
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'previous_signal_state' or col_name == 'next_signal_state':
+                                elif original_col_name in ['previous_signal_state', 'straight_signal_state', 'diverging_signal_state']:
                                     # Convert signal state to user-friendly 
                                     # display with colors
                                     if hasattr(cell_value, 'name'):
@@ -636,7 +649,7 @@ class NetworkStatusUI(QWidget):
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'occupied':
+                                elif original_col_name == 'occupied':
                                     # Convert occupied status to user-friendly 
                                     # display with colors
                                     if isinstance(cell_value, bool):
@@ -658,7 +671,7 @@ class NetworkStatusUI(QWidget):
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'closed':
+                                elif original_col_name == 'closed':
                                     # Convert closed status to display with colors
                                     if isinstance(cell_value, bool):
                                         if cell_value:  # True = closed

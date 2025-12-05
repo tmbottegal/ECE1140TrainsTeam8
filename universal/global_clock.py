@@ -32,7 +32,9 @@ class GlobalClock:
     def tick(self):
         """Advance simulated time by (1 s × multiplier) and notify listeners."""
         #delta = datetime.timedelta(seconds=self.tick_interval * self.time_multiplier)
-        delta = datetime.timedelta(seconds=self.tick_interval)
+        #delta = datetime.timedelta(seconds=self.tick_interval)
+        delta = datetime.timedelta(seconds=1)
+
         #delta = datetime.timedelta(seconds=self.tick_interval)
 
 

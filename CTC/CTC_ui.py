@@ -481,20 +481,36 @@ class CTCWindow(QtWidgets.QMainWindow):
             speed_mph = speed_mps * 2.23693629
             auth_yd = auth_m / 0.9144
 
-            arrival_str = arrival_input.time().toString("HH:mm")
-            h, m = map(int, arrival_str.split(":"))
-            arrival_seconds = h*3600 + m*60
+            import datetime
+            # Get sim clock time (a datetime object)
+            sim_now = clock.get_time()
 
-                    # compute when the train must depart
+            # Read arrival time from UI
+            arrival_qt = arrival_input.time()
+            arr_h = arrival_qt.hour()
+            arr_m = arrival_qt.minute()
+
+            # Build arrival datetime ON THE SIMULATION'S DATE
+            arrival_dt = sim_now.replace(hour=arr_h, minute=arr_m, second=0, microsecond=0)
+
+            # If arrival time is earlier than current simulation time → assume tomorrow
+            if arrival_dt < sim_now:
+                arrival_dt += datetime.timedelta(days=1)
+
+            # Compute arrival seconds since simulation-midnight
+            midnight = sim_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            arrival_seconds = int((arrival_dt - midnight).total_seconds())
+
+            # Travel time based on real path & speed
             travel_time_s = self.state.compute_travel_time(start_block, dest_block)
 
-            departure_seconds = arrival_seconds - travel_time_s
-            if departure_seconds < 0:
-                departure_seconds = 0
-            
-            dep_h = int(departure_seconds // 3600) % 24
-            dep_m = int((departure_seconds % 3600) // 60)
-            departure_time_str = f"{dep_h:02d}:{dep_m:02d}"
+            # Compute departure time (in seconds from midnight)
+            departure_seconds = arrival_seconds - int(travel_time_s)
+
+
+            # For UI feedback
+            dep_dt = midnight + datetime.timedelta(seconds=departure_seconds)
+            departure_time_str = dep_dt.strftime("%H:%M:%S")
 
 
             # 3. Dispatch train exactly like instant dispatch

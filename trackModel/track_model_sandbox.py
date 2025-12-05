@@ -32,8 +32,8 @@ if __name__ == "__main__":
     app = QApplication([])
     network1 = TrackNetwork()
     network2 = TrackNetwork()
-    network1.load_track_layout('trackModel/red_line.csv')
-    network2.load_track_layout('trackModel/green_line.csv')
+    network1.load_track_layout('trackModel/green_line.csv')
+    network2.load_track_layout('trackModel/red_line.csv')
     train = Train(1)
     network1.add_train(train)
     network1.connect_train(1, 12, 0.0)
@@ -41,4 +41,3 @@ if __name__ == "__main__":
     window = NetworkStatusUI(network1, network2)
     window.show()
     app.exec()
-    

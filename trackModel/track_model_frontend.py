@@ -496,15 +496,18 @@ class NetworkStatusUI(QWidget):
         # Define custom column order for Segment Info
         segment_column_order = [
             'block_id', 'type', 'occupied', 'prev_sig', 'str_sig', 'div_sig', 'speed_limit', 'length', 'grade', 
-            'elevation', 'direction', 'active_command', 'previous_segment', 'next_segment', 
-            'current_position', 'gate_status', 'beacon_data',
+            'elevation', 'direction', 'active_command', 'prev_seg', 'next_seg', 
+            'current_pos', 'gate_status', 'beacon_data',
         ]
         
         # Define column aliases for display
         column_aliases = {
             'previous_signal_state': 'prev_sig',
             'straight_signal_state': 'str_sig',
-            'diverging_signal_state': 'div_sig'
+            'diverging_signal_state': 'div_sig',
+            'previous_segment': 'prev_seg',
+            'next_segment': 'next_seg',
+            'current_position': 'current_pos',
         }
         
         # Check if this is being called for segments (based on table widget 

@@ -7,3 +7,4 @@ trackModel/__pycache__/track_model_test.cpython-312-pytest-8.4.2.pyc
 .vscode/
 __pycache__/
 *.pyc
+trackModel/green_line_test.csv

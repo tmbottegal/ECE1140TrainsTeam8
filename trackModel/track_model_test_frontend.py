@@ -471,6 +471,13 @@ class NetworkStatusUI(QWidget):
         exiting_section_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         controls_layout.addWidget(exiting_section_label)
         
+        exiting_train_id_label = QLabel("Train ID (required):")
+        controls_layout.addWidget(exiting_train_id_label)
+        
+        self.exiting_train_id_input = QLineEdit()
+        self.exiting_train_id_input.setPlaceholderText("Enter train ID")
+        controls_layout.addWidget(self.exiting_train_id_input)
+        
         exiting_count_label = QLabel("Count (required):")
         controls_layout.addWidget(exiting_count_label)
         
@@ -810,7 +817,7 @@ class NetworkStatusUI(QWidget):
         
         # Define attributes to exclude from Segment Info
         excluded_segment_attributes = {
-            'diverging_segment', 'failures', 
+            'diverging_segment', 'failures', 'closed',
             'passengers_boarded_total', 'passengers_exited_total', 
             'passengers_waiting', 'station_side', 'straight_segment', 
             'tickets_sold_total', 'station_name', 'underground'
@@ -819,15 +826,18 @@ class NetworkStatusUI(QWidget):
         # Define custom column order for Segment Info
         segment_column_order = [
             'block_id', 'type', 'occupied', 'prev_sig', 'str_sig', 'div_sig', 'speed_limit', 'length', 'grade', 
-            'elevation', 'direction', 'active_command', 'previous_segment', 'next_segment', 
-            'current_position', 'gate_status', 'beacon_data',
+            'elevation', 'direction', 'active_command', 'prev_seg', 'next_seg', 
+            'current_pos', 'gate_status', 'beacon_data',
         ]
         
         # Define column aliases for display
         column_aliases = {
             'previous_signal_state': 'prev_sig',
             'straight_signal_state': 'str_sig',
-            'diverging_signal_state': 'div_sig'
+            'diverging_signal_state': 'div_sig',
+            'previous_segment': 'prev_seg',
+            'next_segment': 'next_seg',
+            'current_position': 'current_pos',
         }
         
         # Check if this is being called for segments (based on table widget 
@@ -1595,6 +1605,18 @@ class NetworkStatusUI(QWidget):
             # Extract station block ID from dropdown text
             station_block_id = int(selected_station.split(' - ')[0])
             
+            # Get train ID (required)
+            train_id_str = self.exiting_train_id_input.text().strip()
+            if not train_id_str:
+                self.status_display.append("Error: Train ID is required")
+                return
+            
+            try:
+                train_id = int(train_id_str)
+            except ValueError:
+                self.status_display.append(f"Error: Train ID must be an integer, got '{train_id_str}'")
+                return
+            
             # Get count (required)
             count_str = self.exiting_count_input.text().strip()
             if not count_str:
@@ -1611,10 +1633,11 @@ class NetworkStatusUI(QWidget):
                 return
             
             # Call backend method
-            self.track_network.passengers_exiting(station_block_id, count)  # TODO: #156 Train ID is now required. Create a field for it.
-            self.status_display.append(f"Exited {count} passengers at station {station_block_id}")
+            self.track_network.passengers_exiting(station_block_id, train_id, count)
+            self.status_display.append(f"Exited {count} passengers from train {train_id} at station {station_block_id}")
             
-            # Clear input and refresh
+            # Clear inputs and refresh
+            self.exiting_train_id_input.clear()
             self.exiting_count_input.clear()
             self.refresh_status()
             

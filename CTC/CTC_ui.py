@@ -9,16 +9,13 @@
 # ============================================================
 
 from PyQt6 import QtWidgets, QtCore, QtGui
-from CTC_backend import TrackState, GREEN_LINE_DATA
+from CTC_backend import TrackState
 from universal.global_clock import clock
 
 BLOCK_LEN_M = 50.0
 MPS_TO_MPH = 2.23693629
 
-LINE_DATA = {
-    "Red Line": [],
-    "Green Line": GREEN_LINE_DATA,  # 💡 now pulls from backend’s live Green Line
-}
+
 
 class CTCWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
@@ -100,7 +97,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, toolbar)
 
         # === Backend state ===
-        self.state = TrackState("Green Line", GREEN_LINE_DATA)
+        self.state = TrackState("Green Line")
         self._trainInfoPage = None
         self._manualPage = None
 
@@ -214,7 +211,7 @@ class CTCWindow(QtWidgets.QMainWindow):
     def _reload_line(self, line_name: str):
         """Refresh occupancy + signals from backend."""
         if line_name != self.state.line_name:
-            self.state.set_line(line_name, LINE_DATA[line_name])
+            self.state.set_line(line_name)
 
         blocks = self.state.get_blocks()
         self.mapTable.setRowCount(len(blocks))
@@ -241,7 +238,9 @@ class CTCWindow(QtWidgets.QMainWindow):
                 switch_text,                     # ⭐ FIXED SWITCH COLUMN
                 b.light,
                 ("Yes" if b.crossing else ""),
-                f"{b.speed_limit * 0.621371:.0f} mph"
+                #f"{b.speed_limit * 0.621371:.0f} mph"
+                f"{b.speed_limit:.0f} mph"
+
             ]
 
             for c, value in enumerate(rowdata):
@@ -406,7 +405,12 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         # --- Destination Station (Dropdown) ---
         station_dropdown = QtWidgets.QComboBox()
-        station_names = [b[3] for b in GREEN_LINE_DATA if b[3] != ""]
+        station_names = [
+            seg.station_name 
+            for seg in self.state.track_model.segments.values()
+            if hasattr(seg, "station_name") and seg.station_name
+        ]
+
         station_dropdown.addItems(station_names)
         layout.addRow("Destination Station:", station_dropdown)
 

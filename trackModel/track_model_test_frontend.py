@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QTabWidget, QLineEdit, QHBoxLayout, 
     QComboBox, QCheckBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
@@ -786,10 +786,16 @@ class NetworkStatusUI(QWidget):
             self.segment_table.setItem(
                 0, 0, QTableWidgetItem(str(network_status))
             )
+        
+        # Restore scroll positions after all tables are populated (with UI update)
+        QApplication.processEvents()
+        self.restore_scroll_positions()
     
     def clear_all_tables(self):
-        """Clear all tables and reset their dimensions"""
-        # Clear content and reset dimensions for all tables
+        """Clear all tables and reset their dimensions while preserving scroll positions"""
+        # Store scroll positions before clearing
+        scroll_positions = {}
+        
         tables_to_clear = [
             self.segment_table,
             self.track_info_table, 
@@ -799,10 +805,58 @@ class NetworkStatusUI(QWidget):
             self.train_table
         ]
         
+        # Save current scroll positions
+        for i, table in enumerate(tables_to_clear):
+            if table is not None:
+                vertical_scrollbar = table.verticalScrollBar()
+                horizontal_scrollbar = table.horizontalScrollBar()
+                scroll_positions[i] = {
+                    'vertical': vertical_scrollbar.value(),
+                    'horizontal': horizontal_scrollbar.value()
+                }
+        
+        # Clear tables
         for table in tables_to_clear:
-            table.clear()
-            table.setRowCount(0)
-            table.setColumnCount(0)
+            if table is not None:
+                table.clear()
+                table.setRowCount(0)
+                table.setColumnCount(0)
+        
+        # Store scroll positions to restore later
+        self._saved_scroll_positions = scroll_positions
+    
+    def restore_scroll_positions(self):
+        """Restore scroll positions after table repopulation"""
+        if not hasattr(self, '_saved_scroll_positions'):
+            return
+            
+        tables_to_restore = [
+            self.segment_table,
+            self.track_info_table, 
+            self.current_failures_table,
+            self.failure_table,
+            self.station_table,
+            self.train_table
+        ]
+        
+        for i, table in enumerate(tables_to_restore):
+            if table is not None and i in self._saved_scroll_positions:
+                position = self._saved_scroll_positions[i]
+                # Force the scrollbars to be visible if they have content
+                if table.rowCount() > 0:
+                    # Restore scroll positions
+                    vertical_bar = table.verticalScrollBar()
+                    horizontal_bar = table.horizontalScrollBar()
+                    
+                    # Ensure the scroll value doesn't exceed the maximum
+                    max_vertical = vertical_bar.maximum()
+                    max_horizontal = horizontal_bar.maximum()
+                    
+                    vertical_value = min(position['vertical'], max_vertical)
+                    horizontal_value = min(position['horizontal'], max_horizontal)
+                    
+                    vertical_bar.setValue(vertical_value)
+                    horizontal_bar.setValue(horizontal_value)
     
     def populate_dict_as_table(
         self, table_widget, data_dict, 

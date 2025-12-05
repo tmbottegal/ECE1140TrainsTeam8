@@ -306,7 +306,7 @@ class TrackSwitch(TrackSegment):
 
     def __init__(self, block_id: int, length: float, speed_limit: float, 
                  grade: float, elevation: float, underground: bool,
-                 direction: Direction, reverse_switch: bool = False) -> None:
+                 direction: Direction) -> None:
         """Initialize a track switch.
         
         Args:
@@ -322,7 +322,6 @@ class TrackSwitch(TrackSegment):
         
         self.straight_segment: Optional['TrackSegment'] = None
         self.diverging_segment: Optional['TrackSegment'] = None
-        self.reverse_switch = reverse_switch
         self.current_position = 0
 
         self.previous_signal_state = SignalState.RED
@@ -375,46 +374,24 @@ class TrackSwitch(TrackSegment):
         
     def _update_connected_segments(self) -> None:
         """Update connected segments based on current switch position."""
-        
-        match self.reverse_switch:
-            case True:
-                match self.current_position:
-                    case 0:
-                        self.previous_segment = self.straight_segment
-                        if self.straight_segment is not None:
-                            self.straight_segment.previous_segment = self
-                        if self.diverging_segment is not None:
-                            # Remove this switch as next segment when not selected
-                            if self.diverging_segment.previous_segment == self:
-                                self.diverging_segment.previous_segment = None  
+        match self.current_position:
+            case 0:
+                self.next_segment = self.straight_segment
+                if self.straight_segment is not None:
+                    self.straight_segment.previous_segment = self
+                if self.diverging_segment is not None:
+                    # Remove this switch as previous segment when not selected
+                    if self.diverging_segment.previous_segment == self:
+                        self.diverging_segment.previous_segment = None
 
-                    case 1:
-                        self.previous_segment = self.diverging_segment
-                        if self.diverging_segment is not None:
-                            self.diverging_segment.previous_segment = self
-                        if self.straight_segment is not None:
-                            # Remove this switch as next segment when not selected
-                            if self.straight_segment.previous_segment == self:
-                                self.straight_segment.previous_segment = None
-            case False:
-                match self.current_position:
-                    case 0:
-                        self.next_segment = self.straight_segment
-                        if self.straight_segment is not None:
-                            self.straight_segment.previous_segment = self
-                        if self.diverging_segment is not None:
-                            # Remove this switch as previous segment when not selected
-                            if self.diverging_segment.previous_segment == self:
-                                self.diverging_segment.previous_segment = None
-
-                    case 1:
-                        self.next_segment = self.diverging_segment
-                        if self.diverging_segment is not None:
-                            self.diverging_segment.previous_segment = self
-                        if self.straight_segment is not None:
-                            # Remove this switch as previous segment when not selected
-                            if self.straight_segment.previous_segment == self:
-                                self.straight_segment.previous_segment = None
+            case 1:
+                self.next_segment = self.diverging_segment
+                if self.diverging_segment is not None:
+                    self.diverging_segment.previous_segment = self
+                if self.straight_segment is not None:
+                    # Remove this switch as previous segment when not selected
+                    if self.straight_segment.previous_segment == self:
+                        self.straight_segment.previous_segment = None
 
     def is_straight(self) -> bool:
         """Check if switch is in straight position.
@@ -720,18 +697,10 @@ class TrackNetwork:
 
         manipulated_segment.previous_segment = previous_segment
         if isinstance(manipulated_segment, TrackSwitch):
-            if not manipulated_segment.reverse_switch:
-                manipulated_segment.previous_segment = previous_segment
-                manipulated_segment.straight_segment = straight_segment
-                manipulated_segment.diverging_segment = diverging_segment
-            else:
-                manipulated_segment.next_segment = next_segment
-                manipulated_segment.straight_segment = straight_segment
-                manipulated_segment.diverging_segment = diverging_segment
+            manipulated_segment.straight_segment = straight_segment
+            manipulated_segment.diverging_segment = diverging_segment
             manipulated_segment._update_connected_segments()
         else:
-            # Regular segment: set both previous and next
-            manipulated_segment.previous_segment = previous_segment
             manipulated_segment.next_segment = next_segment
 
     #TODO: #104 improve error messages to be more specific about required formatting
@@ -789,6 +758,7 @@ class TrackNetwork:
                 if ("underground" not in lines or 
                         not re.match("^(TRUE|FALSE|true|false)$", 
                                    lines["underground"])):
+                
                     raise ValueError(
                         f"Invalid 'underground' field in layout file at row "
                         f"{current_line}.")
@@ -821,8 +791,7 @@ class TrackNetwork:
                             grade=float(lines["grade"]),
                             elevation=float(lines["elevation"]),
                             underground=lines["underground"].lower() == "true",
-                            direction=Direction(lines["direction"].lower()),
-                            reverse_switch=bool(lines.get("reverse_switch", "false").lower() == "true")
+                            direction=Direction(lines["direction"].lower())
                         )
                         if "beacon_data" in lines and lines["beacon_data"].strip():
                             switch.set_beacon_data(lines["beacon_data"])
@@ -916,29 +885,15 @@ class TrackNetwork:
                             None, 
                             None)
                     case "TrackSwitch":
-                        switch_segment = self.segments[int(lines["block_id"])]
-                        if switch_segment.reverse_switch:
-                            # For reverse switches, straight/diverging are previous segments
-                            self._set_connections(
-                                int(lines["block_id"]), 
-                                None,  # previous will be set based on switch position
-                                (int(lines["next_segment"]) 
-                                 if lines["next_segment"] else None), 
-                                (int(lines["straight_segment"]) 
-                                 if lines["straight_segment"] else None), 
-                                (int(lines["diverging_segment"]) 
-                                 if lines["diverging_segment"] else None))
-                        else:
-                            # For regular switches, straight/diverging are next segments
-                            self._set_connections(
-                                int(lines["block_id"]), 
-                                (int(lines["previous_segment"]) 
-                                 if lines["previous_segment"] else None), 
-                                None,  # next will be set based on switch position
-                                (int(lines["straight_segment"]) 
-                                 if lines["straight_segment"] else None), 
-                                (int(lines["diverging_segment"]) 
-                                 if lines["diverging_segment"] else None))
+                        self._set_connections(
+                            int(lines["block_id"]), 
+                            (int(lines["previous_segment"]) 
+                             if lines["previous_segment"] else None), 
+                            None, 
+                            (int(lines["straight_segment"]) 
+                             if lines["straight_segment"] else None), 
+                            (int(lines["diverging_segment"]) 
+                             if lines["diverging_segment"] else None))
                     case _:
                         raise ValueError(
                             f"Unknown segment type {lines['Type']} at row "

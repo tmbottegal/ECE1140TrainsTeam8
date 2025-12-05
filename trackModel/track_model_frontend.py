@@ -457,10 +457,16 @@ class NetworkStatusUI(QWidget):
             self.segment_table.setHorizontalHeaderLabels(["Network Status"])
             self.segment_table.setItem(
                 0, 0, QTableWidgetItem(str(network_status)))
+        
+        # Restore scroll positions after all tables are populated (with UI update)
+        QApplication.processEvents()
+        self.restore_scroll_positions()
     
     def clear_all_tables(self):
-        """Clear all tables and reset their dimensions"""
-        # Clear content and reset dimensions for all tables
+        """Clear all tables and reset their dimensions while preserving scroll positions"""
+        # Store scroll positions before clearing
+        scroll_positions = {}
+        
         tables_to_clear = [
             self.segment_table,
             self.track_info_table, 
@@ -470,10 +476,58 @@ class NetworkStatusUI(QWidget):
             self.train_table
         ]
         
+        # Save current scroll positions
+        for i, table in enumerate(tables_to_clear):
+            if table is not None:
+                vertical_scrollbar = table.verticalScrollBar()
+                horizontal_scrollbar = table.horizontalScrollBar()
+                scroll_positions[i] = {
+                    'vertical': vertical_scrollbar.value(),
+                    'horizontal': horizontal_scrollbar.value()
+                }
+        
+        # Clear tables
         for table in tables_to_clear:
-            table.clear()
-            table.setRowCount(0)
-            table.setColumnCount(0)
+            if table is not None:
+                table.clear()
+                table.setRowCount(0)
+                table.setColumnCount(0)
+        
+        # Store scroll positions to restore later
+        self._saved_scroll_positions = scroll_positions
+    
+    def restore_scroll_positions(self):
+        """Restore scroll positions after table repopulation"""
+        if not hasattr(self, '_saved_scroll_positions'):
+            return
+            
+        tables_to_restore = [
+            self.segment_table,
+            self.track_info_table, 
+            self.current_failures_table,
+            self.failure_table,
+            self.station_table,
+            self.train_table
+        ]
+        
+        for i, table in enumerate(tables_to_restore):
+            if table is not None and i in self._saved_scroll_positions:
+                position = self._saved_scroll_positions[i]
+                # Force the scrollbars to be visible if they have content
+                if table.rowCount() > 0:
+                    # Restore scroll positions
+                    vertical_bar = table.verticalScrollBar()
+                    horizontal_bar = table.horizontalScrollBar()
+                    
+                    # Ensure the scroll value doesn't exceed the maximum
+                    max_vertical = vertical_bar.maximum()
+                    max_horizontal = horizontal_bar.maximum()
+                    
+                    vertical_value = min(position['vertical'], max_vertical)
+                    horizontal_value = min(position['horizontal'], max_horizontal)
+                    
+                    vertical_bar.setValue(vertical_value)
+                    horizontal_bar.setValue(horizontal_value)
     
     def populate_dict_as_table(self, table_widget, data_dict, 
                                id_column_name="ID", 
@@ -788,8 +842,8 @@ class NetworkStatusUI(QWidget):
             # Create value cell
             value_item = QTableWidgetItem(str(value))
             
-            # Make temperature cells editable, others read-only
-            if "Temperature" in key or "Threshold" in key:
+            # Make only Environmental Temperature and Heater Threshold editable, others read-only
+            if ("Environmental Temperature" in key or "Heater Threshold" in key) and "Rail Temperature" not in key:
                 # Store original Celsius value as item data for temperature conversions
                 if "Temperature" in key:
                     # Extract the Fahrenheit value and convert back to Celsius for storage
@@ -805,7 +859,7 @@ class NetworkStatusUI(QWidget):
                 value_item.setFlags(value_item.flags() | Qt.ItemFlag.ItemIsEditable)
                 value_item.setBackground(QColor(240, 248, 255))  # Light blue background for editable cells
             else:
-                # Make read-only for non-temperature values
+                # Make read-only for all other values including Rail Temperature
                 value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
             self.track_info_table.setItem(row, 1, value_item)
@@ -856,6 +910,11 @@ class NetworkStatusUI(QWidget):
             elif "Heater Threshold" in property_name:
                 self.track_network.set_heater_threshold(new_celsius)
                 self.status_display.append(f"Heater threshold updated to {new_fahrenheit:.1f}°F ({new_celsius:.1f}°C)")
+            
+            elif "Rail Temperature" in property_name:
+                # Rail temperature is read-only, should not be editable
+                self.status_display.append("Error: Rail temperature is read-only and cannot be modified.")
+                return
             
             # Update the display format to include °F
             item.setText(f"{new_fahrenheit:.1f}")

@@ -179,6 +179,8 @@ class TrackSegment:
         # Graph connections
         self.next_segment: Optional['TrackSegment'] = None
         self.previous_segment: Optional['TrackSegment'] = None
+        self.next_segment_reverse_entry: bool = False  # Flag to indicate train should enter at max displacement
+        self.previous_segment_reverse_entry: bool = False  # Flag for backward movement
         self.network = None
         
         # Track status
@@ -269,6 +271,16 @@ class TrackSegment:
         """
         return self.previous_segment
     
+    def set_connection_flags(self, next_reverse: bool = False, previous_reverse: bool = False) -> None:
+        """Set flags indicating how trains should enter connected segments.
+        
+        Args:
+            next_reverse: If True, trains entering next_segment should start at max displacement
+            previous_reverse: If True, trains entering previous_segment should start at max displacement
+        """
+        self.next_segment_reverse_entry = next_reverse
+        self.previous_segment_reverse_entry = previous_reverse
+
     def broadcast_train_command(self, commanded_speed: int=None,
                                  authority: int=None) -> None:
         """Broadcast a command to any train on this segment.
@@ -378,43 +390,37 @@ class TrackSwitch(TrackSegment):
         
         match self.reverse_switch:
             case True:
+                # Reverse switch: control which segment connects TO this switch
+                # Note: Don't modify straight/diverging segments' next_segment - they keep their original connections
                 match self.current_position:
                     case 0:
+                        # Straight path is active - trains can come from straight_segment
                         self.previous_segment = self.straight_segment
-                        if self.straight_segment is not None:
-                            self.straight_segment.previous_segment = self
-                        if self.diverging_segment is not None:
-                            # Remove this switch as next segment when not selected
-                            if self.diverging_segment.previous_segment == self:
-                                self.diverging_segment.previous_segment = None  
 
                     case 1:
+                        # Diverging path is active - trains can come from diverging_segment
                         self.previous_segment = self.diverging_segment
-                        if self.diverging_segment is not None:
-                            self.diverging_segment.previous_segment = self
-                        if self.straight_segment is not None:
-                            # Remove this switch as next segment when not selected
-                            if self.straight_segment.previous_segment == self:
-                                self.straight_segment.previous_segment = None
+                            
             case False:
+                # Regular switch: control which segment this switch connects TO
                 match self.current_position:
                     case 0:
+                        # Straight path is active
                         self.next_segment = self.straight_segment
                         if self.straight_segment is not None:
                             self.straight_segment.previous_segment = self
-                        if self.diverging_segment is not None:
-                            # Remove this switch as previous segment when not selected
-                            if self.diverging_segment.previous_segment == self:
-                                self.diverging_segment.previous_segment = None
+                        # Disconnect diverging path
+                        if self.diverging_segment is not None and self.diverging_segment.previous_segment == self:
+                            self.diverging_segment.previous_segment = None
 
                     case 1:
+                        # Diverging path is active
                         self.next_segment = self.diverging_segment
                         if self.diverging_segment is not None:
                             self.diverging_segment.previous_segment = self
-                        if self.straight_segment is not None:
-                            # Remove this switch as previous segment when not selected
-                            if self.straight_segment.previous_segment == self:
-                                self.straight_segment.previous_segment = None
+                        # Disconnect straight path
+                        if self.straight_segment is not None and self.straight_segment.previous_segment == self:
+                            self.straight_segment.previous_segment = None
 
     def is_straight(self) -> bool:
         """Check if switch is in straight position.
@@ -608,7 +614,6 @@ class TrackNetwork:
     def __init__(self) -> None:
         """Initialize an empty track network."""
         self.segments: Dict[TrackSegment] = {}
-        # EVENTUAL: import train class from train model
         self.trains: Dict['Train'] = {}
         # System-wide properties
         self.line_name = ""
@@ -636,7 +641,8 @@ class TrackNetwork:
 
     def connect_segments(self, seg1_block_id: int, seg2_block_id: int,
                          bidirectional: bool = False,
-                         diverging_seg_block_id: int = None) -> None:
+                         diverging_seg_block_id: int = None,
+                         previous_reverse: bool = False, next_reverse: bool = False) -> None:
         """Connect two segments in the graph.
         
         Args:
@@ -645,6 +651,8 @@ class TrackNetwork:
             bidirectional: Whether connection works in both directions.
             diverging_seg_block_id: ID of diverging segment if connecting
                 a switch.
+            previous_reverse: If True, indicates trains should enter from previous at max displacement.
+            next_reverse: If True, indicates trains should enter from next at max displacement.
         """
 
         segment1 = self.segments.get(seg1_block_id)
@@ -684,14 +692,20 @@ class TrackNetwork:
                     "connecting a switch."
                 )
             segment1.next_segment = segment2
+            # Set the reverse entry flag if this is a front-to-front connection
+            segment1.set_connection_flags(next_reverse=next_reverse, previous_reverse=previous_reverse)
+            
             if bidirectional:
                 segment2.previous_segment = segment1
+                # For bidirectional reverse connections, set the reverse flag for the return path too
+                segment2.set_connection_flags(previous_reverse=next_reverse, next_reverse=previous_reverse)
             else:
                 segment2.previous_segment = None
 
     def _set_connections(self, block_id: int, previous_id: int, 
                          next_id: int = None, straight_id: int = None, 
-                         diverging_id: int = None) -> None:
+                         diverging_id: int = None,
+                         previous_reverse: bool = False, next_reverse: bool = False) -> None:
         """Set connections between track segments.
 
         Args:
@@ -700,6 +714,8 @@ class TrackNetwork:
             next_id: ID of the next segment.
             straight_id: ID of the straight segment (if applicable).
             diverging_id: ID of the diverging segment (if applicable).
+            previous_reverse: If True, indicates trains should enter from previous at max displacement.
+            next_reverse: If True, indicates trains should enter from next at max displacement.
         """
         manipulated_segment = self.segments.get(block_id)
         if manipulated_segment is None:
@@ -733,6 +749,8 @@ class TrackNetwork:
             # Regular segment: set both previous and next
             manipulated_segment.previous_segment = previous_segment
             manipulated_segment.next_segment = next_segment
+            # Set reverse connection flags if specified
+            manipulated_segment.set_connection_flags(next_reverse=next_reverse, previous_reverse=previous_reverse)
 
     #TODO: #104 improve error messages to be more specific about required formatting
     def load_track_layout(self, layout_file: str) -> None: 
@@ -905,6 +923,23 @@ class TrackNetwork:
                     raise ValueError(
                         f"Invalid 'diverging_segment' field in layout file "
                         f"at row {current_line}.")
+                # Validate previous_reverse and next_reverse fields
+                previous_reverse = False
+                next_reverse = False
+                
+                if "previous_reverse" in lines and lines["previous_reverse"].strip():
+                    if not re.match("^(TRUE|FALSE|true|false)$", lines["previous_reverse"]):
+                        raise ValueError(
+                            f"Invalid 'previous_reverse' field in layout file "
+                            f"at row {current_line}.")
+                    previous_reverse = lines["previous_reverse"].lower() == "true"
+                
+                if "next_reverse" in lines and lines["next_reverse"].strip():
+                    if not re.match("^(TRUE|FALSE|true|false)$", lines["next_reverse"]):
+                        raise ValueError(
+                            f"Invalid 'next_reverse' field in layout file "
+                            f"at row {current_line}.")
+                    next_reverse = lines["next_reverse"].lower() == "true"
                 match lines["Type"]:
                     case "TrackSegment" | "LevelCrossing" | "Station":
                         self._set_connections(
@@ -914,7 +949,9 @@ class TrackNetwork:
                             (int(lines["next_segment"]) 
                              if lines["next_segment"] else None), 
                             None, 
-                            None)
+                            None,
+                            previous_reverse,
+                            next_reverse)
                     case "TrackSwitch":
                         switch_segment = self.segments[int(lines["block_id"])]
                         if switch_segment.reverse_switch:
@@ -927,7 +964,9 @@ class TrackNetwork:
                                 (int(lines["straight_segment"]) 
                                  if lines["straight_segment"] else None), 
                                 (int(lines["diverging_segment"]) 
-                                 if lines["diverging_segment"] else None))
+                                 if lines["diverging_segment"] else None),
+                                previous_reverse,
+                                next_reverse)
                         else:
                             # For regular switches, straight/diverging are next segments
                             self._set_connections(
@@ -938,7 +977,9 @@ class TrackNetwork:
                                 (int(lines["straight_segment"]) 
                                  if lines["straight_segment"] else None), 
                                 (int(lines["diverging_segment"]) 
-                                 if lines["diverging_segment"] else None))
+                                 if lines["diverging_segment"] else None),
+                                previous_reverse,
+                                next_reverse)
                     case _:
                         raise ValueError(
                             f"Unknown segment type {lines['Type']} at row "

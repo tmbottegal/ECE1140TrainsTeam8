@@ -662,20 +662,9 @@ class TrackState:
         Advances simulation by one global clock tick.
         CTC manually synchronizes Track Model + Track Controller.
         """
-        # Determine delta time (how many simulated seconds passed)
-        if not hasattr(self, "_last_time"):
-            self._last_time = clock.get_time()
-
-        prev_time = self._last_time
-        current_time = clock.tick()
-        self._last_time = current_time
-
-        delta_s = (current_time - prev_time).total_seconds()
-
-        #current_time = clock.tick()
 
         # ----------------------------------------------------------
-        #  Scheduled manual dispatches: fire when time is reached
+        # 0. CHECK SCHEDULED DISPATCHES *BEFORE* CLOCK TICKS
         # ----------------------------------------------------------
         current_seconds = clock.get_seconds_since_midnight()
 
@@ -684,10 +673,9 @@ class TrackState:
             if current_seconds >= entry["departure_seconds"]:
                 to_dispatch.append(entry)
 
-        # Perform dispatches
+        # Perform dispatches at exact simulation time
         for entry in to_dispatch:
             print(f"[CTC] Executing scheduled dispatch → {entry['train_id']}")
-
             self.dispatch_train(
                 entry["train_id"],
                 entry["start_block"],
@@ -695,49 +683,55 @@ class TrackState:
                 entry["speed_mph"],
                 entry["auth_yd"]
             )
-
             self._pending_dispatches.remove(entry)
 
+        # ----------------------------------------------------------
+        # 1. NOW tick the clock
+        # ----------------------------------------------------------
+        if not hasattr(self, "_last_time"):
+            self._last_time = clock.get_time()
 
-        # --- 1. Update Track Model (moves trains + occupancy) ---
+        prev_time = self._last_time
+        current_time = clock.tick()
+        self._last_time = current_time
+
+        delta_s = (current_time - prev_time).total_seconds()
+        # print(f"DEBUG: delta_s = {delta_s}")
+
+        # ----------------------------------------------------------
+        # 2. Update Track Model
+        # ----------------------------------------------------------
         try:
-            #self.track_model.tick(current_time, delta_s)
             self.track_model.set_time(current_time)
-
         except Exception as e:
             print(f"[CTC] Track Model set_time error: {e}")
 
-        # --- 2. Update Track Controller (signals, switches, crossings) ---
+        # ----------------------------------------------------------
+        # 3. Update Track Controller
+        # ----------------------------------------------------------
         try:
             self.track_controller.tick(current_time, delta_s)
             self.track_controller_hw.tick(current_time, delta_s)
         except Exception:
             pass
 
-        # ------------------------------------------------------------------
-        # --- 3. SYNC OCCUPANCY FROM TRACK MODEL TO CTC'S UI MIRROR -------
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------
+        # 4. Sync occupancy
+        # ----------------------------------------------------------
         try:
-            blocks = self._lines[self.line_name]   # UI-side Block objects
+            blocks = self._lines[self.line_name]
             for ui_block in blocks:
                 tm_segment = self.track_model.segments.get(ui_block.block_id)
                 if tm_segment:
                     ui_block.set_occupancy(tm_segment.occupied)
-                    #signal = getattr(tm_segment, "signal_state", None)
-                    #if signal is None:
-                    #    ui_block.set_signal_state("N/A")
-                    #else:
-                    #    ui_block.set_signal_state(signal.value)
                     if tm_segment.closed:
                         ui_block.status = "closed"
-
-
         except Exception as e:
             print(f"[CTC] Occupancy sync error: {e}")
 
-        # ------------------------------------------------------------------
-        # --- 4. Update suggested speed & authority every tick --------------
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------
+        # 5. Suggest speed & authority for trains (manual mode)
+        # ----------------------------------------------------------
         if self.mode == "manual":
             for train_id, (speed_mps, auth_m) in list(self._train_suggestions.items()):
                 train = self.track_model.trains.get(train_id)
@@ -746,18 +740,13 @@ class TrackState:
 
                 block = train.current_segment.block_id
 
-                # Distance train would travel this tick
                 distance_per_tick = speed_mps * delta_s
 
-
-                # Look ahead 1 block to see if it's closed
                 next_seg = train.current_segment.get_next_segment()
                 if next_seg and next_seg.closed:
-                    # block ahead is closed → stop before entering it
                     new_speed = 0.0
                     new_auth = 0.0
 
-                    # Send updated hard-stop to controllers
                     self.track_controller.receive_ctc_suggestion(block, new_speed, new_auth)
                     self.track_controller_hw.receive_ctc_suggestion(block, new_speed, new_auth)
 
@@ -765,40 +754,22 @@ class TrackState:
                     print(f"[CTC] Train {train_id} STOPPED — Block {next_seg.block_id} is CLOSED")
                     continue
 
-
-                # --- NEW: Move train physically in TrackModel ---
-                # --- MOVE TRAIN IN TRACK MODEL ---
-                #try:
-                #    self.track_model.mto(train_id, distance_per_tick)
-                #except Exception as e:
-                #    print(f"[CTC] Train move error: {e}")
-
-                
-
-                # Reduce authority
+                # new_auth based on movement
                 new_auth = max(0.0, auth_m - distance_per_tick)
 
-
-                # STOP train when out of authority
                 if new_auth <= 0.0:
                     new_auth = 0.0
                     speed_mps = 0.0
 
-                # Send updated suggestion to both controllers
-                #self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
-                #self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth)
-
+                # send to correct controller
                 controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
                 controller.receive_ctc_suggestion(block, speed_mps, new_auth)
 
-
-                # Save updated suggestion
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
 
                 print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
                 print(f"[CTC] Suggestion → Train {train_id} in block {block}: "
                     f"{speed_mps:.2f} m/s, {new_auth:.1f} m authority")
-                
 
 
     # --------------------------------------------------------

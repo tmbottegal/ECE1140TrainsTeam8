@@ -804,7 +804,7 @@ class NetworkStatusUI(QWidget):
         
         # Define custom column order for Segment Info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'signal_state', 'speed_limit', 'length', 'grade', 
+            'block_id', 'type', 'occupied', 'previous_signal_state', 'next_signal_state', 'speed_limit', 'length', 'grade', 
             'elevation', 'direction', 'active_command', 'previous_segment', 'next_segment', 
             'current_position', 'gate_status', 'beacon_data',
         ]
@@ -909,7 +909,7 @@ class NetworkStatusUI(QWidget):
                                         display_value = str(cell_value)
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif col_name == 'signal_state':
+                                elif col_name == 'previous_signal_state' or col_name == 'next_signal_state':
                                     # Convert signal state to user-friendly display with colors
                                     if hasattr(cell_value, 'name'):
                                         signal_name = cell_value.name

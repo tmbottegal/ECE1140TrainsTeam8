@@ -114,7 +114,8 @@ def test_switch_construction() -> None:
     assert not switch.underground
     assert switch.direction == Direction.FORWARD
     assert not switch.occupied
-    assert switch.signal_state == SignalState.RED
+    assert switch.previous_signal_state == SignalState.RED
+    assert switch.next_signal_state == SignalState.RED
     assert switch.failures == set()
     assert switch.current_position == 0
     assert switch.straight_segment is None
@@ -575,16 +576,24 @@ def test_network_set_signal_state_valid() -> None:
     switch = TrackSwitch(1, 100, 30, 2.5, 25, False, Direction.FORWARD)
     network.add_segment(switch)
     
-    assert switch.signal_state == SignalState.RED
+    assert switch.previous_signal_state == SignalState.RED
+    assert switch.next_signal_state == SignalState.RED
     
-    network.set_signal_state(block_id=1, signal_state=SignalState.GREEN)
-    assert switch.signal_state == SignalState.GREEN
-    
-    network.set_signal_state(block_id=1, signal_state=SignalState.YELLOW)
-    assert switch.signal_state == SignalState.YELLOW
-    
-    network.set_signal_state(block_id=1, signal_state=SignalState.SUPERGREEN)
-    assert switch.signal_state == SignalState.SUPERGREEN
+    network.set_signal_state(block_id=1, side=0, signal_state=SignalState.GREEN)
+    assert switch.previous_signal_state == SignalState.GREEN
+    assert switch.next_signal_state == SignalState.RED
+
+    network.set_signal_state(block_id=1, side=1, signal_state=SignalState.YELLOW)
+    assert switch.previous_signal_state == SignalState.GREEN
+    assert switch.next_signal_state == SignalState.YELLOW
+
+    network.set_signal_state(block_id=1, side=0, signal_state=SignalState.RED)
+    assert switch.previous_signal_state == SignalState.RED
+    assert switch.next_signal_state == SignalState.YELLOW
+
+    network.set_signal_state(block_id=1, side=1, signal_state=SignalState.SUPERGREEN)
+    assert switch.previous_signal_state == SignalState.RED
+    assert switch.next_signal_state == SignalState.SUPERGREEN
 
 def test_network_set_signal_state_invalid() -> None:
     network = TrackNetwork()
@@ -597,16 +606,18 @@ def test_network_set_signal_state_invalid() -> None:
     network.add_segment(station)
 
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=99, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=99, side=0, signal_state=SignalState.GREEN)
 
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=1, signal_state=SignalState.GREEN)
-
+        network.set_signal_state(block_id=1, side=0, signal_state=SignalState.GREEN)
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=2, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=2, side=0, signal_state=SignalState.GREEN)
     
     with pytest.raises(ValueError):
-        network.set_signal_state(block_id=3, signal_state=SignalState.GREEN)
+        network.set_signal_state(block_id=3, side=0, signal_state=SignalState.GREEN)
+
+    with pytest.raises(ValueError):
+        network.set_signal_state(block_id=1, side=2, signal_state=SignalState.GREEN)
 
 def test_network_board_passengers_valid() -> None:
     network = TrackNetwork()
@@ -795,7 +806,8 @@ def test_get_segment_status_valid() -> None:
     assert status["grade"] == 2.0
     assert status["underground"] == False
     assert status["occupied"] == False
-    assert status["signal_state"] == SignalState.RED
+    assert status["previous_signal_state"] == SignalState.RED
+    assert status["next_signal_state"] == SignalState.RED
     assert status["failures"] == []
     assert status["closed"] == False
     assert status["next_segment"] == 1

@@ -41,3 +41,4 @@ if __name__ == "__main__":
     window = NetworkStatusUI(network1, network2)
     window.show()
     app.exec()
+    

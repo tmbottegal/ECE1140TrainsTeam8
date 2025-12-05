@@ -324,9 +324,10 @@ class TrackSwitch(TrackSegment):
         self.diverging_segment: Optional['TrackSegment'] = None
         self.current_position = 0
 
-        self.signal_state = SignalState.RED
+        self.previous_signal_state = SignalState.RED
+        self.next_signal_state = SignalState.RED
 
-    def set_signal_state(self, state: SignalState) -> None:
+    def set_signal_state(self, side: int, state: SignalState) -> None:
         """Set the signal state for this track segment.
         
         Args:
@@ -334,8 +335,14 @@ class TrackSwitch(TrackSegment):
         """
         if TrackFailureType.POWER_FAILURE in self.failures:
             return
-        self.signal_state = state
-
+        match side:
+            case 0:
+                self.previous_signal_state = state
+            case 1:
+                self.next_signal_state = state
+            case _:
+                raise ValueError("Invalid signal side. Must be 0 (previous) or 1 (next).")
+            
     def set_switch_paths(self, straight_segment: 'TrackSegment', 
                         diverging_segment: 'TrackSegment') -> None:
         """Set the two possible paths for this switch.
@@ -1215,7 +1222,7 @@ class TrackNetwork:
         segment.set_switch_position(position)
         pass
     
-    def set_signal_state(self, block_id: int,
+    def set_signal_state(self, block_id: int, side: int,
                          signal_state: SignalState) -> None:
         """Set the signal state for a specific block.
         Args:
@@ -1227,7 +1234,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, TrackSwitch):
             raise ValueError(f"Block ID {block_id} is not a switch.")
-        segment.set_signal_state(signal_state)
+        segment.set_signal_state(side, signal_state)
         pass
 
     def set_occupancy(self, block_id: int, occupied: bool) -> None:
@@ -1251,8 +1258,10 @@ class TrackNetwork:
         self.time = new_time
         if new_time.second % 30 == 0:
             for segment in self.segments.values():
-                if isinstance(segment, Station):
+                try:
                     segment.sell_tickets()
+                except Exception as e:
+                    pass
         if new_time.second % 10 == 0:
             self.temperature_sim()
 
@@ -1324,7 +1333,8 @@ class TrackNetwork:
             segment_status["tickets_sold_total"] = segment.tickets_sold_total
         
         if isinstance(segment, TrackSwitch):
-            segment_status["signal_state"] = segment.signal_state
+            segment_status["previous_signal_state"] = segment.previous_signal_state
+            segment_status["next_signal_state"] = segment.next_signal_state
             segment_status["current_position"] = segment.current_position
             segment_status["straight_segment"] = (
                 segment.straight_segment.block_id
@@ -1397,7 +1407,8 @@ class TrackNetwork:
         
         if isinstance(segment, TrackSwitch):
             segment_status["current_position"] = segment.current_position
-            segment_status["signal_state"] = segment.signal_state
+            segment_status["previous_signal_state"] = segment.previous_signal_state
+            segment_status["next_signal_state"] = segment.next_signal_state
 
         return segment_status
 

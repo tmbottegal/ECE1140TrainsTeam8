@@ -1,21 +1,36 @@
 from __future__ import annotations
 import sys,os,logging
 from typing import TYPE_CHECKING, Dict
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView) # sue me, idc :D
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtWidgets import (
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QWidget, QHeaderView, QTabWidget, QTextEdit, QCheckBox)
 
 _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _pkg_root not in sys.path:
-    sys.path.append(_pkg_root)
+if _pkg_root not in sys.path: sys.path.append(_pkg_root)
 from universal.global_clock import clock as global_clock
 from universal.universal import SignalState
 from track_controller_backend import TrackControllerBackend
 
 if TYPE_CHECKING: from track_controller_backend import TrackControllerBackend
 
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+class QTextEditLogger(logging.Handler):
+    def __init__(self, text_edit):
+        super().__init__()
+        self.text_edit = text_edit
+        self.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    
+    def emit(self, record):
+        msg = self.format(record)
+        self.text_edit.append(msg)
+        self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
+
 
 class TrackControllerUI(QWidget):
     def __init__(self, controllers: Dict[str, "TrackControllerBackend"], parent: QWidget | None = None) -> None:
@@ -24,90 +39,159 @@ class TrackControllerUI(QWidget):
         self.backend = next(iter(self.controllers.values()))
         self.manual_mode_enabled = False
         self.current_plc_file = None
+        self.bold_font = QFont()
+        self.bold_font.setBold(True)
+        self.big_font = QFont(self.bold_font)
+        self.big_font.setPointSize(self.bold_font.pointSize() * 2)
+        self.bold_font = QFont()
+        self.bold_font.setBold(True)
         try:
             for c in self.controllers.values():
                 c.add_listener(self.refresh_tables)
         except Exception: logger.exception("not attached to backend dumbass")
         global_clock.register_listener(self._update_clock_display)
         self._build_ui()
+        self._setup_logging()
         self.tableswitch.cellClicked.connect(self._on_switch_clicked)
         self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
         self.plc_button.clicked.connect(self._on_plc_upload)
         self._update_clock_display(global_clock.get_time())
 
+    def _bold(self, widget):
+        widget.setFont(self.bold_font)
+        return widget
+
     def _build_ui(self) -> None:
-        # top stuff
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
+        # top
         top_row = QHBoxLayout()
         self.dropdown_text = QLabel("Wayside SW")
-        font_title = QFont()
-        font_title.setPointSize(16)
-        font_title.setBold(True)
-        self.dropdown_text.setFont(font_title)
+        self.dropdown_text.setFont(self.big_font)
         top_row.addWidget(self.dropdown_text)
         top_row.addStretch()
         self.track_picker = QComboBox()
-        line_names = list(self.controllers.keys())
-        self.track_picker.addItems(line_names)
+        self.track_picker.addItems(list(self.controllers.keys()))
         self.track_picker.setCurrentIndex(0)
         self.track_picker.setFixedHeight(32)
         self.track_picker.setFixedWidth(220)
-        font_drop = QFont()
-        font_drop.setPointSize(14)
-        font_drop.setBold(True)
-        self.track_picker.setFont(font_drop)
+        self.track_picker.setFont(self.big_font)
         self.track_picker.currentTextChanged.connect(self.switch_line)
         top_row.addWidget(self.track_picker)
         layout.addLayout(top_row)
-        #scroll area for tables
-        self.table_hud = QScrollArea()
-        self.table_hud.setWidgetResizable(True)
-        self.container = QWidget()
-        self.container_layout = QVBoxLayout(self.container)
+        self.main_tabs = QTabWidget()
+        self.main_tabs.setFont(self.bold_font)
+        # tables
+        self.table_widget = QWidget()
+        table_layout = QVBoxLayout(self.table_widget)
+        table_layout.setContentsMargins(0,0,0,0)
+        table_layout.setSpacing(10)
         self._add_table("Blocks", "tablemain")
+        self.tablemain.setMinimumHeight(400)
+        self.tablemain.setMaximumHeight(800)
+        table_layout.addWidget(self.tablemain, 5)
         self._add_table("Switches", "tableswitch")
+        self.tableswitch.setMinimumHeight(250)
+        self.tableswitch.setMaximumHeight(500)
+        table_layout.addWidget(self.tableswitch, 3)
         self._add_table("Crossings", "tablecrossing")
-        self.table_hud.setWidget(self.container)
-        layout.addWidget(self.table_hud)
-        #bottom controls
+        self.tablecrossing.setMinimumHeight(150)
+        self.tablecrossing.setMaximumHeight(350)
+        table_layout.addWidget(self.tablecrossing, 2)
+        # logs thing
+        self.logs_widget = QWidget()
+        logs_layout = QVBoxLayout(self.logs_widget)
+        logs_layout.setContentsMargins(5, 5, 5, 5)
+        logs_header = QHBoxLayout()
+        logs_title = QLabel("System Logs")
+        logs_title.setFont(self.big_font)
+        logs_header.addWidget(logs_title)
+        logs_header.addStretch()
+        self.log_level_label = QLabel("Filter Level:")
+        self.log_level_label.setFont(self.bold_font)
+        logs_header.addWidget(self.log_level_label)
+        self.log_level_combo = QComboBox()
+        self.log_level_combo.addItems(["ALL", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+        self.log_level_combo.setCurrentText("INFO")
+        self.log_level_combo.setFont(self.bold_font)
+        self.log_level_combo.currentTextChanged.connect(self._on_log_level_changed)
+        logs_header.addWidget(self.log_level_combo)
+        self.auto_scroll_check = QCheckBox("Auto-scroll")
+        self.auto_scroll_check.setChecked(True)
+        self.auto_scroll_check.setFont(self.bold_font)
+        logs_header.addWidget(self.auto_scroll_check)
+        clear_logs_btn = QPushButton("Clear Logs")
+        clear_logs_btn.setFont(self.bold_font)
+        clear_logs_btn.clicked.connect(self._clear_logs)
+        logs_header.addWidget(clear_logs_btn)
+        logs_layout.addLayout(logs_header)
+        self.logs_display = QTextEdit()
+        self.logs_display.setReadOnly(True)
+        self.logs_display.setFont(QFont("Courier", 9))
+        self.logs_display.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        logs_layout.addWidget(self.logs_display)
+        self.main_tabs.addTab(self.table_widget, "Status Tables")
+        self.main_tabs.addTab(self.logs_widget, "System Logs")
+        layout.addWidget(self.main_tabs)
+        # bottom row
         bottom_row = QHBoxLayout()
         self.plc_button = QPushButton("PLC File Upload")
+        self.plc_button.setFont(self.bold_font)
         bigboi = self.plc_button.sizeHint()
         self.plc_button.setFixedSize(bigboi.width() * 2, bigboi.height() * 2)
         bottom_row.addWidget(self.plc_button)
         self.filename_box = QLineEdit("File: None")
+        self.filename_box.setFont(self.big_font)
         self.filename_box.setReadOnly(True)
         self.filename_box.setFixedWidth(800)
-        font_text = QFont()
-        font_text.setPointSize(14)
-        self.filename_box.setFont(font_text)
         self.filename_box.setFixedHeight(bigboi.height() * 2)
         bottom_row.addWidget(self.filename_box)
         bottom_row.addStretch()
-        #clock
         self.clock_label = QLabel("Time: 2000-01-01 00:00:00")
-        font_clock = QFont()
-        font_clock.setPointSize(14)
-        font_clock.setBold(True)
-        self.clock_label.setFont(font_clock)
+        self.clock_label.setFont(self.big_font)
         self.clock_label.setFixedHeight(bigboi.height() * 2)
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000000; }") #will add to other parts of ui later for iteration 4(after iIfinish everything else)
+        self.clock_label.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; background-color: #000; }")
         bottom_row.addWidget(self.clock_label)
-        #maintenace button
         self.manual_button = QPushButton("Maintenance Mode")
+        self.manual_button.setFont(self.bold_font)
         self.manual_button.setCheckable(True)
         self.manual_button.setFixedHeight(bigboi.height() * 2)
         self.manual_button.toggled.connect(self.toggle_manual_mode)
         bottom_row.addWidget(self.manual_button)
         layout.addLayout(bottom_row)
 
+    def _setup_logging(self) -> None:
+        self.log_handler = QTextEditLogger(self.logs_display)
+        self.log_handler.setLevel(logging.INFO)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(self.log_handler)
+        logger.info("Track Controller UI initialized with logging tab")
+
+    def _on_log_level_changed(self, level_str: str) -> None:
+        level_map = {
+            "ALL": logging.DEBUG,
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL}
+        new_level = level_map.get(level_str, logging.INFO)
+        self.log_handler.setLevel(new_level)
+        logger.info(f"log level now at {level_str}")
+
+    def _clear_logs(self) -> None:
+        self.logs_display.clear()
+        logger.info("the logs have been taken out back")
+
     def _add_table(self, label_text: str, attr_name: str) -> None:
-        self.container_layout.addWidget(QLabel(label_text))
+        label = QLabel(label_text)
+        label.setFont(self.bold_font)
+        if hasattr(self, 'container_layout'): self.container_layout.addWidget(label)
         table = QTableWidget()
+        table.setFont(self.bold_font)
         setattr(self, attr_name, table)
-        self.container_layout.addWidget(table)
+        if hasattr(self, 'container_layout'): self.container_layout.addWidget(table)
 
     def switch_line(self, line_name: str) -> None:
         try:
@@ -123,10 +207,8 @@ class TrackControllerUI(QWidget):
         self.manual_mode_enabled = enabled
         logger.info("Maintenance Mode %s", "enabled" if enabled else "disabled")
         try:
-            for c in self.controllers.values():
-                c.set_maintenance_mode(enabled)
-        except Exception:
-            logger.exception("cant set maintenance mode")
+            for c in self.controllers.values(): c.set_maintenance_mode(enabled)
+        except Exception: logger.exception("cant set maintenance mode")
         self.refresh_tables()
 
     def _on_plc_upload(self) -> None:
@@ -164,8 +246,14 @@ class TrackControllerUI(QWidget):
             line_block_map = {"Blue Line": range(1, 16), "Green Line": list(range(1, 63)) + list(range(122, 151)), "Red Line": range(1, 34),}
             block_ids = line_block_map.get(self.backend.line_name, [])
             self.tablemain.setRowCount(len(block_ids))
-            self.tablemain.setColumnCount(7)
-            self.tablemain.setHorizontalHeaderLabels(["Block", "Suggested Speed (mph)", "Suggested Authority (yd)", "Occupancy", "Commanded Speed (mph)", "Commanded Authority (yd)", "Signal State"]) # sue me, idc :D
+            self.tablemain.setColumnCount(6)
+            self.tablemain.setHorizontalHeaderLabels([
+                "Block", 
+                "Suggested Speed (mph)", 
+                "Suggested Authority (yd)", 
+                "Occupancy", 
+                "Commanded Speed (mph)", 
+                "Commanded Authority (yd)"])
             self.tablemain.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             self.tablemain.verticalHeader().setVisible(False)
             blocks_data = self.backend.blocks
@@ -182,40 +270,48 @@ class TrackControllerUI(QWidget):
                 cmd_auth = data.get("commanded_auth")
                 self._set_table_item(self.tablemain, i, 4, str(cmd_speed), editable=False)
                 self._set_table_item(self.tablemain, i, 5, str(cmd_auth), editable=False)
-                sig = data.get("signal")
-                if isinstance(sig, SignalState): sig_text = sig.name.title()
-                else: sig_text = "N/A"
-                item = QTableWidgetItem(sig_text)
-                if isinstance(sig, SignalState): self._color_signal_item(item, sig)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.tablemain.setItem(i, 6, item)
             switches = self.backend.switches
             switch_map = self.backend.switch_map
             if switches:
                 self.tableswitch.setRowCount(len(switches))
-                self.tableswitch.setColumnCount(3)
-                self.tableswitch.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
+                self.tableswitch.setColumnCount(5)
+                self.tableswitch.setHorizontalHeaderLabels([
+                    "Block", 
+                    "Position",
+                    "Prev Signal",
+                    "Straight Signal", 
+                    "Diverging Signal"])
                 self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tableswitch.verticalHeader().setVisible(False)
                 for i, (sid, pos_int) in enumerate(switches.items()):
                     self.tableswitch.setItem(i, 0, QTableWidgetItem(str(sid)))
-                    pos_text = "Normal" if pos_int == 0 else "Alternate"
+                    pos_text = "Straight" if pos_int == 0 else "Diverging"
                     item = QTableWidgetItem(pos_text)
                     item.setData(Qt.ItemDataRole.UserRole, pos_int)
                     self._apply_editable(item, editable=self.manual_mode_enabled)
                     self.tableswitch.setItem(i, 1, item)
-                    blocks = switch_map.get(sid, ())
-                    blocks_text = ", ".join(str(b) for b in blocks) if blocks else "N/A"
-                    blocks_item = QTableWidgetItem(blocks_text)
-                    blocks_item.setFlags(blocks_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.tableswitch.setItem(i, 2, blocks_item)
+                    switch_signals = getattr(self.backend, '_switch_signals', {})
+                    prev_sig = switch_signals.get((sid, 0), "N/A")
+                    prev_item = self._create_signal_item(prev_sig)
+                    self.tableswitch.setItem(i, 2, prev_item)
+                    straight_sig = switch_signals.get((sid, 1), "N/A")
+                    straight_item = self._create_signal_item(straight_sig)
+                    self.tableswitch.setItem(i, 3, straight_item)
+                    diverging_sig = switch_signals.get((sid, 2), "N/A")
+                    diverging_item = self._create_signal_item(diverging_sig)
+                    self.tableswitch.setItem(i, 4, diverging_item)
             else:
                 self.tableswitch.setRowCount(1)
-                self.tableswitch.setColumnCount(3)
-                self.tableswitch.setHorizontalHeaderLabels(["Block", "Position", "Connected Blocks"])
+                self.tableswitch.setColumnCount(5)
+                self.tableswitch.setHorizontalHeaderLabels([
+                    "Block", 
+                    "Position",
+                    "Prev Signal",
+                    "Straight Signal", 
+                    "Diverging Signal"])
                 self.tableswitch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tableswitch.verticalHeader().setVisible(False)
-                for col in range(3): self.tableswitch.setItem(0, col, QTableWidgetItem("No switches"))
+                for col in range(5): self.tableswitch.setItem(0, col, QTableWidgetItem("No switches"))
             crossing_blocks = self.backend.crossing_blocks
             if crossing_blocks:
                 self.tablecrossing.setRowCount(len(crossing_blocks))
@@ -227,8 +323,7 @@ class TrackControllerUI(QWidget):
                     gate_status = False
                     try:
                         seg = self.backend.track_model.segments.get(block_id)
-                        if seg and hasattr(seg, 'gate_status'):
-                            gate_status = seg.gate_status
+                        if seg and hasattr(seg, 'gate_status'): gate_status = seg.gate_status
                     except Exception: pass
                     self.tablecrossing.setItem(i, 0, QTableWidgetItem(str(cid)))
                     self.tablecrossing.setItem(i, 1, QTableWidgetItem(str(block_id)))
@@ -243,13 +338,22 @@ class TrackControllerUI(QWidget):
                 self.tablecrossing.setHorizontalHeaderLabels(["Crossing ID", "Block", "Status"])
                 self.tablecrossing.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
                 self.tablecrossing.verticalHeader().setVisible(False)
-                for col in range(3):
-                    self.tablecrossing.setItem(0, col, QTableWidgetItem("No crossings"))
+                for col in range(3): self.tablecrossing.setItem(0, col, QTableWidgetItem("No crossings"))
             self.tableswitch.cellClicked.connect(self._on_switch_clicked)
             self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
-        except Exception:
-            logger.exception("failed to refresh tables somehow. what did you do lol")
+        except Exception: logger.exception("failed to refresh tables somehow. what did you do lol")
 
+    def _create_signal_item(self, signal_state) -> QTableWidgetItem:
+        if isinstance(signal_state, SignalState):
+            sig_text = signal_state.name.title()
+            item = QTableWidgetItem(sig_text)
+            self._color_signal_item(item, signal_state)
+        else:
+            sig_text = str(signal_state) if signal_state != "N/A" else "N/A"
+            item = QTableWidgetItem(sig_text)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+    
     def _set_table_item(self, table, row: int, col: int, text: str, editable: bool = False) -> None:
         item = QTableWidgetItem(text)
         self._apply_editable(item, editable=editable)
@@ -295,5 +399,4 @@ class TrackControllerUI(QWidget):
             self.clock_label.setText(f"Time: {time_str}")
             for controller in self.controllers.values():
                 controller.set_time(current_time)
-        except Exception:
-            logger.exception("cant update clock display")
+        except Exception: logger.exception("cant update clock display")

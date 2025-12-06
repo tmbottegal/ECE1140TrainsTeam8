@@ -189,6 +189,11 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.clockLabel = QtWidgets.QLabel(f"Sim Time: {clock.get_time_string()}")
         self.clockLabel.setStyleSheet("font-weight:bold; font-size:14px;")
         layout.addWidget(self.clockLabel)
+
+        self.throughputLabel = QtWidgets.QLabel("Throughput: 0 trips completed")
+        self.throughputLabel.setStyleSheet("font-weight:bold; font-size:14px;")
+        layout.addWidget(self.throughputLabel)
+
         layout.addWidget(self.tabs, stretch=2)
 
         # === Simulation timer (drives all modules) ===
@@ -842,6 +847,11 @@ class CTCWindow(QtWidgets.QMainWindow):
             self.state.tick_all_modules()
                 # update the label for each simulated tick
             self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
+
+            self.throughputLabel.setText(
+                f"Throughput: {self.state.train_throughput} trips completed"
+            )
+
 
 
 

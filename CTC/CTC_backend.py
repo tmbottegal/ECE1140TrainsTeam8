@@ -106,6 +106,9 @@ class ScheduleManager:
         #   "line": "Green Line"
         # }
         self.entries = []
+        self.routes = {}          # train_id → list of legs
+        self.current_leg = {}     # train_id → current leg index
+
 
     # --------------------------------------------------------
     # Add a single schedule entry (called from UI later)
@@ -248,13 +251,22 @@ class ScheduleManager:
                 print(f"[Schedule] FIRST LEG dispatched → {train_id} at {departure_seconds}s")
             else:
                 # future logic — store legs for automatic movement
-                self.entries.append({
-                    "train_id": train_id,
+                # ------------------------------
+                # Store remaining legs in routes
+                # ------------------------------
+                if train_id not in self.routes:
+                    self.routes[train_id] = []
+
+                self.routes[train_id].append({
                     "from_block": start_block,
                     "to_block": dest_block,
                     "depart_seconds": departure_seconds,
                     "arrival_seconds": arrival_seconds
                 })
+
+                # first leg already dispatched above, so initialize index = 0
+                self.current_leg[train_id] = 0
+
                 print(f"[Schedule] Added leg {start_station} → {dest_station} for {train_id}")
 
         print(f"[Schedule] Loaded {num_stops - 1} legs for {train_id}")
@@ -317,6 +329,8 @@ class TrackState:
         self._lines: Dict[str, List[Block]] = {}
         self._by_key: Dict[str, Block] = {}
 
+        
+
         #CTC operation mode
         self.mode = "manual"
 
@@ -333,6 +347,8 @@ class TrackState:
 
         self.set_line(line_name)
         self.schedule = ScheduleManager()
+        self.train_throughput = 0   # how many full routes completed
+
         print(f"[CTC Backend] Initialized for {self.line_name}")
 
     # --------------------------------------------------------
@@ -955,6 +971,56 @@ class TrackState:
                     else:
                         print(f"[DWELL] Train {train_id} completed dwell at block {block}")
                         del self._dwell_end[train_id]
+                        # -------------------------------------------------------
+                        # CHECK IF TRAIN HAS FINISHED A SCHEDULED LEG
+                        # -------------------------------------------------------
+                        if train_id in self.schedule.current_leg:
+
+                            leg_index = self.schedule.current_leg[train_id]
+                            if train_id in self.schedule.routes and leg_index < len(self.schedule.routes[train_id]):
+
+                                current_leg = self.schedule.routes[train_id][leg_index]
+
+                                # Did the train reach the destination block of this leg?
+                                if block == current_leg["to_block"]:
+                                    print(f"[SCHEDULE] Train {train_id} finished leg {leg_index}")
+
+                                    # Move to the next leg
+                                    next_index = leg_index + 1
+                                    self.schedule.current_leg[train_id] = next_index
+
+                                    # If more legs remain → dispatch next immediately (Option A)
+                                    if next_index < len(self.schedule.routes[train_id]):
+                                        next_leg = self.schedule.routes[train_id][next_index]
+
+                                        # Compute fresh suggestions for next leg
+                                        spd, auth = self.compute_suggestions(
+                                            next_leg["from_block"],
+                                            next_leg["to_block"]
+                                        )
+                                        spd_mph = spd * 2.23693629
+                                        auth_yd = auth / 0.9144
+
+                                        # Immediate dispatch (Option A)
+                                        now_sec = clock.get_seconds_since_midnight()
+
+                                        self.schedule_manual_dispatch(
+                                            train_id,
+                                            next_leg["from_block"],
+                                            next_leg["to_block"],
+                                            now_sec,      # depart NOW
+                                            spd_mph,
+                                            auth_yd
+                                        )
+
+                                        print(f"[SCHEDULE] Next leg dispatched immediately → "
+                                            f"{next_leg['from_block']} → {next_leg['to_block']}")
+                                    else:
+                                        print(f"[SCHEDULE] Train {train_id} completed all legs.")
+                                        self.train_throughput += 1
+                                        print(f"[CTC] THROUGHPUT UPDATE → {self.train_throughput} trips completed")
+
+
                         # Recompute speed/authority now that dwell is done
                         dest_block = self._train_destinations.get(train_id)
                         if dest_block is not None:

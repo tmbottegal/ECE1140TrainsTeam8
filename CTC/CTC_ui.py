@@ -175,14 +175,11 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.actionArea.setCurrentWidget(self.blankPage)
         occLayout.addWidget(self.actionArea)
 
-        # === Issues tab (placeholder) ===
-        self.issuesTab = QtWidgets.QWidget()
-        issuesLayout = QtWidgets.QVBoxLayout(self.issuesTab)
-        issuesLayout.addWidget(QtWidgets.QLabel("Issues tab — reserved for diagnostics/logs."))
+       
 
         # === Tabs ===
         self.tabs.addTab(self.occupancyTab, "Occupancy")
-        self.tabs.addTab(self.issuesTab, "Issues")
+        
 
         # === Layout ===
         layout = QtWidgets.QVBoxLayout(cw)
@@ -278,14 +275,24 @@ class CTCWindow(QtWidgets.QMainWindow):
                 item = QtWidgets.QTableWidgetItem(str(value))
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
+               
                 # --- STATUS COLORING ---
                 if c == 2:
                     if b.status == "occupied":
-                        item.setBackground(QtGui.QColor("red"))
+                        # OCCUPIED = GREEN
+                        item.setBackground(QtGui.QColor("#2ecc71"))   # bright green
+                        item.setForeground(QtGui.QColor("black"))
+
+                    elif b.status == "unoccupied":
+                        # UNOCCUPIED = RED
+                        item.setBackground(QtGui.QColor("#e74c3c"))   # bright red
                         item.setForeground(QtGui.QColor("white"))
+
                     elif b.status == "closed":
+                        # CLOSED = GRAY
                         item.setBackground(QtGui.QColor("gray"))
                         item.setForeground(QtGui.QColor("white"))
+
 
                 # --- SIGNAL LIGHT COLORING ---
                 if c == 6:
@@ -757,7 +764,7 @@ class CTCWindow(QtWidgets.QMainWindow):
             self,
             "Maintenance",
             f"Toggle status for block {blk_id}:",
-            ["Open (free)", "Closed"],
+            ["Open (unoccupied)", "Closed"],
             0,
             False
         )

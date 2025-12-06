@@ -70,7 +70,7 @@ class Block:
 
     # --- helper methods for UI updates ---
     def set_occupancy(self, occupied: bool):
-        self.status = "occupied" if occupied else "free"
+        self.status = "occupied" if occupied else "unoccupied"
 
     def set_signal_state(self, state: str):
         self.light = state
@@ -616,7 +616,7 @@ class TrackState:
                     line=name,
                     section=section,
                     block_id=block_id,
-                    status="free",
+                    status="unoccupied",
                     station=station,
                     station_side=str(station_side),
                     switch=switch_text,
@@ -633,7 +633,7 @@ class TrackState:
         # ⭐ Ensure Yard (block 0) exists in UI list
         if 0 not in [b.block_id for b in blocks]:
             blocks.insert(0, Block(
-                line=name, section="", block_id=0, status="free",
+                line=name, section="", block_id=0, status="unoccupied",
                 station="", station_side="", switch="", light="",
                 crossing=False, speed_limit=0.0, length_m=0.0, speed_limit_mps=0.0
             ))
@@ -705,7 +705,7 @@ class TrackState:
                 # 🔥 NEW: update UI mirror status
             for b in self._lines[self.line_name]:
                 if b.block_id == block_id:
-                    b.status = "closed" if closed else "free"
+                    b.status = "closed" if closed else "unoccupied"
             print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
         except Exception as e:
             print(f"[CTC] Maintenance toggle failed: {e}")

@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys,os,logging
 from typing import TYPE_CHECKING, Dict
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtGui import QFont, QTextCursor, QColor
 from PyQt6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -33,6 +33,10 @@ class QTextEditLogger(logging.Handler):
 
 
 class TrackControllerUI(QWidget):
+    VIEW_ONLY_BLOCKS = {
+        "Red Line": list(range(35, 46)) + list(range(67, 72)),
+        "Green Line": list(range(63, 69)) + list(range(117, 122))}
+    
     def __init__(self, controllers: Dict[str, "TrackControllerBackend"], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controllers = controllers
@@ -193,6 +197,14 @@ class TrackControllerUI(QWidget):
         setattr(self, attr_name, table)
         if hasattr(self, 'container_layout'): self.container_layout.addWidget(table)
 
+    def _is_view_only_block(self, block_id: int) -> bool:
+        view_only = self.VIEW_ONLY_BLOCKS.get(self.backend.line_name, [])
+        return block_id in view_only
+
+    def _is_view_only_block(self, block_id: int) -> bool:
+        view_only = self.VIEW_ONLY_BLOCKS.get(self.backend.line_name, [])
+        return block_id in view_only
+
     def switch_line(self, line_name: str) -> None:
         try:
             try: self.backend.remove_listener(self.refresh_tables)
@@ -243,7 +255,9 @@ class TrackControllerUI(QWidget):
             except Exception:pass
             try: self.tablecrossing.itemChanged.disconnect()
             except Exception: pass
-            line_block_map = {"Blue Line": range(1, 16), "Green Line": list(range(1, 63)) + list(range(122, 151)), "Red Line": range(1, 34),}
+            line_block_map = {
+                "Green Line": list(range(1, 63)) + list(range(63, 69)) + list(range(117, 122)) + list(range(122, 151)),
+                "Red Line": list(range(1, 34)) + list(range(35, 46)) + list(range(67, 72)),}
             block_ids = line_block_map.get(self.backend.line_name, [])
             self.tablemain.setRowCount(len(block_ids))
             self.tablemain.setColumnCount(6)
@@ -258,20 +272,36 @@ class TrackControllerUI(QWidget):
             self.tablemain.verticalHeader().setVisible(False)
             blocks_data = self.backend.blocks
             for i, block in enumerate(block_ids):
-                self.tablemain.setItem(i, 0, QTableWidgetItem(str(block)))
+                is_view_only = self._is_view_only_block(block)
+                block_item = QTableWidgetItem(str(block))
+                if is_view_only:
+                    block_item.setBackground(QColor(200, 200, 200))
+                    block_item.setForeground(QColor(100, 100, 100))
+                self.tablemain.setItem(i, 0, block_item)
                 data = blocks_data.get(block, {})
-                self._set_table_item(self.tablemain, i, 1, str(data.get("suggested_speed", "N/A")), editable=False)
-                self._set_table_item(self.tablemain, i, 2, str(data.get("suggested_auth", "N/A")), editable=False)
+                self._set_table_item_with_viewonly(self.tablemain, i, 1, str(data.get("suggested_speed", "N/A")), editable=False, view_only=is_view_only)
+                self._set_table_item_with_viewonly(self.tablemain, i, 2, str(data.get("suggested_auth", "N/A")), editable=False, view_only=is_view_only)
                 occ_val = data.get("occupied")
                 if occ_val == "N/A": occ_text = "N/A"
                 else: occ_text = "Occupied" if occ_val else "Unoccupied"
-                self._set_table_item(self.tablemain, i, 3, occ_text, editable=False)
+                occ_item = QTableWidgetItem(occ_text)
+                self._apply_editable(occ_item, editable=False)
+                if occ_val == "N/A": pass
+                elif occ_val:
+                    occ_item.setBackground(Qt.GlobalColor.green)
+                    occ_item.setForeground(Qt.GlobalColor.black)
+                else:
+                    occ_item.setBackground(Qt.GlobalColor.red)
+                    occ_item.setForeground(Qt.GlobalColor.white)
+                if is_view_only:
+                    occ_item.setBackground(QColor(200, 200, 200))
+                    occ_item.setForeground(QColor(100, 100, 100))
+                self.tablemain.setItem(i, 3, occ_item)
                 cmd_speed = data.get("commanded_speed")
                 cmd_auth = data.get("commanded_auth")
-                self._set_table_item(self.tablemain, i, 4, str(cmd_speed), editable=False)
-                self._set_table_item(self.tablemain, i, 5, str(cmd_auth), editable=False)
+                self._set_table_item_with_viewonly(self.tablemain, i, 4, str(cmd_speed), editable=False, view_only=is_view_only)
+                self._set_table_item_with_viewonly(self.tablemain, i, 5, str(cmd_auth), editable=False, view_only=is_view_only)
             switches = self.backend.switches
-            switch_map = self.backend.switch_map
             if switches:
                 self.tableswitch.setRowCount(len(switches))
                 self.tableswitch.setColumnCount(5)
@@ -341,7 +371,8 @@ class TrackControllerUI(QWidget):
                 for col in range(3): self.tablecrossing.setItem(0, col, QTableWidgetItem("No crossings"))
             self.tableswitch.cellClicked.connect(self._on_switch_clicked)
             self.tablecrossing.cellClicked.connect(self._on_crossing_clicked)
-        except Exception: logger.exception("failed to refresh tables somehow. what did you do lol")
+        except Exception: 
+            logger.exception("failed to refresh tables somehow. what did you do lol")
 
     def _create_signal_item(self, signal_state) -> QTableWidgetItem:
         if isinstance(signal_state, SignalState):
@@ -359,6 +390,22 @@ class TrackControllerUI(QWidget):
         self._apply_editable(item, editable=editable)
         table.setItem(row, col, item)
 
+    def _set_table_item_with_viewonly(self, table, row: int, col: int, text: str, editable: bool = False, view_only: bool = False) -> None:
+        item = QTableWidgetItem(text)
+        self._apply_editable(item, editable=editable)
+        if view_only:
+            item.setBackground(QColor(200, 200, 200))
+            item.setForeground(QColor(100, 100, 100))
+        table.setItem(row, col, item)
+
+    def _set_table_item_with_viewonly(self, table, row: int, col: int, text: str, editable: bool = False, view_only: bool = False) -> None:
+        item = QTableWidgetItem(text)
+        self._apply_editable(item, editable=editable)
+        if view_only:
+            item.setBackground(QColor(200, 200, 200))
+            item.setForeground(QColor(100, 100, 100))
+        table.setItem(row, col, item)
+
     def _apply_editable(self, item: QTableWidgetItem, editable: bool = False) -> None:
         if editable: item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         else: item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -366,8 +413,12 @@ class TrackControllerUI(QWidget):
     def _color_signal_item(self, item: QTableWidgetItem, sig: SignalState) -> None:
         if sig == SignalState.RED: item.setBackground(Qt.GlobalColor.red)
         elif sig == SignalState.YELLOW: item.setBackground(Qt.GlobalColor.yellow)
-        elif sig == SignalState.GREEN: item.setBackground(Qt.GlobalColor.green)
-        elif sig == SignalState.SUPERGREEN: item.setBackground(Qt.GlobalColor.darkGreen)
+        elif sig == SignalState.GREEN: 
+            item.setBackground(Qt.GlobalColor.green)
+            item.setForeground(Qt.GlobalColor.black)
+        elif sig == SignalState.SUPERGREEN:
+            item.setBackground(Qt.GlobalColor.darkGreen)
+            item.setForeground(Qt.GlobalColor.black)
 
     def _on_switch_clicked(self, row: int, col: int) -> None:
         if not self.manual_mode_enabled: return

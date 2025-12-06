@@ -95,7 +95,6 @@ class TrainModelBackend:
         self._clock_driven: bool = True  # registered to global clock; suppress local stepping
         self.time: datetime = datetime(2000, 1, 1, 0, 0, 0)
 
-
     # ------------------------------------------------------------------
     # clock listener
     def _on_clock_tick(self, now: datetime) -> None:
@@ -406,12 +405,6 @@ class TrainModelBackend:
 
 # multi-train wrapper that binds a TrainModelBackend to the Track Network 
 class Train:
-    """
-      - owns its own TrainModelBackend
-      - binds to TrackNetwork (add_train/connect_train) for grade/speed-limit/beacon/occupancy
-      - maintains its block + in-block displacement (local view, kept in sync with network)
-    """
-
     def __init__(self, train_id: int, backend: Optional["TrainModelBackend"] = None) -> None:
         self.train_id = train_id
         self.tm = backend if backend is not None else TrainModelBackend()
@@ -523,21 +516,26 @@ class Train:
             prev_len = float(getattr(prev_seg, "length", 0.0))
             new_disp = max(0.0, new_pos + prev_len)
 
+            # bug fix: clear occupancy from current segment before updating network
+            _set_occ(self.current_segment, False)
+
             # tell network first; if it fails, revert
             ok = self._network_set_location(
                 getattr(prev_seg, "block_id", getattr(prev_seg, "id", -1)),
                 new_disp,
             )
             if not ok:
+                # revert occupancy
+                _set_occ(self.current_segment, True)
                 return False
 
             # toggle occupancies
-            _set_occ(self.current_segment, False)
             _set_occ(prev_seg, True)
 
             self.current_segment = prev_seg
             self.segment_displacement_m = new_disp
             self._sync_backend_track_segment()
+            logger.debug(f"Train {self.train_id} moved backwards to block {prev_seg.block_id}")
             return True
 
         # moving forwards
@@ -572,6 +570,7 @@ class Train:
             self.current_segment = next_seg
             self.segment_displacement_m = new_disp
             self._sync_backend_track_segment()
+            logger.debug(f"Train {self.train_id} moved forward to block {next_seg.block_id}")
             return True
 
         # still inside this block
@@ -600,9 +599,42 @@ class Train:
             pass
         if dt_s > 0.0:
             self._advance_along_track(float(self.tm.velocity) * float(dt_s)) # distance = speed * time
-
+    
     # UI/report 
     def report_state(self) -> dict:
+        s = self.tm.report_state()
+        s.update({
+            "train_id": self.train_id,
+            "track_block_id": None if self.current_segment is None else getattr(self.current_segment, "block_id", None),
+            "inblock_displacement_m": self.segment_displacement_m,
+        })
+        return s
+
+    def _check_door_events(self) -> None:
+        # detect door opening events
+        left_opened = self.tm.left_doors and not self._prev_left_doors
+        right_opened = self.tm.right_doors and not self._prev_right_doors
+
+        if left_opened or right_opened:
+            # doors just opened, calculate passengers exiting
+            if self.tm.passenger_count > 0:
+                # 30% of passengers exiting at each stop
+                exit_count = max(1, int(self.tm.passenger_count * 0.3))
+                exited = self.tm.alight_passengers(exit_count)
+                
+                # report back to Track Model
+                if self.network and hasattr(self.network, 'passengers_exiting'):
+                    try:
+                        block_id = getattr(self.current_segment, 'block_id', None)
+                        if block_id is not None:
+                            self.network.passengers_exiting(block_id, self.train_id, exited)
+                            logger.info(f"Train {self.train_id}: {exited} passengers exited at block {block_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to report passenger exits to Track Model: {e}")
+
+        # update previous door states
+        self._prev_left_doors = self.tm.left_doors
+        self._prev_right_doors = self.tm.right_doors
         s = self.tm.report_state()
         s.update({
             "train_id": self.train_id,
@@ -616,18 +648,19 @@ class Train:
         """TrackModel calls this at stations to add riders"""
         return self.tm.board_passengers(n)
 
-    def notify_passengers_exiting(self, n: int, station_id: int | str | None = None) -> int:  #BUG: #148 TrackModel dpes know when the doors are open and will not call this, just call the passengers_exiting function when doors open
-        """
-        TrackModel calls this when doors open so riders exit
-        report throughput back to TrackModel if it exposes passengers_exiting(...).
-        """
+    def alight_passengers(self, n: int) -> int:
         exited = self.tm.alight_passengers(n)
-        try:
-            # signature: passengers_exiting(block_id, count)
-            if hasattr(self.network, "passengers_exiting"):
-                self.network.passengers_exiting(station_id, self.train_id, exited)
-        except Exception:
-            pass
+        
+        # report to Track Model when passengers exit
+        if exited > 0 and self.network and hasattr(self.network, 'passengers_exiting'):
+            try:
+                block_id = getattr(self.current_segment, 'block_id', None)
+                if block_id is not None:
+                    self.network.passengers_exiting(block_id, self.train_id, exited)
+                    logger.info(f"Train {self.train_id}: {exited} passengers exited at block {block_id}")
+            except Exception as e:
+                logger.warning(f"Failed to report passenger exits to Track Model: {e}")
+        
         return exited
     
     def train_command_interrupt(self, block_id: int) -> None:

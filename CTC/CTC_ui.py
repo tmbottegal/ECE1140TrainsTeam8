@@ -368,14 +368,16 @@ class CTCWindow(QtWidgets.QMainWindow):
 
             # === 2. Starting Block ===
             start_block, ok_block = QtWidgets.QInputDialog.getInt(
-                self, "Starting Block", "Enter starting block number:", 1, 1, 150
+                self, "Starting Block", "Enter starting block number:", 0, 0, 150
             )
             if not ok_block:
                 return
+            
+
 
             # === 3. Destination Block ===
             dest_block, ok_dest = QtWidgets.QInputDialog.getInt(
-                self, "Destination Block", "Enter final block number:", 1, 1, 150
+                self, "Destination Block", "Enter final block number:", 0, 0, 150
             )
             if not ok_dest:
                 return
@@ -462,6 +464,9 @@ class CTCWindow(QtWidgets.QMainWindow):
         def confirm():
             train_id = train_id_input.text().strip().upper()
             start_block = int(start_block_input.value())
+            
+         
+
             dest_station = station_dropdown.currentText()
             arrival_time = arrival_input.time().toString("HH:mm")
 
@@ -795,7 +800,9 @@ class CTCWindow(QtWidgets.QMainWindow):
         #btnRow.addWidget(addBtn)
 
         loadBtn = QtWidgets.QPushButton("Load From CSV")
-        loadBtn.clicked.connect(self._load_schedule_csv)
+        #loadBtn.clicked.connect(self._load_schedule_csv)
+        loadBtn.clicked.connect(self._load_route_a_csv)
+
         btnRow.addWidget(loadBtn)
 
         btnRow.addStretch(1)
@@ -808,6 +815,18 @@ class CTCWindow(QtWidgets.QMainWindow):
         # Fill table with any existing schedule entries
         self._refresh_schedule_table()
 
+    def _load_route_a_csv(self):
+        filepath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Route Schedule",
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        print(f"[UI] Loading schedule CSV: {filepath}")
+        self.state.schedule.load_route_csv(filepath, self.state)
 
     # ---------------------------------------------------------
     # Global Tick — drives simulation + UI

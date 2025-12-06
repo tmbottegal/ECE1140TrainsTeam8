@@ -146,6 +146,119 @@ class ScheduleManager:
         except Exception as e:
             print(f"[Schedule] Failed to load CSV: {e}")
 
+    def load_route_csv(self, filepath: str, ctc_backend):
+        """
+        Load a route CSV with multiple stops and schedule
+        ALL legs of the trip based on arrival times.
+        """
+
+        import csv
+        from datetime import datetime, timedelta
+
+        print(f"[Schedule] Loading route schedule: {filepath}")
+
+        # ----- Read CSV -----
+        with open(filepath, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+        if len(rows) < 2:
+            print("[Schedule] ERROR: CSV must contain header + times row.")
+            return
+
+        header = rows[0]
+        times = rows[1]
+
+        route_name = header[0].strip()
+        print(f"[Schedule] Route name: {route_name}")
+
+        TRAIN_NAMES = {
+            "Route A": "Avocet",
+            "Route B": "Bobolink",
+            "Route C": "Cardinal"
+        }
+        train_id = TRAIN_NAMES.get(route_name, route_name.replace(" ", ""))
+        print(f"[Schedule] Train assigned → {train_id}")
+
+        # ----- Stations + times -----
+        stations = header[1:]       # e.g. ["Yard","Glenbury","Dormont",...]
+        arrival_times = times[1:]   # ["7:00 AM", "7:02 AM", ...]
+
+        if len(stations) != len(arrival_times):
+            print("[Schedule] ERROR: Station count must match arrival times.")
+            return
+
+        # ----- Convert arrival times into datetime objects -----
+        sim_now = clock.get_time()
+        midnight = sim_now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        parsed_arrivals = []
+        for t in arrival_times:
+            t_dt = datetime.strptime(t.strip(), "%I:%M %p")
+            arr_dt = midnight.replace(hour=t_dt.hour, minute=t_dt.minute)
+            if arr_dt < sim_now:
+                arr_dt += timedelta(days=1)
+            parsed_arrivals.append(arr_dt)
+
+        # ----- MULTIPLE STOP LOGIC -----
+        num_stops = len(stations)
+
+        for i in range(num_stops - 1):
+            start_station = stations[i]
+            dest_station = stations[i + 1]
+
+            start_block = ctc_backend.station_to_block(start_station)
+            dest_block = ctc_backend.station_to_block(dest_station)
+
+            if start_block is None:
+                print(f"[Schedule] ERROR: No block for station '{start_station}'")
+                return
+            if dest_block is None:
+                print(f"[Schedule] ERROR: No block for station '{dest_station}'")
+                return
+
+            # arrival time at NEXT station
+            arrival_dt = parsed_arrivals[i + 1]
+            arrival_seconds = int((arrival_dt - midnight).total_seconds())
+
+            # ---- travel time between these stops ----
+            travel_s = ctc_backend.compute_travel_time(start_block, dest_block)
+
+            # ---- departure time = arrival - travel ----
+            departure_seconds = arrival_seconds - int(travel_s)
+
+            # For first leg: THIS is the actual dispatch time
+            is_first_leg = (i == 0)
+
+            # compute suggestions
+            speed_mps, auth_m = ctc_backend.compute_suggestions(start_block, dest_block)
+            speed_mph = speed_mps * 2.23693629
+            auth_yd = auth_m / 0.9144
+
+            if is_first_leg:
+                # schedule dispatch into the world
+                ctc_backend.schedule_manual_dispatch(
+                    train_id,
+                    start_block,
+                    dest_block,
+                    departure_seconds,
+                    speed_mph,
+                    auth_yd
+                )
+                print(f"[Schedule] FIRST LEG dispatched → {train_id} at {departure_seconds}s")
+            else:
+                # future logic — store legs for automatic movement
+                self.entries.append({
+                    "train_id": train_id,
+                    "from_block": start_block,
+                    "to_block": dest_block,
+                    "depart_seconds": departure_seconds,
+                    "arrival_seconds": arrival_seconds
+                })
+                print(f"[Schedule] Added leg {start_station} → {dest_station} for {train_id}")
+
+        print(f"[Schedule] Loaded {num_stops - 1} legs for {train_id}")
+
     # --------------------------------------------------------
     # Retrieve entries for UI table
     # --------------------------------------------------------
@@ -212,6 +325,8 @@ class TrackState:
         self._train_progress: Dict[str, float] = {}   # cumulative distance per train
         self._pending_dispatches = []   # stores scheduled manual dispatches
 
+        self._dwell_end = {}   # train_id → dwell end time in seconds
+        self._last_block = {}  # train_id → last block id to detect arrivals
 
         self.maintenance_enabled = False
 
@@ -294,19 +409,58 @@ class TrackState:
 
     def compute_travel_time(self, start_block: int, dest_block: int) -> float:
         """
-        Returns travel time in seconds using real TrackModel lengths
-        and the computed safe speed from compute_suggestions().
+        Returns total travel time in seconds using:
+        - real track lengths
+        - safe speed from compute_suggestions()
+        - dwell time (30s per station block reached, including destination)
         """
+        # Get speed + movement authority
         speed_mps, authority_m = self.compute_suggestions(start_block, dest_block)
 
         if speed_mps <= 0:
             return float('inf')
 
-        return authority_m / speed_mps
+        # -----------------------------
+        # 1. Get the real path
+        # -----------------------------
+        path = self.find_path(start_block, dest_block)
+
+        if not path:
+            # No path → fallback travel time
+            return authority_m / speed_mps
+
+        # -----------------------------
+        # 2. Count station blocks in the path
+        # -----------------------------
+        station_count = 0
+        for bid in path:
+            seg = self.track_model.segments.get(bid)
+            if seg and getattr(seg, "station_name", ""):
+                station_count += 1
+
+        # 30s dwell for each station in path
+        dwell_time_s = station_count * 30
+
+        # -----------------------------
+        # 3. Movement time
+        # -----------------------------
+        moving_time_s = authority_m / speed_mps
+
+        # -----------------------------
+        # 4. Total time = movement + dwell
+        # -----------------------------
+        return moving_time_s + dwell_time_s
+
+
 
     def find_path(self, start_block: int, dest_block: int) -> List[int]:
         """Return the actual connected block path using the track model graph."""
         from collections import deque
+        # 🔥 Fix TrackModel bug: block 0 is actually Yard (63)
+        if start_block == 0:
+            start_block = 63
+        if dest_block == 0:
+            dest_block = 63
         
         tm = self.track_model.segments
         visited = set()
@@ -340,8 +494,13 @@ class TrackState:
                 neighbors.append(seg.previous_segment.block_id)
 
             for nb in neighbors:
+                # 🔥 Do not allow yard-as-0 to ever enter the BFS
+                if nb == 0:
+                    nb = 63
+
                 if nb not in visited:
                     queue.append((nb, path + [nb]))
+
 
             
 
@@ -455,6 +614,13 @@ class TrackState:
 
         # Sort based on numeric block order for UI
         blocks.sort(key=lambda b: b.block_id)
+        # ⭐ Ensure Yard (block 0) exists in UI list
+        if 0 not in [b.block_id for b in blocks]:
+            blocks.insert(0, Block(
+                line=name, section="", block_id=0, status="free",
+                station="", station_side="", switch="", light="",
+                crossing=False, speed_limit=0.0, length_m=0.0, speed_limit_mps=0.0
+            ))
 
         self._lines[name] = blocks
         self._rebuild_index()
@@ -486,6 +652,8 @@ class TrackState:
             self.track_model.add_train(new_train)
             start_block = int(start_block)
             self.track_model.connect_train(train_id, start_block, displacement=0.0)
+            #self.track_model.connect_train(train_id, start_block, displacement=0.0, direction="FORWARD")
+
 
             # ⭐ STORE DESTINATION FOR AUTHORITY LOGIC
             self._train_destinations[train_id] = dest_block
@@ -644,14 +812,40 @@ class TrackState:
                     print(f"[CTC] {line_name} Crossing {block_id} → {status}")
                     return
 
-    def station_to_block(self, station_name: str) -> Optional[int]:
-        """
-        Given a station name, return the block_id from the UI mirror (self._lines).
-        """
-        for b in self._lines[self.line_name]:
-            if b.station.strip().lower() == station_name.strip().lower():
-                return b.block_id
+    def station_to_block(self, station_name: str):
+        # Normalize common typos and variations
+        normalized = station_name.lower().replace(".", "").replace(" ", "")
+
+        ALIASES = {
+            "yard": "Yard",
+            "theyard": "Yard",
+            "storageyard": "Yard",
+            "glenbury": "Glenbury",
+            "dormont": "Dormont",
+            "mtlebanon": "Mt. Lebonon",    # map spelling
+            "mtlebonon": "Mt. Lebonon",
+            "central": "Central",
+            "inglewood": "Inglewood"
+        }
+
+
+        # Replace with canonical map spelling if needed
+        if normalized in ALIASES:
+            station_name = ALIASES[normalized]
+        
+        if station_name == "Yard":
+            return 63     # ALWAYS block 63
+
+        # Search all station segments in the track model
+        for block, seg in self.track_model.segments.items():
+            if hasattr(seg, "station_name"):
+                if seg.station_name.lower().replace(" ", "") == station_name.lower().replace(" ", ""):
+                    return block
+
         return None
+
+
+
 
       # --------------------------------------------------------
     
@@ -729,43 +923,98 @@ class TrackState:
         except Exception as e:
             print(f"[CTC] Occupancy sync error: {e}")
 
-        # ----------------------------------------------------------
-        # 5. Suggest speed & authority for trains (manual mode)
-        # ----------------------------------------------------------
         if self.mode == "manual":
             for train_id, (speed_mps, auth_m) in list(self._train_suggestions.items()):
+
+                # -------------------------
+                # REQUIRED: get train + segment
+                # -------------------------
                 train = self.track_model.trains.get(train_id)
                 if not train or not train.current_segment:
                     continue
 
-                block = train.current_segment.block_id
+                seg = train.current_segment
+                block = seg.block_id
+                current_seconds = clock.get_seconds_since_midnight()
 
-                distance_per_tick = speed_mps * delta_s
+                # Track last block for station arrival detection
+                if train_id not in self._last_block:
+                    self._last_block[train_id] = block
 
+                # -------------------------------
+                # 1. IF TRAIN IS CURRENTLY DWELLING
+                # -------------------------------
+                if train_id in self._dwell_end:
+                    if current_seconds < self._dwell_end[train_id]:
+                        controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                        controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                        self._train_suggestions[train_id] = (0.0, 0.0)
+                        print(f"[DWELL] Train {train_id} dwelling at station block {block} "
+                            f"for {int(self._dwell_end[train_id] - current_seconds)} more seconds")
+                        continue
+                    else:
+                        print(f"[DWELL] Train {train_id} completed dwell at block {block}")
+                        del self._dwell_end[train_id]
+                        # Recompute speed/authority now that dwell is done
+                        dest_block = self._train_destinations.get(train_id)
+                        if dest_block is not None:
+                            new_speed, new_auth = self.compute_suggestions(block, dest_block)
+                            speed_mps, auth_m = new_speed, new_auth
+                            print(f"[DWELL] Recomputed post-dwell suggestions → {speed_mps:.2f} m/s, {auth_m:.1f} m")
+
+                        # fall through
+
+                # -------------------------------
+                # 2. DETECT ARRIVAL INTO A STATION
+                # -------------------------------
+                is_station = bool(getattr(seg, "station_name", ""))
+
+                if is_station and self._last_block[train_id] != block:
+                    dwell_time = 30
+                    self._dwell_end[train_id] = current_seconds + dwell_time
+                    print(f"[DWELL] Train {train_id} ARRIVED at station block {block}, starting {dwell_time}s dwell.")
+
+                    controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                    controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                    self._train_suggestions[train_id] = (0.0, 0.0)
+
+                    self._last_block[train_id] = block
+                    continue
+
+                # -------------------------------
+                # 3. BLOCK CLOSED? STOP TRAIN
+                # -------------------------------
                 next_seg = train.current_segment.get_next_segment()
                 if next_seg and next_seg.closed:
                     new_speed = 0.0
                     new_auth = 0.0
 
-                    self.track_controller.receive_ctc_suggestion(block, new_speed, new_auth)
-                    self.track_controller_hw.receive_ctc_suggestion(block, new_speed, new_auth)
+                    controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                    controller.receive_ctc_suggestion(block, new_speed, new_auth)
 
                     self._train_suggestions[train_id] = (new_speed, new_auth)
                     print(f"[CTC] Train {train_id} STOPPED — Block {next_seg.block_id} is CLOSED")
                     continue
 
-                # new_auth based on movement
+                # -------------------------------
+                # 4. NORMAL MOVEMENT
+                # -------------------------------
+                distance_per_tick = speed_mps * delta_s
                 new_auth = max(0.0, auth_m - distance_per_tick)
 
                 if new_auth <= 0.0:
                     new_auth = 0.0
                     speed_mps = 0.0
 
-                # send to correct controller
                 controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
                 controller.receive_ctc_suggestion(block, speed_mps, new_auth)
 
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
+
+                # -------------------------------
+                # 5. UPDATE last_block FOR NEXT TICK
+                # -------------------------------
+                self._last_block[train_id] = block
 
                 print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
                 print(f"[CTC] Suggestion → Train {train_id} in block {block}: "

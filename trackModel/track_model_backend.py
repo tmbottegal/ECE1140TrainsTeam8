@@ -179,6 +179,8 @@ class TrackSegment:
         # Graph connections
         self.next_segment: Optional['TrackSegment'] = None
         self.previous_segment: Optional['TrackSegment'] = None
+        self.next_segment_reverse_entry: bool = False  # Flag to indicate train should enter at max displacement
+        self.previous_segment_reverse_entry: bool = False  # Flag for backward movement
         self.network = None
         
         # Track status
@@ -269,6 +271,16 @@ class TrackSegment:
         """
         return self.previous_segment
     
+    def set_connection_flags(self, next_reverse: bool = False, previous_reverse: bool = False) -> None:
+        """Set flags indicating how trains should enter connected segments.
+        
+        Args:
+            next_reverse: If True, trains entering next_segment should start at max displacement
+            previous_reverse: If True, trains entering previous_segment should start at max displacement
+        """
+        self.next_segment_reverse_entry = next_reverse
+        self.previous_segment_reverse_entry = previous_reverse
+
     def broadcast_train_command(self, commanded_speed: int=None,
                                  authority: int=None) -> None:
         """Broadcast a command to any train on this segment.
@@ -324,9 +336,11 @@ class TrackSwitch(TrackSegment):
         self.diverging_segment: Optional['TrackSegment'] = None
         self.current_position = 0
 
-        self.signal_state = SignalState.RED
+        self.previous_signal_state = SignalState.RED
+        self.straight_signal_state = SignalState.RED
+        self.diverging_signal_state = SignalState.RED
 
-    def set_signal_state(self, state: SignalState) -> None:
+    def set_signal_state(self, signal_side: int, state: SignalState) -> None:
         """Set the signal state for this track segment.
         
         Args:
@@ -334,8 +348,16 @@ class TrackSwitch(TrackSegment):
         """
         if TrackFailureType.POWER_FAILURE in self.failures:
             return
-        self.signal_state = state
-
+        match signal_side:
+            case 0:
+                self.previous_signal_state = state
+            case 1:
+                self.straight_signal_state = state
+            case 2:
+                self.diverging_signal_state = state
+            case _:
+                raise ValueError("Invalid signal side. Must be 0 (previous) or 1 (straight) or 2 (diverging).")
+            
     def set_switch_paths(self, straight_segment: 'TrackSegment', 
                         diverging_segment: 'TrackSegment') -> None:
         """Set the two possible paths for this switch.
@@ -367,8 +389,6 @@ class TrackSwitch(TrackSegment):
         match self.current_position:
             case 0:
                 self.next_segment = self.straight_segment
-                self.straight_signal_state = SignalState.GREEN
-                self.diverging_signal_state = SignalState.RED
                 if self.straight_segment is not None:
                     self.straight_segment.previous_segment = self
                 if self.diverging_segment is not None:
@@ -378,8 +398,6 @@ class TrackSwitch(TrackSegment):
 
             case 1:
                 self.next_segment = self.diverging_segment
-                self.straight_signal_state = SignalState.RED
-                self.diverging_signal_state = SignalState.GREEN
                 if self.diverging_segment is not None:
                     self.diverging_segment.previous_segment = self
                 if self.straight_segment is not None:
@@ -500,7 +518,7 @@ class Station(TrackSegment):
         self.passengers_waiting += count
         pass
 
-    def passengers_boarding(self, train_id: int, 
+    def passengers_boarding(self, train: 'Train', 
                           count: Optional[int] = None) -> None:
         """Record passengers boarding. Adds to total number, and passes
         to the Train Model.
@@ -511,9 +529,10 @@ class Station(TrackSegment):
             (If no count argument, randomly generates a number
             between set range.)
         """
-        if self.network is not None:
-            if train_id is not None and train_id not in self.network.trains:
-                raise ValueError(f"Train ID {train_id} not found in network.")
+        if train is None:
+            raise ValueError("Train must be provided for boarding.")
+        if train.current_segment != self:
+            raise ValueError("Train is not currently at this station.")
         if count is not None and count > self.passengers_waiting:
             raise ValueError("Cannot board more passengers than are waiting.")
         if count is not None and count < 0:
@@ -529,19 +548,21 @@ class Station(TrackSegment):
                 count = 0
         self.passengers_boarded_total += count
         self.passengers_waiting = max(0, self.passengers_waiting - count)
-        if self.network is not None:
-            train = self.network.trains.get(train_id)
-            if train is not None:
-                train.board_passengers(count)
+        if train is not None:
+            train.board_passengers(count)
         pass
         
-    def passengers_exiting(self, count: int) -> None:
+    def passengers_exiting(self, train: 'Train', count: int) -> None:
         """Record passengers exiting and add them to the total.
         Called by the Train Model.
         
         Args:
             count: Number of passengers exiting the train.
        """
+        if train is None:
+            raise ValueError("Train must be provided for exiting.")
+        if train.current_segment != self:
+            raise ValueError("Train is not currently at this station.")
         if count < 0:
             raise ValueError("Passenger exit count cannot be negative.")
         self.passengers_exited_total += count
@@ -576,7 +597,6 @@ class TrackNetwork:
     def __init__(self) -> None:
         """Initialize an empty track network."""
         self.segments: Dict[TrackSegment] = {}
-        # EVENTUAL: import train class from train model
         self.trains: Dict['Train'] = {}
         # System-wide properties
         self.line_name = ""
@@ -604,7 +624,8 @@ class TrackNetwork:
 
     def connect_segments(self, seg1_block_id: int, seg2_block_id: int,
                          bidirectional: bool = False,
-                         diverging_seg_block_id: int = None) -> None:
+                         diverging_seg_block_id: int = None,
+                         previous_reverse: bool = False, next_reverse: bool = False) -> None:
         """Connect two segments in the graph.
         
         Args:
@@ -613,6 +634,8 @@ class TrackNetwork:
             bidirectional: Whether connection works in both directions.
             diverging_seg_block_id: ID of diverging segment if connecting
                 a switch.
+            previous_reverse: If True, indicates trains should enter from previous at max displacement.
+            next_reverse: If True, indicates trains should enter from next at max displacement.
         """
 
         segment1 = self.segments.get(seg1_block_id)
@@ -652,14 +675,20 @@ class TrackNetwork:
                     "connecting a switch."
                 )
             segment1.next_segment = segment2
+            # Set the reverse entry flag if this is a front-to-front connection
+            segment1.set_connection_flags(next_reverse=next_reverse, previous_reverse=previous_reverse)
+            
             if bidirectional:
                 segment2.previous_segment = segment1
+                # For bidirectional reverse connections, set the reverse flag for the return path too
+                segment2.set_connection_flags(previous_reverse=next_reverse, next_reverse=previous_reverse)
             else:
                 segment2.previous_segment = None
 
     def _set_connections(self, block_id: int, previous_id: int, 
                          next_id: int = None, straight_id: int = None, 
-                         diverging_id: int = None) -> None:
+                         diverging_id: int = None,
+                         previous_reverse: bool = False, next_reverse: bool = False) -> None:
         """Set connections between track segments.
 
         Args:
@@ -668,6 +697,8 @@ class TrackNetwork:
             next_id: ID of the next segment.
             straight_id: ID of the straight segment (if applicable).
             diverging_id: ID of the diverging segment (if applicable).
+            previous_reverse: If True, indicates trains should enter from previous at max displacement.
+            next_reverse: If True, indicates trains should enter from next at max displacement.
         """
         manipulated_segment = self.segments.get(block_id)
         if manipulated_segment is None:
@@ -693,6 +724,8 @@ class TrackNetwork:
             manipulated_segment._update_connected_segments()
         else:
             manipulated_segment.next_segment = next_segment
+            # Set reverse connection flags if specified
+            manipulated_segment.set_connection_flags(next_reverse=next_reverse, previous_reverse=previous_reverse)
 
     #TODO: #104 improve error messages to be more specific about required formatting
     def load_track_layout(self, layout_file: str) -> None: 
@@ -865,6 +898,23 @@ class TrackNetwork:
                     raise ValueError(
                         f"Invalid 'diverging_segment' field in layout file "
                         f"at row {current_line}.")
+                # Validate previous_reverse and next_reverse fields
+                previous_reverse = False
+                next_reverse = False
+                
+                if "previous_reverse" in lines and lines["previous_reverse"].strip():
+                    if not re.match("^(TRUE|FALSE|true|false)$", lines["previous_reverse"]):
+                        raise ValueError(
+                            f"Invalid 'previous_reverse' field in layout file "
+                            f"at row {current_line}.")
+                    previous_reverse = lines["previous_reverse"].lower() == "true"
+                
+                if "next_reverse" in lines and lines["next_reverse"].strip():
+                    if not re.match("^(TRUE|FALSE|true|false)$", lines["next_reverse"]):
+                        raise ValueError(
+                            f"Invalid 'next_reverse' field in layout file "
+                            f"at row {current_line}.")
+                    next_reverse = lines["next_reverse"].lower() == "true"
                 match lines["Type"]:
                     case "TrackSegment" | "LevelCrossing" | "Station":
                         self._set_connections(
@@ -874,7 +924,9 @@ class TrackNetwork:
                             (int(lines["next_segment"]) 
                              if lines["next_segment"] else None), 
                             None, 
-                            None)
+                            None,
+                            previous_reverse,
+                            next_reverse)
                     case "TrackSwitch":
                         self._set_connections(
                             int(lines["block_id"]), 
@@ -974,7 +1026,7 @@ class TrackNetwork:
         segment.set_occupancy(occupied)
         pass
     
-    def set_signal_state(self, block_id: int,
+    def set_signal_state(self, block_id: int, signal_side: int,
                          signal_state: SignalState) -> None:
         """Set the signal state for a specific block.
         
@@ -987,7 +1039,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, TrackSwitch):
             raise ValueError(f"Block ID {block_id} is not a switch.")
-        segment.set_signal_state(signal_state)
+        segment.set_signal_state(signal_side, signal_state)
         pass
 
     def set_beacon_data(self, block_id: int, beacon_data: str) -> None:
@@ -1141,7 +1193,7 @@ class TrackNetwork:
         segment.sell_tickets(count)
         pass
 
-    def passengers_boarding(self, block_id: int, train_id: int = -1, 
+    def passengers_boarding(self, block_id: int, train_id: int, 
                           count: int = None) -> None:
         """Record passengers boarding at a specific station.
         
@@ -1153,12 +1205,14 @@ class TrackNetwork:
             between set range.)
         """
         segment = self.segments.get(block_id)
+        train = self.trains.get(train_id)
         if segment is None:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
-        segment.passengers_boarding(train_id, count)
-        # TODO: remove -1 count when train model is integrated
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        segment.passengers_boarding(train, count)
         pass
 
     def get_throughput(self, block_id: int) -> List[int]:
@@ -1177,7 +1231,7 @@ class TrackNetwork:
             raise ValueError(f"Block ID {block_id} is not a station.")
         return segment.get_throughput()
 
-    def passengers_exiting(self, block_id: int, count: int) -> None:
+    def passengers_exiting(self, block_id: int, train_id: int, count: int) -> None:
         """Record passengers exiting at a specific station.
         
         Args:
@@ -1185,13 +1239,15 @@ class TrackNetwork:
             count: Number of passengers exiting the train.
         """
         segment = self.segments.get(block_id)
+        train = self.trains.get(train_id)
         if segment is None:
             raise ValueError(f"Block ID {block_id} not found in track network.")
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
-        segment.passengers_exiting(count)
+        if train is None:
+            raise ValueError(f"Train ID {train_id} not found in track network.")
+        segment.passengers_exiting(train, count)
         pass
-
     
     def set_switch_position(self, block_id: int, position: int) -> None:
         """Set the position of a specific track switch.
@@ -1206,21 +1262,6 @@ class TrackNetwork:
         if not isinstance(segment, TrackSwitch):
             raise ValueError(f"Block ID {block_id} is not a switch.")
         segment.set_switch_position(position)
-        pass
-    
-    def set_signal_state(self, block_id: int,
-                         signal_state: SignalState) -> None:
-        """Set the signal state for a specific block.
-        Args:
-            block_id: ID of the block to set signal for.
-            signal_state: The new signal state to set.
-        """
-        segment = self.segments.get(block_id)
-        if segment is None:
-            raise ValueError(f"Block ID {block_id} not found in track network.")
-        if not isinstance(segment, TrackSwitch):
-            raise ValueError(f"Block ID {block_id} is not a switch.")
-        segment.set_signal_state(signal_state)
         pass
 
     def set_occupancy(self, block_id: int, occupied: bool) -> None:
@@ -1242,7 +1283,14 @@ class TrackNetwork:
             new_time: The new time to set.
         """
         self.time = new_time
-        self.temperature_sim()
+        if new_time.second % 30 == 0:
+            for segment in self.segments.values():
+                try:
+                    segment.sell_tickets()
+                except Exception as e:
+                    pass
+        if new_time.second % 10 == 0:
+            self.temperature_sim()
 
     def manual_set_time(self, year: int, month: int, day: int,
                         hour: int, minute: int, second: int) -> None:
@@ -1312,7 +1360,9 @@ class TrackNetwork:
             segment_status["tickets_sold_total"] = segment.tickets_sold_total
         
         if isinstance(segment, TrackSwitch):
-            segment_status["signal_state"] = segment.signal_state
+            segment_status["previous_signal_state"] = segment.previous_signal_state
+            segment_status["straight_signal_state"] = segment.straight_signal_state
+            segment_status["diverging_signal_state"] = segment.diverging_signal_state
             segment_status["current_position"] = segment.current_position
             segment_status["straight_segment"] = (
                 segment.straight_segment.block_id
@@ -1385,7 +1435,9 @@ class TrackNetwork:
         
         if isinstance(segment, TrackSwitch):
             segment_status["current_position"] = segment.current_position
-            segment_status["signal_state"] = segment.signal_state
+            segment_status["previous_signal_state"] = segment.previous_signal_state
+            segment_status["straight_signal_state"] = segment.straight_signal_state
+            segment_status["diverging_signal_state"] = segment.diverging_signal_state
 
         return segment_status
 

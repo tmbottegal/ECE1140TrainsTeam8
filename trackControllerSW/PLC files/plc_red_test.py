@@ -1,122 +1,82 @@
-"""
-Example PLC file for Red Line
-"""
+# red line plc file - Wayside 1
 
-# Switches - int values (0 = normal, 1 = alternate)
-switch_1 = 0
-switch_2 = 1
-switch_3 = 0
-switch_4 = 1
-switch_5 = 0
-switch_6 = 0
+# stuff in territory of control:
+# - switch at block 9
+# - crossing at block 11
+# - switch at block 15
+# - switch at block 27 (underground)
+# - switch at block 32 (underground)
 
-# Crossings - bool values (true = active, false = inactive)
-crossing_1 = True
+# speed limit of areas:
+# - A to C = 40 km/h
+# - D to G = 40-70 km/h
+# - H = 70 km/h (underground)
 
-# Signals - string values
-signal_1  = "GREEN"
-signal_2  = "GREEN"
-signal_3  = "GREEN"
-signal_4  = "GREEN"
-signal_5  = "GREEN"
-signal_6  = "GREEN"
-signal_7  = "GREEN"
-signal_8  = "YELLOW"
-signal_9  = "YELLOW"
-signal_10 = "GREEN"
-signal_11 = "GREEN"
-signal_12 = "GREEN"
-signal_13 = "YELLOW"
-signal_14 = "GREEN"
-signal_15 = "GREEN"
-signal_16 = "GREEN"
-signal_17 = "GREEN"
-signal_18 = "GREEN"
-signal_19 = "GREEN"
-signal_20 = "GREEN"
-signal_21 = "GREEN"
-signal_22 = "GREEN"
-signal_23 = "GREEN"
-signal_24 = "GREEN"
-signal_25 = "GREEN"
-signal_26 = "SUPERGREEN"
-signal_27 = "SUPERGREEN"
-signal_28 = "SUPERGREEN"
-signal_29 = "SUPERGREEN"
-signal_30 = "SUPERGREEN"
-signal_31 = "SUPERGREEN"
-signal_32 = "SUPERGREEN"
-signal_33 = "SUPERGREEN"
-signal_34 = "SUPERGREEN"
-
-# Commanded speed -
-commanded_speed_1  = 40
-commanded_speed_2  = 40
-commanded_speed_3  = 40
-commanded_speed_4  = 40
-commanded_speed_5  = 40
-commanded_speed_6  = 40
-commanded_speed_7  = 40
-commanded_speed_8  = 40
-commanded_speed_9  = 40
-commanded_speed_10 = 40
-commanded_speed_11 = 40
-commanded_speed_12 = 40
-commanded_speed_13 = 40
-commanded_speed_14 = 40
-commanded_speed_15 = 40
-commanded_speed_16 = 40
-commanded_speed_17 = 55
-commanded_speed_18 = 70
-commanded_speed_19 = 70
-commanded_speed_20 = 70
-commanded_speed_21 = 55
-commanded_speed_22 = 55
-commanded_speed_23 = 55
-commanded_speed_24 = 70
-commanded_speed_25 = 70
-commanded_speed_26 = 70
-commanded_speed_27 = 70
-commanded_speed_28 = 70
-commanded_speed_29 = 70
-commanded_speed_30 = 70
-commanded_speed_31 = 70
-commanded_speed_32 = 70
-commanded_speed_33 = 70
-commanded_speed_34 = 70
-
-# Commanded authority
-commanded_auth_1  = 50
-commanded_auth_2  = 50
-commanded_auth_3  = 50
-commanded_auth_4  = 50
-commanded_auth_5  = 50
-commanded_auth_6  = 50
-commanded_auth_7  = 75
-commanded_auth_8  = 75
-commanded_auth_9  = 75
-commanded_auth_10 = 75
-commanded_auth_11 = 75
-commanded_auth_12 = 75
-commanded_auth_13 = 70
-commanded_auth_14 = 60
-commanded_auth_15 = 60
-commanded_auth_16 = 50
-commanded_auth_17 = 200
-commanded_auth_18 = 400
-commanded_auth_19 = 400
-commanded_auth_20 = 200
-commanded_auth_21 = 100
-commanded_auth_22 = 100
-commanded_auth_23 = 100
-commanded_auth_24 = 50
-commanded_auth_25 = 50
-commanded_auth_26 = 50
-commanded_auth_27 = 50
-commanded_auth_28 = 50
-commanded_auth_29 = 60
-commanded_auth_30 = 60
-commanded_auth_31 = 50
-commanded_auth_32 = 50
-commanded_auth_33 = 50
-commanded_auth_34 = 50
+def plc_logic(block_occupancies, switch_positions, light_signals, crossing_signals, previous_occupancies, stop):
+    territory_yard = list(range(1, 9))
+    territory_early_main = list(range(9, 24))
+    territory_underground = list(range(24, 34))
+    train_in_yard_area = any(block_occupancies[1:9])
+    train_in_early_main = any(block_occupancies[9:16])
+    train_in_surface = any(block_occupancies[9:24])
+    train_in_underground = any(block_occupancies[24:34])
+    switch_positions[0] = train_in_yard_area and not train_in_early_main
+    light_signals[0] = True
+    if switch_positions[0] == 0:
+        light_signals[1] = True
+        light_signals[2] = False
+    else:
+        light_signals[1] = False
+        light_signals[2] = True
+    train_before_switch_15 = any(block_occupancies[1:15])
+    train_after_switch_15 = any(block_occupancies[16:25])
+    switch_positions[1] = train_before_switch_15 and not train_after_switch_15
+    light_signals[3] = True
+    if switch_positions[1] == 0:
+        light_signals[4] = True
+        light_signals[5] = False
+    else:
+        light_signals[4] = False
+        light_signals[5] = True
+    train_approaching_27 = any(block_occupancies[24:27])
+    train_past_27 = any(block_occupancies[28:34])
+    switch_positions[2] = not (train_approaching_27 and train_past_27)
+    light_signals[6] = True
+    if switch_positions[2] == 0:
+        light_signals[7] = True
+        light_signals[8] = False
+    else:
+        light_signals[7] = False
+        light_signals[8] = True
+    train_past_32 = any(block_occupancies[33:34])
+    switch_positions[3] = not train_past_32
+    light_signals[9] = True
+    if switch_positions[3] == 0:
+        light_signals[10] = True
+        light_signals[11] = False
+    else:
+        light_signals[10] = False
+        light_signals[11] = True
+    train_near_crossing_11 = any(block_occupancies[6:17])
+    crossing_signals[0] = train_near_crossing_11
+    for block_idx in range(1, 34):
+        if block_occupancies[block_idx]:
+            if block_idx + 2 <= 33:
+                if block_occupancies[block_idx] and previous_occupancies[block_idx - 1 if block_idx > 1 else 1]:
+                    if block_occupancies[block_idx + 2]:
+                        stop[block_idx] = True
+                elif block_occupancies[block_idx] and previous_occupancies[block_idx]:
+                    if block_occupancies[block_idx + 2]:
+                        stop[block_idx] = True
+                if stop[block_idx]:
+                    if not block_occupancies[block_idx + 2]:
+                        stop[block_idx] = False
+    if not switch_positions[0] and train_in_yard_area: stop[0:3] = [True] * len(stop[0:3])
+    else: stop[0:3] = [False] * len(stop[0:3])
+    if not switch_positions[1] and train_in_surface: stop[13:17] = [True] * len(stop[13:17])
+    else: stop[13:17] = [False] * len(stop[13:17])
+    if switch_positions[2]: stop[25:29] = [True] * len(stop[25:29])
+    else: stop[25:29] = [False] * len(stop[25:29])
+    if switch_positions[3]: stop[30:34] = [True] * len(stop[30:34])
+    else: stop[30:34] = [False] * len(stop[30:34])
+    return switch_positions, light_signals, crossing_signals, stop

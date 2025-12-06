@@ -9,16 +9,13 @@
 # ============================================================
 
 from PyQt6 import QtWidgets, QtCore, QtGui
-from CTC_backend import TrackState, GREEN_LINE_DATA
+from CTC_backend import TrackState
 from universal.global_clock import clock
 
 BLOCK_LEN_M = 50.0
 MPS_TO_MPH = 2.23693629
 
-LINE_DATA = {
-    "Red Line": [],
-    "Green Line": GREEN_LINE_DATA,  # 💡 now pulls from backend’s live Green Line
-}
+
 
 class CTCWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
@@ -76,13 +73,23 @@ class CTCWindow(QtWidgets.QMainWindow):
         # === CONNECT BUTTONS TO GLOBAL CLOCK ===
         self.clock_start_btn.clicked.connect(lambda: clock.resume())
         self.clock_pause_btn.clicked.connect(lambda: clock.pause())
-        self.clock_normal_btn.clicked.connect(lambda: clock.set_speed(1.0))
-        self.clock_fast_btn.clicked.connect(lambda: clock.set_speed(10.0))
+        self.clock_normal_btn.clicked.connect(
+            lambda: (clock.set_speed(1.0), self._apply_clock_speed())
+        )
+        self.clock_fast_btn.clicked.connect(
+            lambda: (clock.set_speed(10.0), self._apply_clock_speed())
+        )
+
 
         self.clock_start_btn.clicked.connect(self._resume_sim)
         self.clock_pause_btn.clicked.connect(self._pause_sim)
-        self.clock_normal_btn.clicked.connect(lambda: clock.set_speed(1.0))
-        self.clock_fast_btn.clicked.connect(lambda: clock.set_speed(10.0))
+        self.clock_normal_btn.clicked.connect(
+            lambda: (clock.set_speed(1.0), self._apply_clock_speed())
+        )
+        self.clock_fast_btn.clicked.connect(
+            lambda: (clock.set_speed(10.0), self._apply_clock_speed())
+        )
+
 
 
         # === Maintenance Mode Toggle (independent from Auto/Manual) ===
@@ -100,7 +107,7 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, toolbar)
 
         # === Backend state ===
-        self.state = TrackState("Green Line", GREEN_LINE_DATA)
+        self.state = TrackState("Green Line")
         self._trainInfoPage = None
         self._manualPage = None
 
@@ -189,6 +196,9 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.timer.timeout.connect(self._tick)
         self.timer.start(1000)  # 1s per simulated tick
 
+        self._apply_clock_speed()
+
+
     # ---------------------------------------------------------
     # Mode Toggle
     # ---------------------------------------------------------
@@ -208,13 +218,26 @@ class CTCWindow(QtWidgets.QMainWindow):
         # self.addEntryBtn.setEnabled(self.mode == "auto")
         print(f"[CTC UI] Switched to {self.mode.upper()} mode.")
 
+    def _apply_clock_speed(self):
+        """
+        Adjust UI tick interval so simulation updates faster when speed increases.
+        """
+        # prevent divide-by-zero
+        multiplier = max(0.1, clock.time_multiplier)
+
+        # Determine new UI tick frequency
+        interval_ms = max(10, int(1000 / multiplier))  # min 10ms to stay safe
+
+        self.timer.start(interval_ms)
+        print(f"[UI] Timer interval set to {interval_ms} ms (speed={multiplier}×)")
+
     # ---------------------------------------------------------
     # Reload line table from backend
     # ---------------------------------------------------------
     def _reload_line(self, line_name: str):
         """Refresh occupancy + signals from backend."""
         if line_name != self.state.line_name:
-            self.state.set_line(line_name, LINE_DATA[line_name])
+            self.state.set_line(line_name)
 
         blocks = self.state.get_blocks()
         self.mapTable.setRowCount(len(blocks))
@@ -241,7 +264,9 @@ class CTCWindow(QtWidgets.QMainWindow):
                 switch_text,                     # ⭐ FIXED SWITCH COLUMN
                 b.light,
                 ("Yes" if b.crossing else ""),
-                f"{b.speed_limit * 0.621371:.0f} mph"
+                #f"{b.speed_limit * 0.621371:.0f} mph"
+                f"{b.speed_limit:.0f} mph"
+
             ]
 
             for c, value in enumerate(rowdata):
@@ -406,7 +431,12 @@ class CTCWindow(QtWidgets.QMainWindow):
 
         # --- Destination Station (Dropdown) ---
         station_dropdown = QtWidgets.QComboBox()
-        station_names = [b[3] for b in GREEN_LINE_DATA if b[3] != ""]
+        station_names = [
+            seg.station_name 
+            for seg in self.state.track_model.segments.values()
+            if hasattr(seg, "station_name") and seg.station_name
+        ]
+
         station_dropdown.addItems(station_names)
         layout.addRow("Destination Station:", station_dropdown)
 
@@ -451,20 +481,36 @@ class CTCWindow(QtWidgets.QMainWindow):
             speed_mph = speed_mps * 2.23693629
             auth_yd = auth_m / 0.9144
 
-            arrival_str = arrival_input.time().toString("HH:mm")
-            h, m = map(int, arrival_str.split(":"))
-            arrival_seconds = h*3600 + m*60
+            import datetime
+            # Get sim clock time (a datetime object)
+            sim_now = clock.get_time()
 
-                    # compute when the train must depart
+            # Read arrival time from UI
+            arrival_qt = arrival_input.time()
+            arr_h = arrival_qt.hour()
+            arr_m = arrival_qt.minute()
+
+            # Build arrival datetime ON THE SIMULATION'S DATE
+            arrival_dt = sim_now.replace(hour=arr_h, minute=arr_m, second=0, microsecond=0)
+
+            # If arrival time is earlier than current simulation time → assume tomorrow
+            if arrival_dt < sim_now:
+                arrival_dt += datetime.timedelta(days=1)
+
+            # Compute arrival seconds since simulation-midnight
+            midnight = sim_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            arrival_seconds = int((arrival_dt - midnight).total_seconds())
+
+            # Travel time based on real path & speed
             travel_time_s = self.state.compute_travel_time(start_block, dest_block)
 
-            departure_seconds = arrival_seconds - travel_time_s
-            if departure_seconds < 0:
-                departure_seconds = 0
-            
-            dep_h = int(departure_seconds // 3600) % 24
-            dep_m = int((departure_seconds % 3600) // 60)
-            departure_time_str = f"{dep_h:02d}:{dep_m:02d}"
+            # Compute departure time (in seconds from midnight)
+            departure_seconds = arrival_seconds - int(travel_time_s)
+
+
+            # For UI feedback
+            dep_dt = midnight + datetime.timedelta(seconds=departure_seconds)
+            departure_time_str = dep_dt.strftime("%H:%M:%S")
 
 
             # 3. Dispatch train exactly like instant dispatch
@@ -771,7 +817,14 @@ class CTCWindow(QtWidgets.QMainWindow):
        
         try:
             # 1️⃣ Advance simulation time (CTC controls all modules)
+            #self.state.tick_all_modules()
+            #speed = int(clock.time_multiplier)
+            #for _ in range(speed):
             self.state.tick_all_modules()
+                # update the label for each simulated tick
+            self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
+
+
 
             # 2️⃣ Refresh occupancy & train info
             self._reload_line(self.state.line_name)

@@ -30,6 +30,7 @@ from trackModel.track_model_test_frontend import NetworkStatusUI
 # Train Model import
 from trainModel.train_model_backend import TrainModelBackend, Train
 from trainModel.train_model_ui import TrainModelUI  
+from trainModel.train_model_test_ui import TrainModelTestUI 
 
 
 # Train Controller import
@@ -350,7 +351,11 @@ if __name__ == "__main__":
     train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
     train_ui.setWindowTitle("Train Model – T1 (Green Line)")
     train_ui.show()
-
+    #-----------------------------------------------------------------------------------------------
+    # train controller testbench
+    testbench = TrainModelTestUI(train_backend)
+    testbench.setWindowTitle("Train Testbench (Acting as Train Controller) - T99")
+    testbench.show()
  #-----------------------------------------------------------------------------------------------
     '''
     # === TRAIN CONTROLLER INTEGRATION (WORKAROUND VERSION) ===

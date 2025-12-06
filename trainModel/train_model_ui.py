@@ -73,22 +73,6 @@ class TrainModelUI(QWidget):
 
         # left column
         left_col = QVBoxLayout() 
-        
-        # clock (shows GLOBAL CTC time))
-        self.clock_lbl = QLabel("2000-01-01 00:00:00")
-        self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.clock_lbl.setStyleSheet("font-size:18px; font-weight:700; color:black;")
-        left_col.addWidget(self.clock_lbl)
-
-        # subscribe to global clock updates
-        global_clock.register_listener(self._update_clock_display)
-        # initialize immediately with current clock time, if available
-        try:
-            current_time = global_clock.get_time()
-            self._update_clock_display(current_time)
-        except Exception:
-            pass
-
 
         self._ui_refresh_timer = QTimer(self)
         self._ui_refresh_timer.timeout.connect(self.refresh_display)
@@ -96,7 +80,7 @@ class TrainModelUI(QWidget):
 
         # banner (ad)
         banner_box = QGroupBox()
-        banner_box.setTitle("Today's Advertisment")
+        banner_box.setTitle("Today's Advertisments")
         banner_box.setStyleSheet("QGroupBox {font-weight:700;}")
         banner_v = QVBoxLayout(banner_box)
         self.ad_label = QLabel()
@@ -105,15 +89,33 @@ class TrainModelUI(QWidget):
         self.ad_label.setStyleSheet("background:#1f1f1f; border:1px solid #444; padding:0;")
         banner_v.addWidget(self.ad_label)
 
-        self._ad_path = next(
-            (p for p in (
+        self._ad_paths = []
+        ad_dir = os.path.dirname(os.path.abspath(__file__))
+        for i in range(1, 5):  # ad1.png, ad2.png, ad3.png, ad4.png
+            path = os.path.join(ad_dir, f"ad{i}.png")
+            if os.path.exists(path):
+                self._ad_paths.append(path)
+        
+        # fallback to original ad.png if numbered ads don't exist
+        if not self._ad_paths:
+            fallback_paths = [
                 "/Users/sarakeriakes/Desktop/ECE/2025-26/1140/ECE1140TrainsTeam8/trainModel/ad.png",
-                "ad.png", "./assets/ad.png", "./Assets/ad.png", "/mnt/data/ad.png", "C:/Users/Tim Bottegal/Desktop/ECE1140TrainsTeam8/trainModel/ad.png",
-            ) if os.path.exists(p)),
-            None
-        )
-        if self._ad_path:
+                "ad.png", "./assets/ad.png", "./Assets/ad.png", "/mnt/data/ad.png",
+                "C:/Users/Tim Bottegal/Desktop/ECE1140TrainsTeam8/trainModel/ad.png",
+            ]
+            for p in fallback_paths:
+                if os.path.exists(p):
+                    self._ad_paths = [p]
+                    break
+        
+        self._current_ad_index = 0
+        if self._ad_paths:
             self._set_ad_pixmap()
+            # timer to rotate ads every 5 seconds
+            self._ad_timer = QTimer(self)
+            self._ad_timer.timeout.connect(self._rotate_ad)
+            self._ad_timer.start(5000)  
+        
         left_col.addWidget(banner_box)
 
         # three sections under ad (two-column layout)
@@ -188,16 +190,35 @@ class TrainModelUI(QWidget):
         # right column
         right_col = QVBoxLayout()
 
+        # clock (shows GLOBAL CTC time))
+        self.clock_lbl = QLabel("2000-01-01 00:00:00")
+        self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.clock_lbl.setStyleSheet("font-size:18px; font-weight:700;")
+        right_col.addWidget(self.clock_lbl)
+
+        # subscribe to global clock updates
+        global_clock.register_listener(self._update_clock_display)
+        # initialize immediately with current clock time, if available
+        try:
+            current_time = global_clock.get_time()
+            self._update_clock_display(current_time)
+        except Exception:
+            pass
+
         header_box = QGroupBox()
         header_v = QVBoxLayout(header_box)
         self.train_lbl = QLabel("Train -")
         self.train_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.train_lbl.setStyleSheet("font-size:16px; font-weight:800;")
-        self.next_lbl = QLabel(f"Next Stop: Castle Shannon")                   #TODO #125 : will need to be updated based on beacon data
-        self.next_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.next_lbl.setStyleSheet("font-size:14px;")
+
+        self.announcement_lbl = QLabel("No announcement")
+        self.announcement_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.announcement_lbl.setStyleSheet(
+            "font-size: 13px; padding: 8px; background: #1a1a1a; "
+            "border: 1px solid #444; border-radius: 4px; color: #ddd;"
+        )
         header_v.addWidget(self.train_lbl)
-        header_v.addWidget(self.next_lbl)
+        header_v.addWidget(self.announcement_lbl)
         right_col.addWidget(header_box)
 
         # cabin/doors
@@ -225,10 +246,24 @@ class TrainModelUI(QWidget):
             grp.addButton(on_btn)
             def on_clicked(btn: QPushButton):
                 enabled = (btn is on_btn)
+
+                # update button styling
                 style_on(on_btn, green=True) if enabled else style_off(on_btn)
                 style_on(off_btn, green=False) if not enabled else style_off(off_btn)
-                setattr(self.backend, attr_name, enabled)
-                self.backend._notify_listeners()
+
+                # propagate to backend via set_inputs
+                try:
+                    if attr_name in ("cabin_lights", "headlights", "left_doors",
+                                     "right_doors"):
+                        self.backend.set_inputs(**{attr_name: enabled})
+                    else:
+                        # fallback: direct attr + notify
+                        setattr(self.backend, attr_name, enabled)
+                        if hasattr(self.backend, "_notify_listeners"):
+                            self.backend._notify_listeners()
+                except Exception as e:
+                    logger.exception("Failed to push cabin toggle '%s' to backend: %s", attr_name, e)
+
             off_btn.clicked.connect(lambda: on_clicked(off_btn))
             on_btn.clicked.connect(lambda: on_clicked(on_btn))
             off_btn.setChecked(True); style_off(on_btn); style_on(off_btn, green=False)
@@ -242,8 +277,6 @@ class TrainModelUI(QWidget):
             "headlights":   make_on_off_row("Headlights", "headlights"),
             "left_doors":   make_on_off_row("Left Doors", "left_doors", words=("Close", "Open")),
             "right_doors":  make_on_off_row("Right Doors", "right_doors", words=("Close", "Open")),
-            "heating":      make_on_off_row("Heating", "heating"),
-            "aircond":      make_on_off_row("Air Conditioning", "air_conditioning"),
         }
         right_col.addWidget(cabin_box)
 
@@ -276,7 +309,7 @@ class TrainModelUI(QWidget):
                 enabled = (btn is enabled_btn)
                 style_on(enabled_btn, green=False) if enabled else style_off(enabled_btn)
                 style_on(disabled_btn, green=True) if not enabled else style_off(disabled_btn)
-                mapping = {"brake": "brake", "engine": "engine", "signal": "signal"}
+                mapping = {"engine": "engine", "brake": "brake", "signal": "signal"}
                 self.backend.set_failure_state(mapping[key], enabled)
 
             disabled_btn.clicked.connect(lambda: on_clicked(disabled_btn))
@@ -290,14 +323,14 @@ class TrainModelUI(QWidget):
             fail_v.addLayout(row)
 
         self._fail_rows: Dict[str, tuple] = {}
-        make_failure_toggle("Brake Failure", "brake")
         make_failure_toggle("Engine Failure", "engine")
+        make_failure_toggle("Brake Failure", "brake")
         make_failure_toggle("Signal Pickup Failure", "signal")
         right_col.addWidget(fail_box)
 
         # Emergency brake + beacon
         self.ebutton = QPushButton("EMERGENCY BRAKE")
-        self.ebutton.setStyleSheet("background:#d33232; color:white; font-weight:900; padding:12px;")
+        self.ebutton.setStyleSheet("background:#d33232; color:white; font-weight:1000; padding:16px;")
         self.ebutton.clicked.connect(self._activate_emergency_brake)
         right_col.addWidget(self.ebutton)
 
@@ -313,6 +346,12 @@ class TrainModelUI(QWidget):
         root.addWidget(right_panel, 2, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self.refresh_display()
+
+    def _rotate_ad(self) -> None:
+        if not self._ad_paths:
+            return
+        self._current_ad_index = (self._current_ad_index + 1) % len(self._ad_paths)
+        self._set_ad_pixmap()
 
     # helpers 
     def _update_clock_display(self, current_time: datetime) -> None:
@@ -330,16 +369,23 @@ class TrainModelUI(QWidget):
         except Exception:
             logger.exception("Failed to update TrainModelUI clock display")
 
-
     def _set_ad_pixmap(self) -> None:
-        if not self._ad_path:
+        if not getattr(self, "_ad_paths", None):
             return
-        pm = QPixmap(self._ad_path)
+
+        # pick current ad based on index
+        path = self._ad_paths[self._current_ad_index]
+        pm = QPixmap(path)
         if pm.isNull():
             return
-        scaled = pm.scaled(self.ad_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                           Qt.TransformationMode.SmoothTransformation)
+
+        scaled = pm.scaled(
+            self.ad_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
         self.ad_label.setPixmap(scaled)
+
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
@@ -389,7 +435,7 @@ class TrainModelUI(QWidget):
             if temp_c is not None:
                 try:
                     temp_f = float(temp_c) * 9.0 / 5.0 + 32.0
-                    self.live_labels["temp_f"].setText(f"{temp_f:.1f}")
+                    self.live_labels["temp_f"].setText(f"{temp_f:.2f}")
                 except Exception:
                     self.live_labels["temp_f"].setText(str(temp_c))
             else:
@@ -401,6 +447,13 @@ class TrainModelUI(QWidget):
                 )
                 self.live_labels["temp_f"].setText(f"{float(temp_f):.1f}" if temp_f is not None else "—")
 
+            # Announcement display
+            announcement = s.get("current_announcement", "")
+            if announcement and announcement.strip():
+                self.announcement_lbl.setText(f"{announcement}")
+            else:
+                self.announcement_lbl.setText("No announcement")
+
             # train properties (imperial)
             self.prop_labels["len_ft"].setText(f"{float(s.get('length_m', 0.0)) * self.M_TO_FT:.2f}")
             self.prop_labels["wid_ft"].setText(f"{float(s.get('width_m', 0.0)) * self.M_TO_FT:.2f}")
@@ -409,8 +462,8 @@ class TrainModelUI(QWidget):
 
             # sync failure toggles without retrigger 
             states = {
-                "brake": bool(s.get("brake_failure", False)),
                 "engine": bool(s.get("engine_failure", False)),
+                "brake": bool(s.get("brake_failure", False)),
                 "signal": bool(s.get("signal_pickup_failure", False)),
             }
             for key, enabled in states.items():
@@ -422,6 +475,33 @@ class TrainModelUI(QWidget):
                 else:
                     disabled_btn.setChecked(True); style_on(disabled_btn, green=True); style_off(enabled_btn)
                 for btn in (disabled_btn, enabled_btn):
+                    btn.blockSignals(False)
+
+            # sync cabin/door/HVAC toggles to backend state without retriggering
+            cabin_states = {
+                "cabin_lights": bool(s.get("cabin_lights", False)),
+                "headlights":   bool(s.get("headlights", False)),
+                "left_doors":   bool(s.get("left_doors", False)),
+                "right_doors":  bool(s.get("right_doors", False)),
+            }
+
+            for key, (off_btn, on_btn) in self._cabin_controls.items():
+                enabled = cabin_states.get(key, False)
+                for btn in (off_btn, on_btn):
+                    btn.blockSignals(True)
+                if enabled:
+                    on_btn.setChecked(True)
+                else:
+                    off_btn.setChecked(True)
+                on_btn.setStyleSheet(
+                    "QPushButton {background:%s; color:#111; font-weight:700; padding:6px;}"
+                    % ("#7ee093" if enabled else "#2a2a2a")
+                )
+                off_btn.setStyleSheet(
+                    "QPushButton {background:%s; color:%s; font-weight:%s; padding:6px;}"
+                    % (("#2a2a2a", "#ddd", "400") if enabled else ("#e06b6b", "#111", "700"))
+                )
+                for btn in (off_btn, on_btn):
                     btn.blockSignals(False)
 
         except Exception as exc:

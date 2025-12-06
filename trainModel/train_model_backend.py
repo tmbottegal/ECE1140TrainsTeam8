@@ -14,9 +14,6 @@ from universal.universal import TrainCommand
 logger = logging.getLogger(__name__)
 
 class TrainModelBackend:
-    """
-    Backend simulation for a single train (SI units internally -> UI converts to imperial)
-    """
     # constants (SI)
     GRAVITY = 9.81            # m/s^2
     AIR_DENSITY = 1.225       # kg/m^3 (sea level)
@@ -54,19 +51,16 @@ class TrainModelBackend:
         self.velocity: float = 0.0      # m/s
         self.acceleration: float = 0.0  # m/s^2
         self.position: float = 0.0      # m
+
+        # inputs from testbench
         self.power_kw: float = 0.0      # kW
         self.grade_percent: float = 0.0 # %
         self.authority_m: float = 0.0 # m
         self.commanded_speed: float = 0.0  # m/s 
-
         # device / failures
         self.service_brake: bool = False
         self.emergency_brake: bool = False
-        self.engine_failure: bool = False
-        self.brake_failure: bool = False
-        self.signal_pickup_failure: bool = False
-        self.block_occupied: bool = True
-
+        # environment
         self.cabin_lights: bool = False
         self.headlights: bool = False
         self.left_doors: bool = False  
@@ -74,10 +68,19 @@ class TrainModelBackend:
         self.heating: bool = False
         self.air_conditioning: bool = False
 
+        # device / failures
+        self.engine_failure: bool = False
+        self.brake_failure: bool = False
+        self.signal_pickup_failure: bool = False
+
+        self.block_occupied: bool = True
+
         # cabin environment (C, then UI converts to F)
+        self.temperature_setpoint: float = 22.0
         self.actual_temperature: float = 22.0
 
         # misc / I/O
+        self.current_announcement: str = "" 
         self.beacon_info: str = ""
         self.track_segment: Optional[str] = None  # filled by Train._sync_backend_track_segment()
 
@@ -85,7 +88,6 @@ class TrainModelBackend:
         self._listeners: List[Callable[[], None]] = []
 
         # integrator time bases
-        self._last_t_monotonic: Optional[float] = None        # legacy/local stepping
         self._last_clock_time: Optional[datetime] = None      # global clock stepping
 
         # register with global clock
@@ -134,58 +136,58 @@ class TrainModelBackend:
     # inputs
     def set_inputs(
         self,
-        power_kw: float,
-        service_brake: bool,
-        emergency_brake: bool,
-        grade_percent: float,
-        beacon_info: str = "None",
-        **kwargs,
+        power_kw: float = None,
+        service_brake: bool = None,
+        emergency_brake: bool = None,
+        grade_percent: float = None,
+        beacon_info: str = None,
+        commanded_speed_mph: float = None,
+        authority_yd: float = None,
+        temperature_setpoint_f: float = None,
+        announcement: str = None,
+        **kwargs
     ) -> None:
-        """
-        Update control inputs (called by Test UI). Extra kwargs supported:
-          cabin_lights, headlights, left_doors, right_doors,
-          heating, air_conditioning, commanded_speed_mph
-        """
-        self.power_kw = max(0.0, float(power_kw))
-        self.service_brake = bool(service_brake)
-        self.emergency_brake = bool(emergency_brake)
-        self.grade_percent = float(grade_percent)
-        self.beacon_info = str(beacon_info)
-
-        # device toggles
+        if power_kw is not None:
+            self.power_kw = max(0.0, float(power_kw))
+        if service_brake is not None:
+            self.service_brake = bool(service_brake)
+        if emergency_brake is not None:
+            self.emergency_brake = bool(emergency_brake)
+        if grade_percent is not None:
+            self.grade_percent = float(grade_percent)
+        if beacon_info is not None:
+            self.beacon_info = str(beacon_info)
+        if commanded_speed_mph is not None:
+            self.commanded_speed = float(commanded_speed_mph) / self.MPS_TO_MPH
+        if authority_yd is not None:
+            self.authority_m = float(authority_yd) * 0.9144  # yd to m
+        if temperature_setpoint_f is not None:
+            self.temperature_setpoint = (float(temperature_setpoint_f) - 32.0) * 5.0 / 9.0
+            logger.info(f"Temperature setpoint updated: {temperature_setpoint_f:.1f}°F = {self.temperature_setpoint:.1f}°C")
+        if announcement is not None:
+            self.current_announcement = str(announcement)
+            
+        # toggles
         for name in ("cabin_lights", "headlights", "left_doors", "right_doors",
                      "heating", "air_conditioning"):
             if name in kwargs:
                 setattr(self, name, bool(kwargs[name]))
-
-        # commanded speed (mph -> m/s)
-        if "commanded_speed_mph" in kwargs:
-            self.commanded_speed = max(0.0, float(kwargs["commanded_speed_mph"])) / self.MPS_TO_MPH
-
-        # one physics step per input change (legacy local dt)
-        if not self._clock_driven:
-            self._simulate_step()
+                
         self._notify_listeners()
 
     # ------------------------------------------------------------------
-    # legacy local stepper (kept so existing callers still work)
-    def _simulate_step(self) -> None:
-        """Physics update using a local monotonic-clock dt (for standalone use)."""
-        now = time.monotonic()
-        if self._last_t_monotonic is None:
-            dt = 0.0
-        else:
-            dt = max(0.0, min(self.DT_MAX, now - self._last_t_monotonic))
-        self._last_t_monotonic = now
-        self._step_dt(dt)
-
-    # ------------------------------------------------------------------
-    # core stepper (used by both global-clock and legacy stepping)
     def _step_dt(self, dt: float) -> None:
-        """Advance physics by a provided dt (seconds)."""
-        # compute once
+        """advance physics by provided dt (seconds)"""
+        if dt <= 0.0:
+            return
+
+         # compute once
         mass = max(1.0, (self.mass_kg * self.num_cars) + self.passenger_count * self.PASSENGER_MASS_KG)
         v_old = self.velocity
+
+        if self.engine_failure or self.signal_pickup_failure or self.brake_failure:
+            self.emergency_brake = True
+            logger.warning("FAILURE DETECTED - Emergency brake activated!")
 
         # tractive force from power
         if self.engine_failure:
@@ -221,20 +223,29 @@ class TrainModelBackend:
         # braking caps (still affected by grade via a_base)
         if self.emergency_brake:
             a_target = min(self.MAX_EBRAKE, a_base)
-        elif self.service_brake and not self.brake_failure:
+        elif self.service_brake:
             a_target = min(self.MAX_DECEL, a_base)
         else:
             a_target = max(-10.0, min(self.MAX_ACCEL, a_base))  # clamp absurd values
 
+        if (
+            not self.emergency_brake
+            and not self.service_brake
+            and self.authority_m > 0.0
+        ):
+            # approximate stopping distance using service-brake decel
+            service_a = abs(self.MAX_DECEL)
+            if service_a > 0.0:
+                stopping_dist = (v_old ** 2) / (2.0 * service_a)  # d = v^2 / (2a)
+                if self.authority_m <= stopping_dist and v_old > 0.1:
+                    # begin service braking
+                    a_target = min(a_target, self.MAX_DECEL)
+
         # integrate (semi-implicit / Euler ok for small dt)
-        a_new = a_target
-        v_new = v_old + a_new * dt
+        v_new = v_old + a_target * dt
         if v_new < 0.0:
             v_new = 0.0
-
-        # hard speed cap from commanded speed (if provided)
-        if v_new > self.commanded_speed:
-            v_new = self.commanded_speed
+            a_target = 0.0
 
         # position integrates velocity
         self.position += 0.5 * (v_old + v_new) * dt
@@ -250,28 +261,34 @@ class TrainModelBackend:
         """
         # commit
         self.velocity = v_new
-        self.acceleration = a_new
+        self.acceleration = a_target
         self.block_occupied = self.velocity > 0.01
 
-        # cabin temperature update (gradual)
+        # cabin temperature update
         if dt > 0.0:
-            deg_per_sec = 0.5 / 60.0
-            if self.heating and not self.air_conditioning:
-                dT = deg_per_sec * dt
-            elif self.air_conditioning and not self.heating:
-                dT = -deg_per_sec * dt
-            elif self.air_conditioning and self.heating:
-                dT = 0.0
-            else:
-                dT = 0.02 / 60.0 * dt  # tiny background creep
-            self.actual_temperature += dT
-
-        logger.info(
-            "v=%.2f m/s, a=%.2f m/s², x=%.1f m, cspd=%.2f m/s, auth=%.1f m, "
-            "brk=%s EB=%s P=%.1f kW grade=%.2f%%",
-            self.velocity, self.acceleration, self.position, self.commanded_speed, self.authority_m,
-            self.service_brake, self.emergency_brake, self.power_kw, self.grade_percent
-        )
+            temp_diff = self.temperature_setpoint - self.actual_temperature
+            
+            if abs(temp_diff) > 0.1:
+                base_rate = 0.05 / 60.0  # 0.05°C per minute
+                
+                hvac_rate = 0.5 / 60.0  # 0.5°C per minute
+                
+                if temp_diff > 0:  # need to heat
+                    rate = hvac_rate if self.heating else base_rate
+                    dT = min(rate * dt, temp_diff) 
+                else:  # need to cool
+                    rate = hvac_rate if self.air_conditioning else base_rate
+                    dT = max(-rate * dt, temp_diff) 
+                
+                self.actual_temperature += dT
+                
+                # debug log
+                if abs(temp_diff) > 0.2:
+                    logger.debug(
+                        f"Temp control: setpoint={self.temperature_setpoint:.1f}°C, "
+                        f"actual={self.actual_temperature:.1f}°C, "
+                        f"heating={self.heating}, AC={self.air_conditioning}"
+                    )
 
     def board_passengers(self, n: int) -> int:
         """increase passengers up to CAPACITY. Returns actually boarded"""
@@ -295,10 +312,16 @@ class TrainModelBackend:
     def set_failure_state(self, failure_type: str, state: bool) -> None:
         if failure_type == "engine":
             self.engine_failure = bool(state)
+            if state:
+                self.emergency_brake = True
         elif failure_type == "brake":
             self.brake_failure = bool(state)
+            if state:
+                self.emergency_brake = True
         elif failure_type == "signal":
             self.signal_pickup_failure = bool(state)
+            if state:
+                self.emergency_brake = True
         else:
             logger.error("Invalid failure type: %s", failure_type)
             return
@@ -340,6 +363,14 @@ class TrainModelBackend:
 
             # cabin
             "actual_temperature_c": self.actual_temperature,
+            "temperature_setpoint_c": self.temperature_setpoint,
+            "current_announcement": self.current_announcement,
+            "cabin_lights": self.cabin_lights,
+            "headlights": self.headlights,
+            "left_doors": self.left_doors,
+            "right_doors": self.right_doors,
+            "heating": self.heating,
+            "air_conditioning": self.air_conditioning,
         }
     
     # ------------------------------------------------------------------
@@ -384,7 +415,6 @@ class Train:
     def __init__(self, train_id: int, backend: Optional["TrainModelBackend"] = None) -> None:
         self.train_id = train_id
         self.tm = backend if backend is not None else TrainModelBackend()
-        self.controller = None  # TrainControllerBackend instance
         self.tm.train_id = self.train_id
 
         self.network: Optional[object] = None
@@ -654,81 +684,3 @@ class Train:
             self.tm.authority_m = max(0.0, float(auth))
 
         print(f"Train {self.train_id} applied train command: speed={commanded_speed:.2f} m/s, authority={authority:.1f} m")
-
-    
-    # controller wiring
-    def attach_controller(self, controller) -> None:
-        """
-        attach TrainControllerBackend-like object
-        expected interface (methods):
-        set_actual_speed(mps), set_commanded_speed(mps), set_commanded_authority(m),
-        set_service_brake(bool), set_emergency_brake(bool), set_speed_limit(mps),
-        get_display_values() -> dict, update(dt_s: float)
-        """
-        self.controller = controller
-        # keep controller's idea of speed limit in sync with current block
-        try:
-            trk = self._pull_track_inputs()
-            self.controller.set_speed_limit(float(trk["speed_limit_mps"]))
-        except Exception:
-            pass
-
-    def send_to_controller(self) -> None:
-        """
-        push current TM/track state to controller:
-        - commanded speed (from TM), authority
-        - actual speed
-        - manual brake requests (from TM flags)
-        - speed limit (from current track block)
-        """
-        if not self.controller:
-            return
-
-        # actual speed/authority from the physics model
-        self.controller.set_actual_speed(float(self.tm.velocity))
-        self.controller.set_commanded_authority(float(self.tm.authority_m))
-
-        # whichever module sets commanded speed (CTC/wayside) writes it into TM;
-        # forward it into the controller (m/s expected).
-        self.controller.set_commanded_speed(float(self.tm.commanded_speed))
-
-        # driver/engineer brake requests (manual)
-        self.controller.set_service_brake(bool(self.tm.service_brake))
-        self.controller.set_emergency_brake(bool(self.tm.emergency_brake))
-
-        # keep speed limit updated from the current track block
-        try:
-            trk = self._pull_track_inputs()
-            self.controller.set_speed_limit(float(trk["speed_limit_mps"]))
-        except Exception:
-            pass
-
-    def receive_from_controller(self) -> None:
-        """
-        - pull power/brake outputs from controller and apply to TM
-        - grade/beacon from track so we include them in the same write
-        """
-        if not self.controller:
-            return
-
-        disp = self.controller.get_display_values()  # {'power_kw', 'service_brake', 'emergency_brake', ...}
-        trk = self._pull_track_inputs()
-
-        self.tm.set_inputs(
-            power_kw=float(disp.get("power_kw", 0.0)),
-            service_brake=bool(disp.get("service_brake", False)),
-            emergency_brake=bool(disp.get("emergency_brake", False)),
-            grade_percent=float(trk["grade_percent"]),
-            beacon_info=trk["beacon_info"],
-        )
-
-    def step_controller(self, dt_s: float) -> None:
-        """
-        one controller step - send inputs -> update(dt) -> receive outputs
-        call this before advancing along the track
-        """
-        if not self.controller:
-            return
-        self.send_to_controller()
-        self.controller.update(float(dt_s))
-        self.receive_from_controller()

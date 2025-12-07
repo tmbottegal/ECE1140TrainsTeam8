@@ -295,6 +295,7 @@ class TrackState:
         # Create and load the Track Model
         if network is not None:
             self.track_model = network
+            self.section_map = self._load_section_letters()
             print(f"[CTC Backend] Using provided TrackNetwork for {network.line_name}")
         else:
             self.track_model = TrackNetwork()
@@ -325,9 +326,7 @@ class TrackState:
         #Register Track Model as a clock listener (optional redundancy)
         clock.register_listener(self.track_model.set_time)
 
-        #UI mirror of blocks
-        self._lines: Dict[str, List[Block]] = {}
-        self._by_key: Dict[str, Block] = {}
+        
 
         
 
@@ -344,6 +343,9 @@ class TrackState:
 
         self.maintenance_enabled = False
 
+        #UI mirror of blocks
+        self._lines: Dict[str, List[Block]] = {}
+        self._by_key: Dict[str, Block] = {}
 
         self.set_line(line_name)
         self.schedule = ScheduleManager()

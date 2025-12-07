@@ -144,25 +144,25 @@ class CTCWindow(QtWidgets.QMainWindow):
         occLayout.addWidget(self.mapTable)
 
         # === Bottom buttons ===
-        self.manualBtn = QtWidgets.QPushButton("Manual Override")
+        #self.manualBtn = QtWidgets.QPushButton("Manual Override")
         self.infoBtn = QtWidgets.QPushButton("Train Information")
         self.uploadBtn = QtWidgets.QPushButton("Upload Schedule")
         self.maintBtn = QtWidgets.QPushButton("Maintenance / Inputs")
         self.dispatchBtn = QtWidgets.QPushButton("Dispatch Train")
-        for b in (self.manualBtn, self.infoBtn, self.uploadBtn, self.maintBtn, self.dispatchBtn):
+        for b in ( self.infoBtn, self.uploadBtn, self.maintBtn, self.dispatchBtn):
             b.setMinimumHeight(40)
             b.setStyleSheet("font-size:14px; font-weight:bold;")
 
         btnRow = QtWidgets.QHBoxLayout()
         btnRow.addWidget(self.dispatchBtn)
-        btnRow.addWidget(self.manualBtn)
+        #btnRow.addWidget(self.manualBtn)
         btnRow.addWidget(self.infoBtn)
         btnRow.addWidget(self.uploadBtn)
         btnRow.addWidget(self.maintBtn)
         occLayout.addLayout(btnRow)
 
         # === Connect buttons ===
-        self.manualBtn.clicked.connect(self._manual_override)
+        #elf.manualBtn.clicked.connect(self._manual_override)
         self.infoBtn.clicked.connect(self._train_info)
         self.uploadBtn.clicked.connect(self._upload_schedule)
         self.maintBtn.clicked.connect(self._maintenance_inputs)
@@ -296,7 +296,17 @@ class CTCWindow(QtWidgets.QMainWindow):
 
                 # --- SIGNAL LIGHT COLORING ---
                 if c == 6:
-                    light = str(value).upper()
+                   
+                    # Convert SignalState enum → string
+                    signal_obj = b.light
+
+                    if hasattr(signal_obj, "name"):
+                        light = signal_obj.name.upper()
+                    else:
+                        light = str(signal_obj).upper()
+
+                    item.setText(light)
+                    print(f"[UI DEBUG] Block {b.block_id} signal =", b.light)
 
                     if light == "N/A":
                         item.setText("")  # hide N/A
@@ -775,8 +785,8 @@ class CTCWindow(QtWidgets.QMainWindow):
             self._reload_line(self.state.line_name)
 
 
-    def _manual_override(self):
-        QtWidgets.QMessageBox.information(self, "Manual Override", "Manual Override page coming soon.")
+    #def _manual_override(self):
+     #   QtWidgets.QMessageBox.information(self, "Manual Override", "Manual Override page coming soon.")
 
     def _upload_schedule(self):
         """

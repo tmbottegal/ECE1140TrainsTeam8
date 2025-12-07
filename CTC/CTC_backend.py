@@ -602,7 +602,7 @@ class TrackState:
             switch_text = "Switch" if segment.__class__.__name__ == "TrackSwitch" else ""
 
             # SIGNAL -------------------------------------------------------------
-            signal_state = getattr(segment, "signal_state", "")
+            #signal_state = getattr(segment, "signal_state", "")
             
             # CROSSING -----------------------------------------------------------
             crossing = segment.__class__.__name__ == "LevelCrossing"
@@ -620,7 +620,7 @@ class TrackState:
                     station=station,
                     station_side=str(station_side),
                     switch=switch_text,
-                    light=str(signal_state),
+                    light="",
                     crossing=crossing,
                     speed_limit=speed_limit_mph,    # UI shows mph
                     length_m=segment.length,         # backend real values
@@ -805,12 +805,23 @@ class TrackState:
                     return
 
     def update_signal_state(self, line_name, block_id, signal_state):
-        if line_name in self._lines:
-            for b in self._lines[line_name]:
-                if b.block_id == block_id:
-                    b.set_signal_state(signal_state)
-                    print(f"[CTC] {line_name} Block {block_id} signal → {signal_state}")
-                    return
+        print(f"[CTC DEBUG] GOT SIGNAL UPDATE: block={block_id}, state={signal_state}")
+
+        # Convert enum → string
+        if hasattr(signal_state, "name"):
+            signal_state = signal_state.name
+
+        # TrackController sends "N/A" when no PLC logic exists
+        if not signal_state or signal_state == "N/A":
+            signal_state = "RED"   # default to RED
+
+        for b in self._lines[line_name]:
+            if b.block_id == block_id:
+                b.set_signal_state(signal_state)
+                print(f"[CTC] {line_name} Block {block_id} signal → {signal_state}")
+                return
+
+
 
     def update_switch_position(self, line_name, block_id, position):
         if line_name in self._lines:
@@ -919,11 +930,18 @@ class TrackState:
         # ----------------------------------------------------------
         # 3. Update Track Controller
         # ----------------------------------------------------------
+        # SW Track Controller has no tick() method — manually poll it
         try:
-            self.track_controller.tick(current_time, delta_s)
-            self.track_controller_hw.tick(current_time, delta_s)
-        except Exception:
-            pass
+            self.track_controller._poll_track_model()
+            self.track_controller._send_status_to_ctc()
+        except Exception as e:
+            print("[CTC] SW Controller manual poll error:", e)
+
+        try:
+            self.track_controller_hw._poll_track_model()
+            self.track_controller_hw._send_status_to_ctc()
+        except Exception as e:
+            print("[CTC] HW Controller manual poll error:", e)
 
         # ----------------------------------------------------------
         # 4. Sync occupancy

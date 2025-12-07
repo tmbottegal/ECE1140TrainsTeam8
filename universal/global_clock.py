@@ -9,7 +9,7 @@ class GlobalClock:
     and notifies registered listeners (e.g. Track Model) whenever it ticks.
     """
 
-    def __init__(self, start_hour: int = 6, start_minute: int = 0):
+    def __init__(self, start_hour: int = 6, start_minute: int = 00):
         # --- CHOOSE START MODE -------------------------------------------------
         USE_REAL_SYSTEM_TIME = False   # <--- toggle this True to use real time
 

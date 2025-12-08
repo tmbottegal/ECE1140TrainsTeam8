@@ -195,5 +195,95 @@ def test_maintenance_switch_change_updates_tc(ctc, mocker):
     assert sw_update.switch_position == 1  # Alternate = 1
 
 
+def test_receive_wayside_occupancy(ctc):
+    class FakeUpdate:
+        def __init__(self):
+            self.block_id = 5
+            self.occupied = True
+            self.signal_state = "GREEN"
+            self.switch_position = None
+            self.crossing_status = None
+
+    ctc.receive_wayside_status("Green Line", [FakeUpdate()], source="SW")
+
+    blk = next(b for b in ctc.get_blocks() if b.block_id == 5)
+    assert blk.status == "occupied"
+
+def test_continuous_suggestion_forwarding(ctc, mocker):
+    sw_mock = mocker.patch.object(ctc.track_controller, "receive_ctc_suggestion")
+
+    ctc.dispatch_train("T1", 1, 4, 20.0, 100.0)
+    ctc.tick_all_modules()
+
+    sw_mock.assert_called()
+
+def test_mode_toggle_changes_state(ctc):
+    # CTC starts in MANUAL mode (actual default)
+    assert ctc.mode == "manual"
+
+    # Switch to auto
+    ctc.set_mode("auto")
+    assert ctc.mode == "auto"
+
+    # Switch back to manual
+    ctc.set_mode("manual")
+    assert ctc.mode == "manual"
+
+def test_auto_mode_generates_suggestions(ctc, mocker):
+    ctc.set_mode("auto")
+
+    send_mock = mocker.patch.object(ctc.track_controller, "receive_ctc_suggestion")
+
+    # Trigger a tick → auto logic should send suggestions
+    ctc.dispatch_train("T_AUTO", 2, 6, 20.0, 100.0)
+    ctc.tick_all_modules()
+
+    send_mock.assert_called()
+
+def test_manual_mode_stops_auto_suggestions(ctc, mocker):
+    ctc.set_mode("manual")
+
+    send_mock = mocker.patch.object(ctc.track_controller, "receive_ctc_suggestion")
+
+    # Run tick; no auto suggestions should be sent
+    ctc.tick_all_modules()
+
+    send_mock.assert_not_called()
+
+def test_receive_multiple_occupancy_updates(ctc):
+    class Update:
+        def __init__(self, b, occ):
+            self.block_id = b
+            self.occupied = occ
+            self.signal_state = "GREEN"
+            self.switch_position = None
+            self.crossing_status = None
+
+    updates = [Update(5, True), Update(6, True), Update(7, False)]
+
+    ctc.receive_wayside_status("Green Line", updates, source="SW")
+
+    blk5 = next(b for b in ctc.get_blocks() if b.block_id == 5)
+    blk6 = next(b for b in ctc.get_blocks() if b.block_id == 6)
+    blk7 = next(b for b in ctc.get_blocks() if b.block_id == 7)
+
+    assert blk5.status == "occupied"
+    assert blk6.status == "occupied"
+    assert blk7.status == "unoccupied"
+
+def test_schedule_dispatch_triggers(ctc, mocker):
+    # Mock dispatch_train to verify call instead of actually dispatching
+    dispatch_mock = mocker.patch.object(ctc, "dispatch_train")
+
+    # Load schedule
+    ctc.schedule_manager.load("schedule.csv")
+
+    # Simulate clock tick at scheduled time (example "10:00:00")
+    ctc.tick("10:00:00")
+
+    # At least one scheduled dispatch should trigger
+    dispatch_mock.assert_called()
+
+
 
 

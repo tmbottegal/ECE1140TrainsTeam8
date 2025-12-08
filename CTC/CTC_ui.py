@@ -187,7 +187,8 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.clockLabel.setStyleSheet("font-weight:bold; font-size:14px;")
         layout.addWidget(self.clockLabel)
 
-        self.throughputLabel = QtWidgets.QLabel("Throughput: 0 trips completed")
+        self.throughputLabel = QtWidgets.QLabel("Throughput: 0 passengers/hour")
+
         self.throughputLabel.setStyleSheet("font-weight:bold; font-size:14px;")
         layout.addWidget(self.throughputLabel)
 
@@ -865,9 +866,11 @@ class CTCWindow(QtWidgets.QMainWindow):
                 # update the label for each simulated tick
             self.clockLabel.setText(f"Sim Time: {clock.get_time_string()}")
 
+            throughput = self.state.get_throughput_per_hour()
             self.throughputLabel.setText(
-                f"Throughput: {self.state.train_throughput} trips completed"
+                f"Throughput: {throughput} passengers/hour"
             )
+
 
 
 

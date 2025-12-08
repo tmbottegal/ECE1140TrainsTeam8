@@ -320,6 +320,9 @@ class TrackState:
         self.track_controller_hw = HardwareTrackControllerBackend(self.track_model, line_name)
         self.track_controller_hw.set_ctc_backend(self)
         self.track_controller_hw.start_live_link(poll_interval=1.0)
+        self.passenger_throughput_hour = 0
+        self._last_throughput_reset = clock.get_time()
+
 
         
 
@@ -797,6 +800,12 @@ class TrackState:
             if update.crossing_status is not None:
                 self.update_crossing_status(line_name, bid, update.crossing_status)
 
+    # --------------------------------------------------------
+    # Throughput accessor for UI
+    # --------------------------------------------------------
+    def get_throughput_per_hour(self):
+        return self.passenger_throughput_hour
+
 
     def update_block_occupancy(self, line_name, block_id, occupied):
         if line_name in self._lines:
@@ -832,6 +841,19 @@ class TrackState:
                     b.set_switch_position(position)
                     print(f"[CTC] {line_name} Switch {block_id} position → {position}")
                     return
+
+    def _update_throughput(self):
+        total_passengers = 0
+
+        # count boardings OR exits at all stations
+        for block_id, seg in self.track_model.segments.items():
+            if hasattr(seg, "station_name"):
+                # Option A: use boarded passengers
+                total_passengers += seg.passengers_boarded_total
+                # Option B: or use exited passengers (either works)
+                # total_passengers += seg.passengers_exited_total
+
+        self.passenger_throughput_hour = total_passengers
 
     def update_crossing_status(self, line_name, block_id, status):
         if line_name in self._lines:
@@ -958,6 +980,11 @@ class TrackState:
                         ui_block.status = "closed"
         except Exception as e:
             print(f"[CTC] Occupancy sync error: {e}")
+        
+        try:
+            self._update_throughput()
+        except Exception as e:
+            print("[CTC] Throughput update error:", e)
 
         if self.mode == "manual":
             for train_id, (speed_mps, auth_m) in list(self._train_suggestions.items()):

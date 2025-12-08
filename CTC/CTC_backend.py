@@ -26,6 +26,8 @@ from universal.global_clock import clock
 
 # The Track Model simulates the physical railway (blocks, trains, etc.)
 from trackModel.track_model_backend import TrackNetwork
+from trackModel.track_model_backend import TrackSwitch
+
 from trainModel.train_model_backend import Train
 
 # The Track Controller governs signals, switches, crossings, etc.
@@ -826,11 +828,11 @@ class TrackState:
         if not signal_state or signal_state == "N/A":
             signal_state = "RED"   # default to RED
 
-        for b in self._lines[line_name]:
-            if b.block_id == block_id:
-                b.set_signal_state(signal_state)
-                print(f"[CTC] {line_name} Block {block_id} signal → {signal_state}")
-                return
+        tm_seg = self.track_model.segments.get(block_id)
+
+        if not isinstance(tm_seg, TrackSwitch):
+            return  # ignore signal update for non-switch blocks
+
 
 
 

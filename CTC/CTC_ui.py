@@ -11,6 +11,8 @@
 from PyQt6 import QtWidgets, QtCore, QtGui
 from CTC_backend import TrackState
 from universal.global_clock import clock
+from trackModel.track_model_backend import TrackSwitch
+
 
 BLOCK_LEN_M = 50.0
 MPS_TO_MPH = 2.23693629
@@ -265,7 +267,7 @@ class CTCWindow(QtWidgets.QMainWindow):
                 b.station,
                 b.station_side,
                 switch_text,                     # ⭐ FIXED SWITCH COLUMN
-                b.light,
+                "--",
                 ("Yes" if b.crossing else ""),
                 #f"{b.speed_limit * 0.621371:.0f} mph"
                 f"{b.speed_limit:.0f} mph"
@@ -296,36 +298,39 @@ class CTCWindow(QtWidgets.QMainWindow):
 
 
                 # --- SIGNAL LIGHT COLORING ---
+                # --- SIGNAL LIGHT COLUMN (SWITCHES ONLY) ---
                 if c == 6:
-                   
-                    # Convert SignalState enum → string
-                    signal_obj = b.light
+                    tm_seg = self.state.track_model.segments.get(b.block_id)
 
-                    if hasattr(signal_obj, "name"):
-                        light = signal_obj.name.upper()
+                    if isinstance(tm_seg, TrackSwitch):
+                        prev_sig = tm_seg.previous_signal_state.name
+                        straight_sig = tm_seg.straight_signal_state.name
+                        diverging_sig = tm_seg.diverging_signal_state.name
+
+                        # UI text like the Track Model Test UI
+                        text = f"P:{prev_sig}  S:{straight_sig}  D:{diverging_sig}"
+                        item.setText(text)
+
+                        # Background coloring based on highest-danger aspect
+                        if "RED" in [prev_sig, straight_sig, diverging_sig]:
+                            item.setBackground(QtGui.QColor("#b00020"))    # dark red
+                            item.setForeground(QtGui.QColor("white"))
+                        elif "YELLOW" in [prev_sig, straight_sig, diverging_sig]:
+                            item.setBackground(QtGui.QColor("#d7b600"))    # yellow
+                            item.setForeground(QtGui.QColor("black"))
+                        else:
+                            item.setBackground(QtGui.QColor("#1b5e20"))    # green
+                            item.setForeground(QtGui.QColor("white"))
                     else:
-                        light = str(signal_obj).upper()
-
-                    item.setText(light)
-                    print(f"[UI DEBUG] Block {b.block_id} signal =", b.light)
-
-                    if light == "N/A":
-                        item.setText("")  # hide N/A
-                    elif light == "RED":
-                        item.setBackground(QtGui.QColor("#b00020"))
-                        item.setForeground(QtGui.QColor("white"))
-                    elif light == "YELLOW":
-                        item.setBackground(QtGui.QColor("#d7b600"))
-                        item.setForeground(QtGui.QColor("black"))
-                    elif light == "GREEN":
-                        item.setBackground(QtGui.QColor("#1b5e20"))
-                        item.setForeground(QtGui.QColor("white"))
-
+                        # Not a switch — hide signals
+                        item.setText("")
                 self.mapTable.setItem(r, c, item)
 
-        # Update train info if needed
-        if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
-            self._populate_train_info_table()
+
+
+                # Update train info if needed
+                if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
+                    self._populate_train_info_table()
 
 
 

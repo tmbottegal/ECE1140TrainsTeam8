@@ -1,8 +1,7 @@
 # list of shit to do for me
 
-# plc file and failure bug fixes
-# wayside needs to see hardware part so not cause collisions
 # make the ui not shit looking and make the logs info more formal(random shit)
+# bug fix as much as you can
 
 from __future__ import annotations
 import sys, os, logging, importlib.util, threading, time, math
@@ -665,11 +664,12 @@ class TrackControllerBackend(FailuresShit):
                         self.set_commanded_speed(block_id, 0)
                         self.set_commanded_authority(block_id, 0)
                         logger.debug("PLC: Block %d commanded to STOP", block_id)
-                    else:
-                        suggested_speed = self._suggested_speed_mps.get(block_id, 20)
-                        suggested_auth = self._suggested_auth_m.get(block_id, 100)
+                    elif block_id in self._suggested_speed_mps and block_id in self._suggested_auth_m:
+                        suggested_speed = self._suggested_speed_mps[block_id]
+                        suggested_auth = self._suggested_auth_m[block_id]
                         self.set_commanded_speed(block_id, int(suggested_speed))
                         self.set_commanded_authority(block_id, int(suggested_auth))
+                        logger.debug("PLC: Block %d commanded speed=%d, auth=%d", block_id, int(suggested_speed), int(suggested_auth))
             for block_id in self._line_block_ids():
                 if block_id < len(block_occupancies): self._previous_occupancies[block_id] = block_occupancies[block_id]
             logger.info("PLC logic works")
@@ -880,17 +880,31 @@ class TrackControllerBackend(FailuresShit):
             try:
                 if b in self._known_occupancy: occupied_val = bool(self._known_occupancy[b])
                 else: occupied_val = "N/A"
-                suggested_speed_mps = self._suggested_speed_mps.get(b, 0.0)
-                suggested_auth_m = self._suggested_auth_m.get(b, 0.0)
-                suggested_speed_mph = ConversionFunctions.mps_to_mph(suggested_speed_mps)
-                suggested_auth_yd = ConversionFunctions.meters_to_yards(suggested_auth_m)
-                if b in self._commanded_speed_mps or b in self._known_commanded_speed:
-                    commanded_speed_mps = self._commanded_speed_mps.get(b) or self._known_commanded_speed.get(b, 0)
+                if b in self._suggested_speed_mps and self._suggested_speed_mps[b] > 0:
+                    suggested_speed_mps = self._suggested_speed_mps[b]
+                    suggested_speed_mph = ConversionFunctions.mps_to_mph(suggested_speed_mps)
+                    suggested_speed_mph = int(round(suggested_speed_mph))
+                else: suggested_speed_mph = "N/A"
+                if b in self._suggested_auth_m and self._suggested_auth_m[b] > 0:
+                    suggested_auth_m = self._suggested_auth_m[b]
+                    suggested_auth_yd = ConversionFunctions.meters_to_yards(suggested_auth_m)
+                    suggested_auth_yd = int(round(suggested_auth_yd))
+                else: suggested_auth_yd = "N/A"
+                if b in self._commanded_speed_mps:
+                    commanded_speed_mps = self._commanded_speed_mps[b]
+                    commanded_speed_mph = ConversionFunctions.mps_to_mph(commanded_speed_mps)
+                    commanded_speed_mph = int(math.ceil(commanded_speed_mph))
+                elif b in self._known_commanded_speed:
+                    commanded_speed_mps = self._known_commanded_speed[b]
                     commanded_speed_mph = ConversionFunctions.mps_to_mph(commanded_speed_mps)
                     commanded_speed_mph = int(math.ceil(commanded_speed_mph))
                 else: commanded_speed_mph = "N/A"
-                if b in self._commanded_auth_m or b in self._known_commanded_auth:
-                    commanded_auth_m = self._commanded_auth_m.get(b) or self._known_commanded_auth.get(b, 0)
+                if b in self._commanded_auth_m:
+                    commanded_auth_m = self._commanded_auth_m[b]
+                    commanded_auth_yd = ConversionFunctions.meters_to_yards(commanded_auth_m)
+                    commanded_auth_yd = int(math.ceil(commanded_auth_yd))
+                elif b in self._known_commanded_auth:
+                    commanded_auth_m = self._known_commanded_auth[b]
                     commanded_auth_yd = ConversionFunctions.meters_to_yards(commanded_auth_m)
                     commanded_auth_yd = int(math.ceil(commanded_auth_yd))
                 else: commanded_auth_yd = "N/A"
@@ -900,19 +914,18 @@ class TrackControllerBackend(FailuresShit):
                         'straight': self._switch_signals.get((b, 1), "N/A"),
                         'diverging': self._switch_signals.get((b, 2), "N/A")}
                 elif b in self._known_signal: signal_val = self._known_signal[b]
-
                 else: signal_val = "N/A"
                 d[b] = {
                     "occupied": occupied_val,
-                    "suggested_speed": int(round(suggested_speed_mph)),
-                    "suggested_auth": int(round(suggested_auth_yd)),
+                    "suggested_speed": suggested_speed_mph,
+                    "suggested_auth": suggested_auth_yd,
                     "commanded_speed": commanded_speed_mph,
                     "commanded_auth": commanded_auth_yd,
-                    "signal": signal_val,}
+                    "signal": signal_val,
+                }
             except Exception as e: 
                 logger.debug(f"Error building block {b} data: {e}")
                 continue
-
         return d
     
     @property

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QGroupBox, QButtonGroup, QDialog, QLineEdit,
-    QMessageBox, QSizePolicy 
+    QMessageBox, QSizePolicy
 )
 from universal.global_clock import clock as global_clock
 from datetime import datetime
@@ -59,8 +59,8 @@ class TrainModelUI(QWidget):
     MPS_TO_MPH = 2.23694
     MS2_TO_FTS2 = 3.28084
 
-    def __init__(self, backend: "TrainModelBackend") -> None:
-        super().__init__()
+    def __init__(self, backend: "TrainModelBackend | list[TrainModelBackend]") -> None:
+        super().__init__()     
         self.backend = backend
         self.backend.add_listener(self.refresh_display)
 

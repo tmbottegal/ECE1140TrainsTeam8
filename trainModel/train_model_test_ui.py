@@ -537,13 +537,3 @@ class TrainModelTestUI(QWidget):
             QMessageBox.information(self, "Announcement Playing", f"Now announcing:\n\n\"{announcement_text}\"")
         else:
             QMessageBox.warning(self, "No Announcement", "Please enter an announcement first.")
-
-
-if __name__ == "__main__":
-    from train_model_backend import TrainModelBackend
-    
-    app = QApplication(sys.argv)
-    backend = TrainModelBackend()
-    test_ui = TrainModelTestUI(backend)
-    test_ui.show()
-    sys.exit(app.exec())

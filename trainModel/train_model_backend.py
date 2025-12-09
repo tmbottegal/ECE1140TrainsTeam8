@@ -414,6 +414,58 @@ class Train:
         self.current_segment: Optional[object] = None
         self.segment_displacement_m: float = 0.0
 
+        clock.register_listener(self._auto_tick)
+        self._last_tick_time: Optional[datetime] = None
+
+    def _auto_tick(self, current_time: datetime) -> None:
+        """
+        called automatically by global clock every tick; pulls commands from Track Model and runs physics
+        """
+        if self._last_tick_time is None:
+            self._last_tick_time = current_time
+            return
+
+        dt_s = (current_time - self._last_tick_time).total_seconds()
+        self._last_tick_time = current_time
+
+        if dt_s <= 0.0:
+            return
+
+        # pull track inputs (grade, beacon, speed limit)
+        trk = self._pull_track_inputs()
+
+        if self.current_segment and hasattr(self.current_segment, 'active_command'):
+            cmd = self.current_segment.active_command
+            if cmd:
+                spd = getattr(cmd, "commanded_speed", None)
+                auth = getattr(cmd, "authority", None)
+                
+                if spd is not None:
+                    self.tm.commanded_speed = max(0.0, float(spd))
+                if auth is not None:
+                    self.tm.authority_m = max(0.0, float(auth))
+
+        self.tm.set_inputs(
+            power_kw=self.tm.power_kw,
+            service_brake=self.tm.service_brake,
+            emergency_brake=self.tm.emergency_brake,
+            grade_percent=float(trk["grade_percent"]),
+            beacon_info=trk["beacon_info"],
+        )
+
+        try:
+            limit = float(trk["speed_limit_mps"])
+            if self.tm.velocity > limit:
+                self.tm.velocity = limit
+        except Exception:
+            pass
+        
+        # move
+        if dt_s > 0.0:
+            distance = float(self.tm.velocity) * float(dt_s)
+            self._advance_along_track(distance)
+
+
     # helpers from track graph
     # what is next
     def _next_segment(self):
@@ -546,24 +598,10 @@ class Train:
                 self.segment_displacement_m = seg_len
                 # _set_occ(seg, True)
                 return False
-            
-            """
-            if getattr(next_seg, "closed", False) or self._is_red(next_seg):
-                self.segment_displacement_m = seg_len
-                _set_occ(seg, True)
-                return False
-            """
 
             next_len = float(getattr(next_seg, "length", 0.0))
             new_disp = min(next_len, new_pos - seg_len)
-            """
-            ok = self._network_set_location(
-                getattr(next_seg, "block_id", getattr(next_seg, "id", -1)),
-                new_disp,
-            )
-            if not ok:
-                return False
-            """
+
             _set_occ(self.current_segment, False)
             _set_occ(next_seg, True)
 
@@ -577,28 +615,6 @@ class Train:
         self.segment_displacement_m = new_pos
         _set_occ(seg, True)  # make sure block stays marked occupied
         return True
-
-
-    # public tick
-    def tick(self, dt_s: float, *, power_kw: float | None = None,
-             service_brake: bool | None = None, emergency_brake: bool | None = None) -> None:
-        trk = self._pull_track_inputs()
-        #take inputs and feed to backend
-        self.tm.set_inputs(
-            power_kw=float(self.tm.power_kw if power_kw is None else power_kw),
-            service_brake=bool(self.tm.service_brake if service_brake is None else service_brake),
-            emergency_brake=bool(self.tm.emergency_brake if emergency_brake is None else emergency_brake),
-            grade_percent=float(trk["grade_percent"]),
-            beacon_info=trk["beacon_info"],
-        )
-        try:
-            limit = float(trk["speed_limit_mps"])
-            if self.tm.velocity > limit:
-                self.tm.velocity = limit
-        except Exception:
-            pass
-        if dt_s > 0.0:
-            self._advance_along_track(float(self.tm.velocity) * float(dt_s)) # distance = speed * time
     
     # UI/report 
     def report_state(self) -> dict:
@@ -672,48 +688,13 @@ class Train:
         pass
 
     def apply_train_command(self, active_command: TrainCommand) -> None:
-        """
-        accepts either a dict or an object with attributes:
-          speed_mps, authority_m, service_brake, emergency_brake
-        any missing field is ignored.
-        """
-        # read fields from dict/obj safely
-        commanded_speed = active_command.commanded_speed
-        authority = active_command.authority
-        """
-        spd = getf("speed_mps")
-        if spd is not None:
-            self.tm.commanded_speed = max(0.0, float(spd))
-
-        auth = getf("authority_m")
-        if auth is not None:
-            self.tm.authority_m = max(0.0, float(auth))
-
-        sb = getf("service_brake")
-        if sb is not None:
-            self.tm.service_brake = bool(sb)
-
-        eb = getf("emergency_brake")
-        if eb is not None:
-            self.tm.emergency_brake = bool(eb)
-
-        # immediately propagate to Train Controller if attached
-        if self.controller:
-            if spd is not None:
-                self.controller.set_commanded_speed(float(self.tm.commanded_speed))
-            if auth is not None:
-                self.controller.set_commanded_authority(float(self.tm.authority_m))
-            if sb is not None:
-                self.controller.set_service_brake(bool(self.tm.service_brake))
-            if eb is not None:
-                self.controller.set_emergency_brake(bool(self.tm.emergency_brake))
-        """
-
+        """Apply train command from Track Model"""
         spd = getattr(active_command, "commanded_speed", None)
         if spd is not None:
             self.tm.commanded_speed = max(0.0, float(spd))
+        
         auth = getattr(active_command, "authority", None)
         if auth is not None:
             self.tm.authority_m = max(0.0, float(auth))
 
-        print(f"Train {self.train_id} applied train command: speed={commanded_speed:.2f} m/s, authority={authority:.1f} m")
+        logger.debug(f"Train {self.train_id} applied command: speed={spd:.2f} m/s, authority={auth:.1f} m")

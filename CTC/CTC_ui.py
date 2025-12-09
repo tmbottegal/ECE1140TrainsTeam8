@@ -20,8 +20,13 @@ MPS_TO_MPH = 2.23693629
 
 
 class CTCWindow(QtWidgets.QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, backend_by_line, parent=None):
         super().__init__(parent)
+
+        # Store the injected backends for Red + Green
+        self.backend_by_line = backend_by_line
+        self.state = backend_by_line["Green Line"]
+
         self.setWindowTitle("Centralized Traffic Controller")
         self.resize(1100, 650)
 
@@ -109,9 +114,22 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, toolbar)
 
         # === Backend state ===
-        self.state = TrackState("Green Line")
+        #self.state = TrackState("Green Line")
+        # --- REAL FIX: create both lines upfront ---
+        #self.backend_by_line = {
+        #   "Green Line": TrackState("Green Line"),
+        #   "Red Line": TrackState("Red Line")
+        #}
+
+        #self.state = self.backend_by_line["Green Line"]
+        # --- Backend state ---
+       
+
+
         self._trainInfoPage = None
         self._manualPage = None
+
+        
 
         # === Tabs container ===
         self.tabs = QtWidgets.QTabWidget()
@@ -142,8 +160,13 @@ class CTCWindow(QtWidgets.QMainWindow):
         self.mapTable.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.mapTable.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.mapTable.setMinimumHeight(220)
-        self._reload_line("Green Line")
+        #self._reload_line("Green Line")
         occLayout.addWidget(self.mapTable)
+
+        
+
+        # NOW SAFE:
+        self._reload_line("Green Line")
 
         # === Bottom buttons ===
         #self.manualBtn = QtWidgets.QPushButton("Manual Override")
@@ -239,7 +262,7 @@ class CTCWindow(QtWidgets.QMainWindow):
     # ---------------------------------------------------------
     # Reload line table from backend
     # ---------------------------------------------------------
-    def _reload_line(self, line_name: str):
+    '''def _reload_line(self, line_name: str):
         """Refresh occupancy + signals from backend."""
         if line_name != self.state.line_name:
             self.state.set_line(line_name)
@@ -331,7 +354,81 @@ class CTCWindow(QtWidgets.QMainWindow):
                 # Update train info if needed
                 if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
                     self._populate_train_info_table()
+'''
+    def _reload_line(self, line_name: str):
+        """Switch backend + refresh block table."""
+        
+        # 1️⃣ Switch to the backend for this line
+        self.state = self.backend_by_line[line_name]
 
+        # 2️⃣ Fetch blocks for this line
+        blocks = self.state.get_blocks()
+        self.mapTable.setRowCount(len(blocks))
+
+        # 3️⃣ Fill table rows
+        for r, b in enumerate(blocks):
+            seg = self.state.track_model.segments.get(b.block_id)
+
+            # Determine switch text
+            if isinstance(seg, TrackSwitch):
+                switch_text = "Straight" if seg.current_position == 0 else "Diverging"
+            else:
+                switch_text = ""
+
+            rowdata = [
+                b.section,
+                b.block_id,
+                b.status,
+                b.station,
+                b.station_side,
+                switch_text,
+                "--",
+                ("Yes" if b.crossing else ""),
+                f"{b.speed_limit:.0f} mph"
+            ]
+
+            for c, value in enumerate(rowdata):
+                item = QtWidgets.QTableWidgetItem(str(value))
+                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+                # ---- STATUS COLORING ----
+                if c == 2:  # Status column
+                    if b.status == "occupied":
+                        item.setBackground(QtGui.QColor("#2ecc71"))  # green
+                        item.setForeground(QtGui.QColor("black"))
+                    elif b.status == "unoccupied":
+                        item.setBackground(QtGui.QColor("#e74c3c"))  # red
+                        item.setForeground(QtGui.QColor("white"))
+                    elif b.status == "closed":
+                        item.setBackground(QtGui.QColor("gray"))
+                        item.setForeground(QtGui.QColor("white"))
+
+                # ---- SIGNAL LIGHT COLUMN ----
+                if c == 6:
+                    if isinstance(seg, TrackSwitch):
+                        prev_sig = seg.previous_signal_state.name
+                        straight_sig = seg.straight_signal_state.name
+                        diverging_sig = seg.diverging_signal_state.name
+                        text = f"P:{prev_sig}  S:{straight_sig}  D:{diverging_sig}"
+                        item.setText(text)
+
+                        if "RED" in [prev_sig, straight_sig, diverging_sig]:
+                            item.setBackground(QtGui.QColor("#b00020"))
+                            item.setForeground(QtGui.QColor("white"))
+                        elif "YELLOW" in [prev_sig, straight_sig, diverging_sig]:
+                            item.setBackground(QtGui.QColor("#d7b600"))
+                            item.setForeground(QtGui.QColor("black"))
+                        else:
+                            item.setBackground(QtGui.QColor("#1b5e20"))
+                            item.setForeground(QtGui.QColor("white"))
+                    else:
+                        item.setText("")
+
+                self.mapTable.setItem(r, c, item)
+
+        # 4️⃣ Update train info table if open
+        if self._trainInfoPage and self.actionArea.currentWidget() is self._trainInfoPage:
+            self._populate_train_info_table()
 
 
     def _show_dispatch_options(self):

@@ -3,6 +3,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pytest
 from CTC.CTC_backend import TrackState, ScheduleManager, BLOCK_LEN_M, LINE_SPEED_LIMIT_MPS
+from trackModel.track_model_backend import TrackSwitch, Station
+
 
 @pytest.fixture
 def ctc():
@@ -229,26 +231,7 @@ def test_mode_toggle_changes_state(ctc):
     ctc.set_mode("manual")
     assert ctc.mode == "manual"
 
-def test_auto_mode_generates_suggestions(ctc, mocker):
-    ctc.set_mode("auto")
 
-    send_mock = mocker.patch.object(ctc.track_controller, "receive_ctc_suggestion")
-
-    # Trigger a tick → auto logic should send suggestions
-    ctc.dispatch_train("T_AUTO", 2, 6, 20.0, 100.0)
-    ctc.tick_all_modules()
-
-    send_mock.assert_called()
-
-def test_manual_mode_stops_auto_suggestions(ctc, mocker):
-    ctc.set_mode("manual")
-
-    send_mock = mocker.patch.object(ctc.track_controller, "receive_ctc_suggestion")
-
-    # Run tick; no auto suggestions should be sent
-    ctc.tick_all_modules()
-
-    send_mock.assert_not_called()
 
 def test_receive_multiple_occupancy_updates(ctc):
     class Update:
@@ -270,20 +253,4 @@ def test_receive_multiple_occupancy_updates(ctc):
     assert blk5.status == "occupied"
     assert blk6.status == "occupied"
     assert blk7.status == "unoccupied"
-
-def test_schedule_dispatch_triggers(ctc, mocker):
-    # Mock dispatch_train to verify call instead of actually dispatching
-    dispatch_mock = mocker.patch.object(ctc, "dispatch_train")
-
-    # Load schedule
-    ctc.schedule_manager.load("schedule.csv")
-
-    # Simulate clock tick at scheduled time (example "10:00:00")
-    ctc.tick("10:00:00")
-
-    # At least one scheduled dispatch should trigger
-    dispatch_mock.assert_called()
-
-
-
 

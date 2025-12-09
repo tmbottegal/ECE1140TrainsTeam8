@@ -41,14 +41,14 @@ from trackControllerHW.track_controller_hw_backend import HardwareTrackControlle
 # ------------------------------------------------------------
 
 
-SW_RANGES = list(range(1, 63)) + list(range(122, 151))
-HW_RANGES = list(range(63, 122))
+#SW_RANGES = list(range(1, 63)) + list(range(122, 151))
+#HW_RANGES = list(range(63, 122))
 
-def controller_for_block(block_id: int, sw, hw):
-    """Return the correct controller (SW or HW) for a given block ID."""
-    if block_id in SW_RANGES:
-        return sw
-    return hw
+def controller_for_block(self, block_id: int):
+    if block_id in self.sw_ranges:
+        return self.track_controller
+    return self.track_controller_hw
+
 
 
 # ------------------------------------------------------------
@@ -293,6 +293,8 @@ class TrackState:
 
     def __init__(self, line_name: str = "Green Line",  network: TrackNetwork = None):
         self.line_name = line_name
+        
+
 
         # Create and load the Track Model
         if network is not None:
@@ -302,12 +304,37 @@ class TrackState:
         else:
             self.track_model = TrackNetwork()
             try:
-                layout_path = os.path.join(os.path.dirname(__file__), "..", "trackModel", "green_line.csv")
+                layout_file = f"{self.line_name.lower().replace(' ', '_')}.csv"
+                layout_path = os.path.join(
+                    os.path.dirname(__file__),
+                    "..", "trackModel", layout_file
+                )
                 layout_path = os.path.abspath(layout_path)
                 self.track_model.load_track_layout(layout_path)
                 self.section_map = self._load_section_letters()
 
                 print(f"[CTC Backend] Loaded track layout from {layout_path}")
+                # --------------------------------------------------------
+                # Determine SW / HW block ranges based on line
+                # --------------------------------------------------------
+                all_blocks = sorted(self.track_model.segments.keys())
+
+                if self.line_name == "Green Line":
+                    # Original mapping (confirmed)
+                    self.sw_ranges = set(list(range(1, 63)) + list(range(122, 151)))
+                    self.hw_ranges = set(all_blocks) - self.sw_ranges
+
+                elif self.line_name == "Red Line":
+                    # From your controller team: SW = 1–32
+                    self.sw_ranges = set(range(1, 33))
+                    self.hw_ranges = set(all_blocks) - self.sw_ranges
+
+                else:
+                    # Fallback for unknown lines
+                    mid = len(all_blocks) // 2
+                    self.sw_ranges = set(all_blocks[:mid])
+                    self.hw_ranges = set(all_blocks[mid:])
+
             except Exception as e:
                 print(f"[CTC Backend] Warning: failed to load layout → {e}")
 
@@ -480,10 +507,19 @@ class TrackState:
         """Return the actual connected block path using the track model graph."""
         from collections import deque
         # 🔥 Fix TrackModel bug: block 0 is actually Yard (63)
-        if start_block == 0:
-            start_block = 63
-        if dest_block == 0:
-            dest_block = 63
+        # 🔥 Dynamically find the Yard block for this line
+        yard_block = None
+        for b, seg in self.track_model.segments.items():
+            if hasattr(seg, "station_name") and seg.station_name and seg.station_name.lower() == "yard":
+                yard_block = b
+                break
+
+        # Map block 0 → yard only if yard exists
+        if start_block == 0 and yard_block is not None:
+            start_block = yard_block
+        if dest_block == 0 and yard_block is not None:
+            dest_block = yard_block
+
         
         tm = self.track_model.segments
         visited = set()
@@ -554,9 +590,10 @@ class TrackState:
         section_map = {}
 
         # Path to the same CSV TrackNetwork loads
+        layout_file = f"{self.line_name.lower().replace(' ', '_')}.csv"
         layout_path = os.path.join(
-            os.path.dirname(__file__), 
-            "..", "trackModel", "green_line.csv"
+            os.path.dirname(__file__),
+            "..", "trackModel", layout_file
         )
         layout_path = os.path.abspath(layout_path)
 
@@ -787,11 +824,11 @@ class TrackState:
             bid = update.block_id
 
             # If SW is reporting HW territory → ignore
-            if source == "SW" and bid in HW_RANGES:
+            if source == "SW" and bid in self.hw_ranges:
                 continue
 
             # If HW is reporting SW territory → ignore
-            if source == "HW" and bid in SW_RANGES:
+            if source == "HW" and bid in self.sw_ranges:
                 continue
 
             # Otherwise accept the update
@@ -886,8 +923,14 @@ class TrackState:
         if normalized in ALIASES:
             station_name = ALIASES[normalized]
         
-        if station_name == "Yard":
-            return 63     # ALWAYS block 63
+        # If user typed 'Yard', find the yard dynamically
+        if station_name.lower() == "yard":
+            for block, seg in self.track_model.segments.items():
+                if hasattr(seg, "station_name") and seg.station_name and seg.station_name.lower() == "yard":
+                    return block
+            # no yard found
+            return None
+
 
         # Search all station segments in the track model
         for block, seg in self.track_model.segments.items():
@@ -1011,7 +1054,9 @@ class TrackState:
                 # -------------------------------
                 if train_id in self._dwell_end:
                     if current_seconds < self._dwell_end[train_id]:
-                        controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                        #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                        controller = self.controller_for_block(block)
+
                         controller.receive_ctc_suggestion(block, 0.0, 0.0)
                         self._train_suggestions[train_id] = (0.0, 0.0)
                         print(f"[DWELL] Train {train_id} dwelling at station block {block} "
@@ -1089,7 +1134,9 @@ class TrackState:
                     self._dwell_end[train_id] = current_seconds + dwell_time
                     print(f"[DWELL] Train {train_id} ARRIVED at station block {block}, starting {dwell_time}s dwell.")
 
-                    controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                    #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                    controller = self.controller_for_block(block)
+
                     controller.receive_ctc_suggestion(block, 0.0, 0.0)
                     self._train_suggestions[train_id] = (0.0, 0.0)
 
@@ -1104,7 +1151,9 @@ class TrackState:
                     new_speed = 0.0
                     new_auth = 0.0
 
-                    controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                    #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                    controller = self.controller_for_block(block)
+
                     controller.receive_ctc_suggestion(block, new_speed, new_auth)
 
                     self._train_suggestions[train_id] = (new_speed, new_auth)
@@ -1121,7 +1170,9 @@ class TrackState:
                     new_auth = 0.0
                     speed_mps = 0.0
 
-                controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
+                controller = self.controller_for_block(block)
+
                 controller.receive_ctc_suggestion(block, speed_mps, new_auth)
 
                 self._train_suggestions[train_id] = (speed_mps, new_auth)

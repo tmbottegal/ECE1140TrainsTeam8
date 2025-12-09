@@ -97,8 +97,29 @@ if __name__ == "__main__":
     controllers["Green Line"].set_ctc_backend(ctc_state)
     controllers["Green Line"].start_live_link(poll_interval=1.0)
 
-    ctc_ui = CTCWindow()
-    ctc_ui.state = ctc_state  # ensure UI uses this backend
+    #ctc_ui = CTCWindow()
+    #ctc_ui.state = ctc_state  # ensure UI uses this backend
+    # Create both real CTC backends
+    ctc_green = TrackState("Green Line", network1)
+    ctc_red = TrackState("Red Line", network2)
+
+    # Replace internal controllers so both use REAL modules
+    ctc_green.track_controller = controllers["Green Line"]
+    controllers["Green Line"].set_ctc_backend(ctc_green)
+
+    ctc_red.track_controller = controllers["Red Line"]
+    controllers["Red Line"].set_ctc_backend(ctc_red)
+
+    # Give both to the UI
+    backend_by_line = {
+        "Green Line": ctc_green,
+        "Red Line": ctc_red
+    }
+
+    ctc_ui = CTCWindow(backend_by_line)
+    ctc_ui.show()
+
+
     ctc_ui.setWindowTitle("Centralized Traffic Controller")
     ctc_ui.show()
     #-----------------------------------------------------------------------------------------------

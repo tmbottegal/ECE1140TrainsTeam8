@@ -34,7 +34,7 @@ class TrainModelBackend:
     PASSENGER_MASS_KG = 70.0  #avg weight
     CAPACITY = 272
 
-    def __init__(self, line_name: str | None = None) -> None:
+    def __init__(self, line_name: Optional[str] = None) -> None:
         self.line_name = line_name or "-"
         self.train_id: str = "T1"
 

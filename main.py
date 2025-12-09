@@ -55,6 +55,7 @@ if __name__ == "__main__":
     network2 = TrackNetwork()
     network2.load_track_layout('trackModel/red_line.csv')
     network2.line_name = "Red Line"
+    trains: dict[tuple[str, int | str], dict] = {}
 
     #------------------------------------------------------------------------------------------------
     # trackcontroller sw stuff that might be wrong or need to be changed, tell me to change if needed
@@ -90,7 +91,77 @@ if __name__ == "__main__":
     TrackControllerUi.show()
     TrackControllerUi.refresh_tables()
     #-----------------------------------------------------------------------------------------------
+    '''
+    # train model backend + train wrapper + ui
+    train_backend = TrainModelBackend() #backend
+    train = Train(train_id=99, backend=train_backend) # train object wrapper so it can talk to TrackNetwork
+    network1.add_train(train)
+    network1.connect_train(99, block_id=1, displacement=0.0) 
+    # choose a starting block for the train on Green Line (adjust block_id/displacement)
+    train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
+    train_ui.setWindowTitle("Train Model – T1")
+    train_ui.show()
+    #-----------------------------------------------------------------------------------------------
+    # train controller testbench
+    testbench = TrainModelTestUI(train_backend)
+    testbench.setWindowTitle("Train Testbench (Acting as Train Controller)")
+    testbench.show()
+    '''
+
+    # keep track of all trains by (line_name, train_id)
+    def create_train(train_id: int | str, line_name: str, start_block_id: int) -> None:
+        """
+        creates TrainModelBackend + Train wrapper, attaches it to the right TrackNetwork, opens TrainModel UI + Test UI for that specific train
+        """
+        # pick correct network based on line name label
+        if line_name == "Green Line":
+            network = network1
+        elif line_name == "Red Line":
+            network = network2
+        else:
+            print(f"[WARN] Unknown line '{line_name}', defaulting to Green Line")
+            network = network1
+
+        # normalize ints or string ids
+        train_id_str = str(train_id)
+
+        # create backend and train
+        backend = TrainModelBackend(line_name=line_name)
+        backend.train_id = train_id_str  
+
+        train = Train(train_id=train_id_str, backend=backend)
+        network.add_train(train)
+
+        network.connect_train(train_id_str, block_id=start_block_id, displacement=0.0)
+
+        def train_tick_listener(current_time):
+            """Clock listener that calls the train backend's tick() method every clock update"""
+            try:
+                backend.tick()
+            except Exception as e:
+                print(f"[ERROR] Train {train_id_str} tick failed: {e}")
+        
+        clock.register_listener(train_tick_listener)
+
+        # create main Train Model UI
+        tm_ui = TrainModelUI(backend)
+        tm_ui.setWindowTitle(f"Train Model – {line_name} – Train {train_id_str}")
+        tm_ui.show()
+
+        # create the Test UI (acting as controller)
+        test_ui = TrainModelTestUI(backend)
+        test_ui.setWindowTitle(f"Train Controller Testbench – {line_name} – Train {train_id_str}")
+        test_ui.show()
+
+        # store in registry for later
+        trains[(line_name, train_id_str)] = {
+            "backend": backend, "train": train, "tm_ui": tm_ui,"test_ui": test_ui,
+        }
+
+        print(f"[MAIN] Created train {train_id_str} on {line_name}, block {start_block_id}")
+    #-----------------------------------------------------------------------------------------------
     # === CTC Backend + UI ===
+    '''
     ctc_state = TrackState("Green Line", network1)
     # Replace its internal controller with the already-created one
     ctc_state.track_controller = controllers["Green Line"]
@@ -99,6 +170,8 @@ if __name__ == "__main__":
 
     #ctc_ui = CTCWindow()
     #ctc_ui.state = ctc_state  # ensure UI uses this backend
+    '''
+
     # Create both real CTC backends
     ctc_green = TrackState("Green Line", network1)
     ctc_red = TrackState("Red Line", network2)
@@ -109,6 +182,9 @@ if __name__ == "__main__":
 
     ctc_red.track_controller = controllers["Red Line"]
     controllers["Red Line"].set_ctc_backend(ctc_red)
+
+    ctc_green.on_train_created = create_train
+    ctc_red.on_train_created  = create_train
 
     # Give both to the UI
     backend_by_line = {
@@ -122,21 +198,6 @@ if __name__ == "__main__":
 
     ctc_ui.setWindowTitle("Centralized Traffic Controller")
     ctc_ui.show()
-    #-----------------------------------------------------------------------------------------------
-    # train model backend + train wrapper + ui
-    train_backend = TrainModelBackend() #backend
-    train = Train(train_id=99, backend=train_backend) # train object wrapper so it can talk to TrackNetwork
-    network1.add_train(train)
-    network1.connect_train(99, block_id=1, displacement=0.0) 
-    # choose a starting block for the train on Green Line (adjust block_id/displacement)
-    train_ui = TrainModelUI(train_backend) # launch the Train Model UI window
-    train_ui.setWindowTitle("Train Model – T1 (Green Line)")
-    train_ui.show()
-    #-----------------------------------------------------------------------------------------------
-    # train controller testbench
-    testbench = TrainModelTestUI(train_backend)
-    testbench.setWindowTitle("Train Testbench (Acting as Train Controller) - T99")
-    testbench.show()
  #-----------------------------------------------------------------------------------------------
     '''
     # === TRAIN CONTROLLER INTEGRATION (WORKAROUND VERSION) ===
@@ -210,6 +271,10 @@ if __name__ == "__main__":
     train_controller_ui.resize(1200, 750)
     train_controller_ui.show()
     '''
+
+    create_train(99, "Green Line", 1)
+    create_train(98, "Green Line", 3)
+
     app.exec()
 
     

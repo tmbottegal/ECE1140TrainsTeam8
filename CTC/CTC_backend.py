@@ -383,6 +383,8 @@ class TrackState:
         self.schedule = ScheduleManager()
         self.train_throughput = 0   # how many full routes completed
 
+        self.on_train_created = None
+
         print(f"[CTC Backend] Initialized for {self.line_name}")
 
     # --------------------------------------------------------
@@ -731,6 +733,9 @@ class TrackState:
             self._train_progress[train_id] = 0.0
 
             print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed_mph} mph, {suggested_auth_yd} yd")
+
+            if getattr(self, "on_train_created", None):
+                self.on_train_created(train_id, self.line_name, start_block)
 
         except Exception as e:
             print(f"[CTC] Error dispatching train: {e}")

@@ -13,13 +13,9 @@
 # - H = 70 km/h (underground)
 
 def plc_logic(block_occupancies, switch_positions, light_signals, crossing_signals, previous_occupancies, stop):
-    territory_yard = list(range(1, 9))
-    territory_early_main = list(range(9, 24))
-    territory_underground = list(range(24, 34))
     train_in_yard_area = any(block_occupancies[1:9])
     train_in_early_main = any(block_occupancies[9:16])
     train_in_surface = any(block_occupancies[9:24])
-    train_in_underground = any(block_occupancies[24:34])
     switch_positions[0] = train_in_yard_area and not train_in_early_main
     light_signals[0] = True
     if switch_positions[0] == 0:

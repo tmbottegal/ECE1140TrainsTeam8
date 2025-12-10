@@ -23,7 +23,6 @@
 def plc_logic(block_occupancies, switch_positions, light_signals, crossing_signals, previous_occupancies, stop):
     territory_main_line = list(range(1, 63))
     territory_underground = list(range(122, 151))
-    train_in_main_line = any(block_occupancies[1:63]) # may use at some point if shit hits the fan last minute
     train_in_underground = any(block_occupancies[122:151])
     train_in_yard_area = any(block_occupancies[0:13])
     train_in_early_main = any(block_occupancies[13:29])
@@ -59,8 +58,9 @@ def plc_logic(block_occupancies, switch_positions, light_signals, crossing_signa
     for i, block_idx in enumerate(territory_main_line):
         if block_occupancies[block_idx]:
             distance_to_end = len(territory_main_line) - i
-            if distance_to_end > 2:
-                if block_occupancies[block_idx] and previous_occupancies[block_idx - 1 if block_idx > 0 else 0]:
+            if distance_to_end > 2 and block_idx + 2 < len(block_occupancies):
+                prev_idx = max(0, block_idx - 1)
+                if block_idx > 0 and block_occupancies[block_idx] and previous_occupancies[prev_idx]:
                     if block_occupancies[block_idx + 2]: stop[block_idx] = True
                 elif block_occupancies[block_idx] and previous_occupancies[block_idx]:
                     if block_occupancies[block_idx + 2]: stop[block_idx] = True
@@ -69,15 +69,15 @@ def plc_logic(block_occupancies, switch_positions, light_signals, crossing_signa
     for i, block_idx in enumerate(territory_underground):
         if block_occupancies[block_idx]:
             distance_to_end = len(territory_underground) - i
-            if distance_to_end > 2:
-                if block_occupancies[block_idx] and previous_occupancies[block_idx - 1 if block_idx > 0 else 0]:
+            if distance_to_end > 2 and block_idx + 2 < len(block_occupancies):
+                if block_idx > 0 and block_occupancies[block_idx] and previous_occupancies[prev_idx]:
                     if block_occupancies[block_idx + 2]: stop[block_idx] = True
                 elif block_occupancies[block_idx] and previous_occupancies[block_idx]:
                     if block_occupancies[block_idx + 2]: stop[block_idx] = True
                 if stop[block_idx]:
                     if not block_occupancies[block_idx + 2]: stop[block_idx] = False
-    if not switch_positions[0] and train_in_yard_area: stop[0:3] = [True] * len(stop[0:3])
-    else: stop[0:3] = [False] * len(stop[0:3])
-    if not switch_positions[1] and train_in_stations: stop[27:30] = [True] * len(stop[27:30])
-    else: stop[27:30] = [False] * len(stop[27:30])
+    if not switch_positions[0] and train_in_yard_area: stop[0:3] = [True, True, True]
+    else: stop[0:3] = [False] * 3
+    if not switch_positions[1] and train_in_stations: stop[27:30] = [True] * 3
+    else: stop[27:30] = [False] * 3
     return switch_positions, light_signals, crossing_signals, stop

@@ -134,7 +134,9 @@ class FailuresShit:
         if not self._known_occupancy.get(block_id, False): return
         commanded_speed = self._commanded_speed_mps.get(block_id)
         commanded_auth = self._commanded_auth_m.get(block_id)
-        if commanded_speed is None or commanded_auth is None: return
+        if commanded_speed is None or commanded_auth is None:
+            logger.debug(f"Skipping track circuit failure detection for block {block_id}: missing commanded values")
+            return
         if commanded_speed == 0:
             if self._check_train_movement(block_id):
                 failure_key = f"track_circuit_{block_id}"
@@ -326,11 +328,12 @@ class FailuresShit:
             if next_block in self._line_block_ids(): next_blocks.append(next_block)
         return next_blocks
 
-    def _upload_plc_python_enhanced(self, filepath: str) -> None:
+    def _upload_plc_python(self, filepath: str) -> None:
         spec = importlib.util.spec_from_file_location("plc_module", filepath)
         if spec is None or spec.loader is None:
-            logger.error("Could not load PLC module from %s", filepath)
-            return
+            error_msg = f"could not load PLC module from {filepath}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         plc_module = importlib.util.module_from_spec(spec)
         try:
             spec.loader.exec_module(plc_module)
@@ -402,6 +405,7 @@ class TrackControllerBackend(FailuresShit):
         self._command_retry_count: Dict[int, int] = {}
         self._plc_module = None
         self._previous_occupancies: Dict[int, bool] = {}
+        self._live_thread_lock = threading.Lock()
         if self.line_name == "Green Line":
             self.crossing_blocks = {1: 19}
         elif self.line_name == "Red Line":
@@ -569,12 +573,27 @@ class TrackControllerBackend(FailuresShit):
         if not self.maintenance_mode: raise PermissionError("be in maintenance mode to upload PLC")
         ext = os.path.splitext(filepath)[1].lower()
         logger.info("uploading PLC file: %s", filepath)
+        # self._set_placeholder_values()                            # sara comment this stuff out for placeholder values
         if ext == ".py": self._upload_plc_python(filepath)
         else: self._upload_plc_text(filepath)
         self._sync_after_plc_upload()
         self._notify_listeners()
         self._send_status_to_ctc()
         logger.info("PLC uploaded for %s", self.line_name)
+
+    # def _set_placeholder_values(self) -> None:
+    #     default_speed_mps = 20
+    #     default_authority_m = 150
+    #     for block_id in self._line_block_ids():
+    #         if block_id not in self._commanded_speed_mps:
+    #             self._commanded_speed_mps[block_id] = default_speed_mps
+    #             self._known_commanded_speed[block_id] = default_speed_mps
+    #         if block_id not in self._commanded_auth_m:
+    #             self._commanded_auth_m[block_id] = default_authority_m
+    #             self._known_commanded_auth[block_id] = default_authority_m
+    #         try:
+    #             self.track_model.broadcast_train_command(block_id, int(self._commanded_speed_mps[block_id]), int(self._commanded_auth_m[block_id]))
+    #         except Exception as e: logger.warning("placehold no work")
 
     def _upload_plc_python(self, filepath: str) -> None:
         spec = importlib.util.spec_from_file_location("plc_module", filepath)
@@ -584,7 +603,7 @@ class TrackControllerBackend(FailuresShit):
         plc_module = importlib.util.module_from_spec(spec)
         try: 
             spec.loader.exec_module(plc_module)
-            self._plc_module = plc_module  # Store for repeated use
+            self._plc_module = plc_module
             logger.info("PLC module loaded successfully")
         except Exception:
             logger.exception("failed to execute PLC Python file %s", filepath)
@@ -599,18 +618,19 @@ class TrackControllerBackend(FailuresShit):
             logger.warning("No PLC module loaded or plc_logic function not found")
             return
         try:
-            block_occupancies = [False] * 151
-            previous_occupancies = [False] * 151
-            stop = [False] * 151
+            max_blocks = max(self._line_block_ids()) + 1 if self._line_block_ids() else 151
+            block_occupancies = [False] * max_blocks
+            previous_occupancies = [False] * max_blocks
+            stop = [False] * max_blocks
             for block_id in self._line_block_ids():
                 if block_id < len(block_occupancies):
                     block_occupancies[block_id] = self._known_occupancy.get(block_id, False)
                     previous_occupancies[block_id] = self._previous_occupancies.get(block_id, False)
-            switch_positions = [0] * 10
+            switch_positions = [0] * max(10, len(self.switches))
             for idx, (switch_id, position) in enumerate(self.switches.items()):
                 if idx < len(switch_positions): switch_positions[idx] = position
-            light_signals = [False] * 10
-            crossing_signals = [False] * 10
+            light_signals = [False] * (len(self.switches) * 3)
+            crossing_signals = [False] * max(10, len(self.crossings))
             for idx, (crossing_id, status) in enumerate(self.crossings.items()):
                 if idx < len(crossing_signals): crossing_signals[idx] = status
             logger.info("PLC logic working")
@@ -622,29 +642,41 @@ class TrackControllerBackend(FailuresShit):
                 previous_occupancies,
                 stop)
             for idx, (switch_id, _) in enumerate(self.switches.items()):
-                if idx < len(switch_positions):
+                if idx < len(switch_positions) and switch_positions[idx] is not None:
                     new_position = switch_positions[idx]
                     if self.switches[switch_id] != new_position:
                         self.switches[switch_id] = new_position
                         try:
                             self.track_model.set_switch_position(switch_id, new_position)
                             logger.info("PLC set switch %d to position %d", switch_id, new_position)
-                        except Exception as e: logger.warning("Failed to set switch %d: %s", switch_id, e)
+                        except Exception as e: 
+                            logger.warning("Failed to set switch %d: %s", switch_id, e)
             for idx, (switch_id, _) in enumerate(self.switches.items()):
-                if idx < len(light_signals):
-                    signal_idx_base = idx * 2
-                    if signal_idx_base < len(light_signals):
-                        signal_state_prev = SignalState.GREEN if light_signals[signal_idx_base] else SignalState.RED
-                        try:
-                            self.track_model.set_signal_state(switch_id, 0, signal_state_prev)
-                            self._switch_signals[(switch_id, 0)] = signal_state_prev
-                        except Exception as e: logger.warning("Failed to set switch %d previous signal: %s", switch_id, e)
-                    if signal_idx_base + 1 < len(light_signals):
-                        signal_state_div = SignalState.GREEN if light_signals[signal_idx_base + 1] else SignalState.RED
-                        try:
-                            self.track_model.set_signal_state(switch_id, 2, signal_state_div)
-                            self._switch_signals[(switch_id, 2)] = signal_state_div
-                        except Exception as e: logger.warning("Failed to set switch %d diverging signal: %s", switch_id, e)
+                signal_idx_base = idx * 3
+                if signal_idx_base < len(light_signals):
+                    signal_state_prev = SignalState.GREEN if light_signals[signal_idx_base] else SignalState.RED
+                    try:
+                        self.track_model.set_signal_state(switch_id, 0, signal_state_prev)
+                        self._switch_signals[(switch_id, 0)] = signal_state_prev
+                        logger.debug("PLC set switch %d previous signal: %s", switch_id, signal_state_prev)
+                    except Exception as e: 
+                        logger.warning("Failed to set switch %d previous signal: %s", switch_id, e)
+                if signal_idx_base + 1 < len(light_signals):
+                    signal_state_straight = SignalState.GREEN if light_signals[signal_idx_base + 1] else SignalState.RED
+                    try:
+                        self.track_model.set_signal_state(switch_id, 1, signal_state_straight)
+                        self._switch_signals[(switch_id, 1)] = signal_state_straight
+                        logger.debug("PLC set switch %d straight signal: %s", switch_id, signal_state_straight)
+                    except Exception as e: 
+                        logger.warning("Failed to set switch %d straight signal: %s", switch_id, e)
+                if signal_idx_base + 2 < len(light_signals):
+                    signal_state_div = SignalState.GREEN if light_signals[signal_idx_base + 2] else SignalState.RED
+                    try:
+                        self.track_model.set_signal_state(switch_id, 2, signal_state_div)
+                        self._switch_signals[(switch_id, 2)] = signal_state_div
+                        logger.debug("PLC set switch %d diverging signal: %s", switch_id, signal_state_div)
+                    except Exception as e: 
+                        logger.warning("Failed to set switch %d diverging signal: %s", switch_id, e)
             for idx, (crossing_id, _) in enumerate(self.crossings.items()):
                 if idx < len(crossing_signals):
                     new_status = crossing_signals[idx]
@@ -657,7 +689,8 @@ class TrackControllerBackend(FailuresShit):
                                 if seg and hasattr(seg, 'set_gate_status'):
                                     seg.set_gate_status(new_status)
                                     logger.info("PLC set crossing %d to %s", crossing_id, "Active" if new_status else "Inactive")
-                            except Exception as e: logger.warning("Failed to set crossing %d: %s", crossing_id, e)
+                            except Exception as e: 
+                                logger.warning("Failed to set crossing %d: %s", crossing_id, e)
             for block_id in self._line_block_ids():
                 if block_id < len(stop):
                     if stop[block_id]:
@@ -671,9 +704,11 @@ class TrackControllerBackend(FailuresShit):
                         self.set_commanded_authority(block_id, int(suggested_auth))
                         logger.debug("PLC: Block %d commanded speed=%d, auth=%d", block_id, int(suggested_speed), int(suggested_auth))
             for block_id in self._line_block_ids():
-                if block_id < len(block_occupancies): self._previous_occupancies[block_id] = block_occupancies[block_id]
+                if block_id < len(block_occupancies): 
+                    self._previous_occupancies[block_id] = block_occupancies[block_id]
             logger.info("PLC logic works")
-        except Exception: logger.exception(" PLC logic no work HAHAHAHHAHA")
+        except Exception: 
+            logger.exception("PLC logic no work HAHAHAHHAHA")
 
     def _sync_after_plc_upload(self) -> None:
         for block_id in self._line_block_ids():
@@ -736,13 +771,17 @@ class TrackControllerBackend(FailuresShit):
         self._detect_track_circuit_failure(block_id)
 
     def start_live_link(self, poll_interval: float = 1.0) -> None:
-        if self._live_thread_running:
-            logger.warning("Live link already running for %s", self.line_name)
-            return
-        self._live_thread_running = True
+        with self._live_thread_lock:
+            if self._live_thread_running:
+                logger.warning("Live link already running for %s", self.line_name)
+                return
+            self._live_thread_running = True
 
         def _poll_loop() -> None:
-            while self._live_thread_running:
+            while True:
+                with self._live_thread_lock:
+                    if not self._live_thread_running:
+                        break
                 try: self._poll_track_model()
                 except Exception: logger.exception("Error during Track Model polling loop")
                 time.sleep(poll_interval)
@@ -751,12 +790,14 @@ class TrackControllerBackend(FailuresShit):
         logger.info("Live link started for %s (poll interval: %.1fs)", self.line_name, poll_interval)
 
     def stop_live_link(self) -> None:
-        self._live_thread_running = False
+        with self._live_thread_lock:
+            self._live_thread_running = False
         logger.info("Live link stopped for %s", self.line_name)
 
     def _poll_track_model(self) -> None:
         if not hasattr(self.track_model, "segments"): return
         state_changed = False
+        occupancy_changed = False
         for block_id in self._line_block_ids():
             segment = self.track_model.segments.get(block_id)
             if segment is None: continue
@@ -767,6 +808,7 @@ class TrackControllerBackend(FailuresShit):
                     if known_occ != current_occ:
                         self._update_occupancy_from_model(block_id, current_occ)
                         state_changed = True
+                        occupancy_changed = True
                 if isinstance(segment, type(segment)) and hasattr(segment, 'straight_signal_state'):
                     if hasattr(segment, 'previous_signal_state'):
                         current_prev = segment.previous_signal_state
@@ -833,6 +875,9 @@ class TrackControllerBackend(FailuresShit):
             except Exception as e:
                 logger.debug("Error polling block %d: %s", block_id, e)
                 continue
+        if occupancy_changed and self._plc_module is not None:
+            logger.info("Occupancy changed, PLC logic will run it back")
+            self._execute_plc_logic()
         if state_changed:
             self._notify_listeners()
             self._send_status_to_ctc()

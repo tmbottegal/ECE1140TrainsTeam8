@@ -14,6 +14,7 @@
 - **Operating System**: Windows 10 or Windows 11
 - **Python**: Version 3.12 or higher
     - **PyQt6**
+    - **pytest** (for test files)
 ---
 
 ## Step-by-Step Installation Guide
@@ -41,7 +42,7 @@
    - Click "Code" → "Download ZIP"
    - Extract to `C:\Users\[YourUsername]\Desktop\ECE1140TrainsTeam8`
 
-2. **Option B: Git Clone** (if you have Git installed):
+2. **Option B: Git Clone** (if Git is installed):
    ```cmd
    git clone [repository-url] C:\Users\[YourUsername]\Desktop\ECE1140TrainsTeam8
    ```
@@ -53,14 +54,20 @@
    cd C:\Users\[YourUsername]\Desktop\ECE1140TrainsTeam8
    ```
 
-2. **Install PyQt6**:
+2. **Install PyQt6 and pytest**:
    ```cmd
    pip install PyQt6
+   ```
+   ```cmd
+   pip install pytest
    ```
 
 3. **Verify Installation**:
    ```cmd
-   python -c "import PyQt6; print('PyQt6 installed successfully')"
+   python -c "import PyQt6; print('PyQt6 installed')"
+   ```
+   ```cmd
+   python -c "import pytest; print('pytest installed')"
    ```
 
 ## Running the Application
@@ -79,8 +86,11 @@
 **Issue**: `No module named 'PyQt6'`
 - **Solution**: Install PyQt6: `pip install PyQt6`
 
+**Issue**: `No module named 'pytest'`
+- **Solution**: Install pytest: `pip install pytest`
+
 **Issue**: `FileNotFoundError: [Errno 2] No such file or directory: 'green_line.csv'`
-- **Solution**: Make sure you are running commands from the project root directory, as all files are designed to be run from there
+- **Solution**: Make sure you are running from the project root directory, as all files are designed to be run from there
 
 **Issue**: Application crashes on startup
 - **Solution**: 

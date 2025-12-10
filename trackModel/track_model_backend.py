@@ -1211,7 +1211,12 @@ class TrackNetwork:
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
         if train is None:
-            raise ValueError(f"Train ID {train_id} not found in track network.")
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+            if train is None:
+                raise ValueError(f"Train ID {train_id} not found in track network.")
         segment.passengers_boarding(train, count)
         pass
 
@@ -1245,7 +1250,12 @@ class TrackNetwork:
         if not isinstance(segment, Station):
             raise ValueError(f"Block ID {block_id} is not a station.")
         if train is None:
-            raise ValueError(f"Train ID {train_id} not found in track network.")
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+            if train is None:
+                raise ValueError(f"Train ID {train_id} not found in track network.")
         segment.passengers_exiting(train, count)
         pass
     
@@ -1385,7 +1395,12 @@ class TrackNetwork:
         """
         train = self.trains.get(train_id)
         if train is None:
-            raise ValueError(f"Train ID {train_id} not found in track network.")
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+            if train is None:
+                raise ValueError(f"Train ID {train_id} not found in track network.")
         
         train_status = {
             "train_id": train.train_id,
@@ -1512,7 +1527,12 @@ class TrackNetwork:
         
         train = self.trains.get(train_id)
         if train is None:
-            raise ValueError(f"Train ID {train_id} not found in track network.")
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+            if train is None:
+                raise ValueError(f"Train ID {train_id} not found in track network.")
         train.current_segment = self.segments[block_id]
         train.segment_displacement_m = displacement
         train.network = self
@@ -1526,14 +1546,24 @@ class TrackNetwork:
         pass
 
     def gti(self, train_id: int) -> None:    #DEBUG
+        """ (Get Train Info) Retrieve information about a specific train.
+        
+        Args:
+            train_id: ID of the train to look up.
+        """
         train = self.trains.get(train_id)
         if train is None:
-            raise ValueError(f"Train ID {train_id} not found in track network.")
-        print(f"[TrackNetwork] Train Info: Train ID: {train.train_id}, Current Segment: {train.current_segment.block_id if train.current_segment else 'None'}, Displacement: {train.segment_displacement_m} m")
-        pass
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+            if train is None:
+                raise ValueError(f"Train ID {train_id} not found in track network.")
+        self.out = (f"[TrackNetwork] Train Info: Train ID: {train.train_id}, Current Segment: {train.current_segment.block_id if train.current_segment else 'None'}, Displacement: {train.segment_displacement_m} m")
+        return self.out
 
     def mto(self, train_id: int, distance: float) -> None:   #DEBUG
-        """Move a train by a specified distance, overriding normal movement logic.
+        """(Move Train Override) Move a train by a specified distance, overriding normal movement logic.
         
         Args:
             train_id: ID of the train to move.
@@ -1541,7 +1571,41 @@ class TrackNetwork:
         """
         train = self.trains.get(train_id)
         if train is None:
-            raise ValueError(f"Train ID {train_id} not found in track network.")
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+            if train is None:
+                raise ValueError(f"Train ID {train_id} not found in track network.")
         success = train.mto(distance)
-        print(f"[TrackNetwork] Moved Train {train_id} by {distance} m: {'Success' if success else 'Blocked'}.")
-        pass
+        self.out = (f"[TrackNetwork] Moved Train {train_id} by {distance} m: {'Success' if success else 'Blocked'}.")
+        return self.out
+
+    def debug_get_train(self, train_id):  #DEBUG
+        """Get a train by ID - with debug logging for type conversions
+        
+        Args: 
+            train_id (any type)
+        """
+        print(f"[TRACK MODEL] Looking for train_id={train_id} (type={type(train_id)})")
+        print(f"[TRACK MODEL] Available trains: {list(self.trains.keys())}")
+        print(f"[TRACK MODEL] Key types: {[type(k) for k in self.trains.keys()]}")
+        self.debug = 0
+        
+        train = self.trains.get(train_id)
+        if train is not None:
+            self.debug = 1
+        if train is None:
+            # Try converting the key if lookup failed
+            if isinstance(train_id, str):
+                train = self.trains.get(int(train_id))
+                if train is not None:
+                    self.debug = 2
+                print(f"[TRACK MODEL] Tried int conversion: found={train is not None}")
+            elif isinstance(train_id, int):
+                train = self.trains.get(str(train_id))
+                if train is not None:
+                    self.debug = 3
+                print(f"[TRACK MODEL] Tried str conversion: found={train is not None}")
+        
+        return self.debug

@@ -109,21 +109,14 @@ if __name__ == "__main__":
     '''
 
     # keep track of all trains by (line_name, train_id)
-    def create_train(train_id: int | str, line_name: str, start_block_id: int) -> None:
+    def create_train(train_id: int, network: TrackNetwork, start_block_id: int) -> None:
         """
         creates TrainModelBackend + Train wrapper, attaches it to the right TrackNetwork, opens TrainModel UI + Test UI for that specific train
         """
         # pick correct network based on line name label
-        if line_name == "Green Line":
-            network = network1
-        elif line_name == "Red Line":
-            network = network2
-        else:
-            print(f"[WARN] Unknown line '{line_name}', defaulting to Green Line")
-            network = network1
-
+        line_name = network.line_name
         # normalize ints or string ids
-        train_id_str = str(train_id)
+        train_id_str = int(train_id)
 
         # create backend and train
         backend = TrainModelBackend(line_name=line_name)
@@ -272,8 +265,8 @@ if __name__ == "__main__":
     train_controller_ui.show()
     '''
 
-    create_train(99, "Green Line", 1)
-    create_train(98, "Green Line", 3)
+    create_train(99, network1, 1)
+    create_train(98, network1, 3)
 
     app.exec()
 

@@ -435,16 +435,23 @@ class TrackControllerHWUI(QWidget):
             QMessageBox.warning(self, "PLC Upload Failed", str(exc))
 
     def _on_switch_click(self, row: int, col: int) -> None:
-        if col != 2 or not self.maintenance_enabled:
+        if col != 1 or not self.maintenance_enabled:
+            # col 1 is "Position" in the new table layout
             return
         try:
             sid_item = self.tbl_switch.item(row, 0)
-            pos_item = self.tbl_switch.item(row, 2)
+            pos_item = self.tbl_switch.item(row, 1)
             if not sid_item or not pos_item:
                 return
+
             sid = int(sid_item.text())
-            current = (pos_item.text() or "Straight").strip()
-            next_pos = "Diverging" if current == "Straight" else "Straight"
+            current = (pos_item.text() or "Straight").strip().lower()
+
+            if current in ("straight", "normal"):
+                next_pos = "Diverging"
+            else:
+                next_pos = "Straight"
+
             self.backend.safe_set_switch(sid, next_pos)
         except Exception as exc:
             QMessageBox.warning(self, "Switch Change Failed", str(exc))
@@ -811,20 +818,24 @@ class TrackControllerHWUI(QWidget):
                     return
                 sig_text = (item.text() or "N/A").strip().upper()
                 if sig_text in ("RED", "YELLOW", "GREEN"):
-                    # Set the text to uppercase
+                    # Normalize text
                     item.setText(sig_text)
-                    # Update backend
+                    # Update backend; UI colors will be refreshed in the next refresh_all()
                     self.backend.set_signal(b, sig_text)
                     logger.info(f"Set signal for block {b} to {sig_text}")
-                    # Update the color immediately
-                    self._color_signal_item(item, sig_text)
                 else:
-                    logger.warning(f"Invalid signal value: {sig_text}. Must be RED, YELLOW, or GREEN")
+                    logger.warning(
+                        f"Invalid signal value: {sig_text}. Must be RED, YELLOW, or GREEN"
+                    )
                     # Revert to previous value
                     old_sig = self.backend.blocks.get(b, {}).get("signal", "N/A")
-                    old_text = old_sig.name.title() if isinstance(old_sig, SignalState) else (old_sig if isinstance(old_sig, str) else "N/A")
+                    if isinstance(old_sig, SignalState):
+                        old_text = old_sig.name.upper()
+                    elif isinstance(old_sig, str):
+                        old_text = old_sig.upper()
+                    else:
+                        old_text = "N/A"
                     item.setText(old_text)
-                    self._color_signal_item(item, old_text)
         except Exception:
             logger.exception("Cell edit failed")
         finally:

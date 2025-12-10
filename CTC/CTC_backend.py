@@ -699,7 +699,7 @@ class TrackState:
     # --------------------------------------------------------
     # Train dispatching
     # --------------------------------------------------------
-    def dispatch_train(self, train_id: str, start_block: int, dest_block: int,
+    def dispatch_train(self, train_id: int, start_block: int, dest_block: int,
                     suggested_speed_mph: float, suggested_auth_yd: float):
         """
         Dispatcher adds a train manually to TrackModel, with an initial

@@ -127,15 +127,6 @@ if __name__ == "__main__":
 
         network.connect_train(train_id_str, block_id=start_block_id, displacement=0.0)
 
-        def train_tick_listener(current_time):
-            """Clock listener that calls the train backend's tick() method every clock update"""
-            try:
-                backend.tick()
-            except Exception as e:
-                print(f"[ERROR] Train {train_id_str} tick failed: {e}")
-        
-        clock.register_listener(train_tick_listener)
-
         # create main Train Model UI
         tm_ui = TrainModelUI(backend)
         tm_ui.setWindowTitle(f"Train Model – {line_name} – Train {train_id_str}")

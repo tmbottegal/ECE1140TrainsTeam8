@@ -44,10 +44,10 @@ from trackControllerHW.track_controller_hw_backend import HardwareTrackControlle
 #SW_RANGES = list(range(1, 63)) + list(range(122, 151))
 #HW_RANGES = list(range(63, 122))
 
-def controller_for_block(self, block_id: int):
-    if block_id in self.sw_ranges:
-        return self.track_controller
-    return self.track_controller_hw
+#def controller_for_block(self, block_id: int):
+ #   if block_id in self.sw_ranges:
+   #     return self.track_controller
+  #  return self.track_controller_hw
 
 
 
@@ -459,6 +459,11 @@ class TrackState:
 
         return suggested_speed_mps, total_authority_m
 
+    def controller_for_block(self, block_id: int):
+        if block_id in self.sw_ranges:
+            return self.track_controller
+        return self.track_controller_hw
+
     def compute_travel_time(self, start_block: int, dest_block: int) -> float:
         """
         Returns total travel time in seconds using:
@@ -724,8 +729,14 @@ class TrackState:
             #self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
             #self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
 
-            controller = controller_for_block(start_block, self.track_controller, self.track_controller_hw)
-            controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+            #controller = self.controller_for_block(start_block, self.track_controller, self.track_controller_hw)
+            #controller = self.controller_for_block(start_block)
+            
+            self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+            self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
+
+
+            #controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
 
 
             # Save for per-tick resend
@@ -780,8 +791,13 @@ class TrackState:
                     self._train_suggestions[train_id] = (spd, auth)
                     #self.track_controller.receive_ctc_suggestion(seg.block_id, spd, auth)
                     #self.track_controller_hw.receive_ctc_suggestion(seg.block_id, spd, auth)
-                    controller = controller_for_block(seg.block_id, self.track_controller, self.track_controller_hw)
-                    controller.receive_ctc_suggestion(seg.block_id, spd, auth)
+                    #controller = self.controller_for_block(seg.block_id, self.track_controller, self.track_controller_hw)
+                    #controller = self.controller_for_block(seg.block_id)
+                    
+                    self.track_controller.receive_ctc_suggestion(seg.block_id, spd, auth)
+                    self.track_controller_hw.receive_ctc_suggestion(seg.block_id, spd, auth)
+
+                    #controller.receive_ctc_suggestion(seg.block_id, spd, auth)
 
 
                     print(f"[CTC] Block {block_id} reopened — resumed movement for train {train_id}")
@@ -1060,9 +1076,15 @@ class TrackState:
                 if train_id in self._dwell_end:
                     if current_seconds < self._dwell_end[train_id]:
                         #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                        controller = self.controller_for_block(block)
+                        #controller = self.controller_for_block(block)
 
-                        controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                        #self.track_controller.receive_ctc_suggestion(block, speed_mps, auth_m)
+                        #self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, auth_m)
+                        self.track_controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                        self.track_controller_hw.receive_ctc_suggestion(block, 0.0, 0.0)
+
+
+                        #controller.receive_ctc_suggestion(block, 0.0, 0.0)
                         self._train_suggestions[train_id] = (0.0, 0.0)
                         print(f"[DWELL] Train {train_id} dwelling at station block {block} "
                             f"for {int(self._dwell_end[train_id] - current_seconds)} more seconds")
@@ -1140,9 +1162,12 @@ class TrackState:
                     print(f"[DWELL] Train {train_id} ARRIVED at station block {block}, starting {dwell_time}s dwell.")
 
                     #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                    controller = self.controller_for_block(block)
+                    #controller = self.controller_for_block(block)
 
-                    controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                    #controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                    self.track_controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                    self.track_controller_hw.receive_ctc_suggestion(block, 0.0, 0.0)
+
                     self._train_suggestions[train_id] = (0.0, 0.0)
 
                     self._last_block[train_id] = block
@@ -1157,9 +1182,12 @@ class TrackState:
                     new_auth = 0.0
 
                     #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                    controller = self.controller_for_block(block)
+                    #controller = self.controller_for_block(block)
 
-                    controller.receive_ctc_suggestion(block, new_speed, new_auth)
+                    #controller.receive_ctc_suggestion(block, new_speed, new_auth)
+                    self.track_controller.receive_ctc_suggestion(block, new_speed, new_auth)
+                    self.track_controller_hw.receive_ctc_suggestion(block, new_speed, new_auth)
+
 
                     self._train_suggestions[train_id] = (new_speed, new_auth)
                     print(f"[CTC] Train {train_id} STOPPED — Block {next_seg.block_id} is CLOSED")
@@ -1176,9 +1204,12 @@ class TrackState:
                     speed_mps = 0.0
 
                 #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                controller = self.controller_for_block(block)
+                #controller = self.controller_for_block(block)
 
-                controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+                #controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+                self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
+                self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth)
+
 
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
 

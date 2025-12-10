@@ -7,6 +7,13 @@ PROJECT_ROOT = os.path.dirname(HERE)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from trackModel.track_model_backend import TrackNetwork
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(HERE)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 try:
     from track_controller_hw_backend import (
         HardwareTrackControllerBackend,
@@ -70,7 +77,7 @@ class TrackControllerHWUI(QWidget):
             pass
 
         self.refresh_all()
-        
+
         # ---- Global clock hookup ----
         try:
             global_clock.register_listener(self._update_clock_display)
@@ -87,12 +94,12 @@ class TrackControllerHWUI(QWidget):
                 font-size: 13px;
                 color: #1e293b;
             }
-            
+
             QLabel {
                 color: #475569;
                 font-weight: 500;
             }
-            
+
             QComboBox {
                 padding: 8px 12px;
                 border: 1px solid #cbd5e1;
@@ -100,16 +107,16 @@ class TrackControllerHWUI(QWidget):
                 background-color: white;
                 min-height: 20px;
             }
-            
+
             QComboBox:hover {
                 border-color: #94a3b8;
             }
-            
+
             QComboBox::drop-down {
                 border: none;
                 width: 20px;
             }
-            
+
             QPushButton {
                 padding: 8px 16px;
                 border: 1px solid #cbd5e1;
@@ -119,26 +126,26 @@ class TrackControllerHWUI(QWidget):
                 font-weight: 500;
                 min-height: 20px;
             }
-            
+
             QPushButton:hover {
                 background-color: #f1f5f9;
                 border-color: #94a3b8;
             }
-            
+
             QPushButton:pressed {
                 background-color: #e2e8f0;
             }
-            
+
             QPushButton:checked {
                 background-color: #3b82f6;
                 color: white;
                 border-color: #2563eb;
             }
-            
+
             QPushButton:checked:hover {
                 background-color: #2563eb;
             }
-            
+
             QLineEdit {
                 padding: 8px 12px;
                 border: 1px solid #cbd5e1;
@@ -146,19 +153,19 @@ class TrackControllerHWUI(QWidget):
                 background-color: white;
                 color: #64748b;
             }
-            
+
             QLineEdit:focus {
                 border-color: #3b82f6;
                 outline: none;
             }
-            
+
             QTabWidget::pane {
                 border: 1px solid #e2e8f0;
                 border-radius: 8px;
                 background-color: white;
                 top: -1px;
             }
-            
+
             QTabBar::tab {
                 padding: 10px 20px;
                 margin-right: 2px;
@@ -169,24 +176,24 @@ class TrackControllerHWUI(QWidget):
                 background-color: #f1f5f9;
                 color: #64748b;
             }
-            
+
             QTabBar::tab:selected {
                 background-color: white;
                 color: #1e293b;
                 font-weight: 500;
             }
-            
+
             QTabBar::tab:hover:!selected {
                 background-color: #e2e8f0;
             }
-            
+
             QTableWidget {
                 border: none;
                 gridline-color: #f1f5f9;
                 selection-background-color: #dbeafe;
                 background-color: transparent;
             }
-            
+
             QHeaderView::section {
                 background-color: #f8fafc;
                 padding: 10px;
@@ -196,7 +203,7 @@ class TrackControllerHWUI(QWidget):
                 color: #475569;
                 text-align: left;
             }
-            
+
             QSplitter::handle {
                 background-color: #e2e8f0;
                 width: 1px;
@@ -234,17 +241,14 @@ class TrackControllerHWUI(QWidget):
         self.btn_maint.setCheckable(True)
         side_layout.addWidget(self.btn_maint)
 
+        # New: button to clear failures (requires maintenance mode)
+        self.btn_clear_faults = QPushButton("Clear Failures")
+        self.btn_clear_faults.setToolTip("Clear all active failure flags (maintenance mode only)")
+        side_layout.addWidget(self.btn_clear_faults)
+
         side_layout.addStretch(1)
 
         # ---- Main content ----
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(24, 24, 24, 24)
-        content_layout.setSpacing(16)
-
-        # --- PLC upload section ---
-        plc_container = QWidget()
-        
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(24, 24, 24, 24)
@@ -261,7 +265,6 @@ class TrackControllerHWUI(QWidget):
 
         # --- PLC upload section ---
         plc_container = QWidget()
-
         plc_container.setStyleSheet("""
             QWidget {
                 background-color: white;
@@ -300,7 +303,7 @@ class TrackControllerHWUI(QWidget):
         self.tbl_blocks.setColumnCount(7)
         self.tbl_blocks.setHorizontalHeaderLabels([
             "Block",
-            "Occupied",
+            "Occupancy",
             "Suggested Speed (mph)",
             "Suggested Authority (yd)",
             "Commanded Speed (mph)",
@@ -314,11 +317,18 @@ class TrackControllerHWUI(QWidget):
 
         # Switches
         self.tbl_switch = QTableWidget()
-        self.tbl_switch.setColumnCount(3)
-        self.tbl_switch.setHorizontalHeaderLabels(["Switch ID", "Blocks", "Position"])
+        self.tbl_switch.setColumnCount(5)
+        self.tbl_switch.setHorizontalHeaderLabels([
+            "Block",
+            "Position",
+            "Entry Signal",
+            "Straight Signal",
+            "Diverging Signal",
+        ])
         self.tbl_switch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tbl_switch.verticalHeader().setVisible(False)
         self.tabs.addTab(self.tbl_switch, "Switches")
+
 
         # Crossings
         self.tbl_cross = QTableWidget()
@@ -327,6 +337,14 @@ class TrackControllerHWUI(QWidget):
         self.tbl_cross.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tbl_cross.verticalHeader().setVisible(False)
         self.tabs.addTab(self.tbl_cross, "Crossings")
+
+        # Diagnostics / Failures
+        self.tbl_diag = QTableWidget()
+        self.tbl_diag.setColumnCount(4)
+        self.tbl_diag.setHorizontalHeaderLabels(["Type", "Block", "Time", "Details"])
+        self.tbl_diag.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tbl_diag.verticalHeader().setVisible(False)
+        self.diag_tab_index = self.tabs.addTab(self.tbl_diag, "Diagnostics")
 
         self._apply_edit_triggers()
 
@@ -345,10 +363,13 @@ class TrackControllerHWUI(QWidget):
         self.tbl_switch.cellClicked.connect(self._on_switch_click)
         self.tbl_cross.cellClicked.connect(self._on_crossing_click)
         self.tbl_blocks.cellChanged.connect(self._on_blocks_cell_changed)
-        
+
         # Pause refresh when editing
         self.tbl_blocks.itemChanged.connect(self._pause_refresh_on_edit)
-        
+
+        # Diagnostics / failure clear
+        self.btn_clear_faults.clicked.connect(self._on_clear_failures_clicked)
+
     def _pause_refresh_on_edit(self, item) -> None:
         """Pause the refresh timer briefly when user is editing"""
         if self.maintenance_enabled and item and (item.flags() & Qt.ItemFlag.ItemIsEditable):
@@ -371,7 +392,6 @@ class TrackControllerHWUI(QWidget):
                     logger.exception("Failed to set time on a HW controller")
         except Exception:
             logger.exception("cant update clock display (HW)")
-
 
     # -------------- Actions --------------
     def _on_line_changed(self, name: str) -> None:
@@ -423,8 +443,8 @@ class TrackControllerHWUI(QWidget):
             if not sid_item or not pos_item:
                 return
             sid = int(sid_item.text())
-            current = (pos_item.text() or "Normal").strip()
-            next_pos = "Alternate" if current == "Normal" else "Normal"
+            current = (pos_item.text() or "Straight").strip()
+            next_pos = "Diverging" if current == "Straight" else "Straight"
             self.backend.safe_set_switch(sid, next_pos)
         except Exception as exc:
             QMessageBox.warning(self, "Switch Change Failed", str(exc))
@@ -448,12 +468,34 @@ class TrackControllerHWUI(QWidget):
         finally:
             self.refresh_all()
 
+    def _on_clear_failures_clicked(self) -> None:
+        """
+        Handler for 'Clear Failures' button — calls backend.clear_failures()
+        and refreshes diagnostics.
+        """
+        try:
+            if not self.maintenance_enabled:
+                QMessageBox.information(
+                    self,
+                    "Maintenance Required",
+                    "Enable Maintenance Mode before clearing failures.",
+                )
+                return
+            self.backend.clear_failures()
+            self.refresh_all()
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Clear Failures Failed", str(exc))
+        except Exception:
+            logger.exception("Clear failures handler crashed")
+            QMessageBox.warning(self, "Clear Failures Failed", "Unable to clear failures on this controller.")
+
     # -------------- Refresh --------------
     def refresh_all(self) -> None:
         try:
             self._refresh_blocks()
             self._refresh_switches()
             self._refresh_crossings()
+            self._refresh_diagnostics()
         except KeyboardInterrupt:
             return
         except Exception:
@@ -463,7 +505,7 @@ class TrackControllerHWUI(QWidget):
         # Don't refresh if user is actively editing a cell
         if self.tbl_blocks.state() == QAbstractItemView.State.EditingState:
             return
-            
+
         ids = self.backend.get_line_block_ids()
         logger.debug(f"Refreshing blocks for {self.backend.line_name}; ids={len(ids)}")
         if not ids:
@@ -485,9 +527,21 @@ class TrackControllerHWUI(QWidget):
 
                 # Occupied
                 occ = data.get(b, {}).get("occupied", "N/A")
-                occ_text = "N/A" if occ == "N/A" else ("Yes" if occ else "No")
+                occ_text = "N/A" if occ == "N/A" else ("OCCUPIED" if occ else "UNOCCUPIED")
                 self._set_item(self.tbl_blocks, r, 1, occ_text, editable=False)
 
+                # Color the occupancy cell
+                item_occ = self.tbl_blocks.item(r, 1)
+                if item_occ:
+                    if occ_text == "OCCUPIED":         # Occupied
+                        item_occ.setBackground(QColor("#22c55e"))   # Green
+                        item_occ.setForeground(QColor("#000000"))
+                    elif occ_text == "UNOCCUPIED":        # Unoccupied
+                        item_occ.setBackground(QColor("#ef4444"))   # Red
+                        item_occ.setForeground(QColor("#000000"))
+                    else:
+                        item_occ.setBackground(QColor("#ffffff"))   # N/A
+                        item_occ.setForeground(QColor("#000000"))
                 # Suggested
                 sug_spd = data.get(b, {}).get("suggested_speed", "N/A")
                 sug_auth = data.get(b, {}).get("suggested_auth", "N/A")
@@ -511,66 +565,181 @@ class TrackControllerHWUI(QWidget):
             self.tbl_blocks.resizeRowsToContents()
         finally:
             self.tbl_blocks.blockSignals(False)
-
-    def _refresh_switches(self) -> None:
-        switches = self.backend.switches
-        switch_map = self.backend.switch_map
-        if not switches and not switch_map:
-            if self.backend.line_name == "Blue Line":
-                switch_map[1] = (5, 6, 11)
-            elif self.backend.line_name == "Red Line":
-                switch_map[1] = (90, 91, 92)
-                switch_map[2] = (120, 121, 122)
-            elif self.backend.line_name == "Green Line":
-                switch_map[1] = (12, 13, 14)
-                switch_map[2] = (28, 29, 30)
-            for sid in switch_map:
-                switches[sid] = "N/A"
-        rows = max(len(switches), 1)
-
-        self.tbl_switch.blockSignals(True)
-        try:
-            self.tbl_switch.setRowCount(rows)
-            if not switches:
-                for c in range(3):
-                    self._set_item(self.tbl_switch, 0, c, "", editable=False)
-            else:
-                for r, (sid, pos) in enumerate(switches.items()):
-                    self._set_item(self.tbl_switch, r, 0, str(sid), editable=False)
-                    self._set_item(self.tbl_switch, r, 1, str(switch_map.get(sid, ())), editable=False)
-                    self._set_item(self.tbl_switch, r, 2, pos, editable=self.maintenance_enabled)
-            self.tbl_switch.resizeRowsToContents()
-        finally:
-            self.tbl_switch.blockSignals(False)
-
+            
     def _refresh_crossings(self) -> None:
         crosses = self.backend.crossings
         cross_blocks = self.backend.crossing_blocks
+
+        # If both are empty, seed a default crossing layout per line
         if not crosses and not cross_blocks:
             if self.backend.line_name == "Blue Line":
+                # Blue demo crossing at block 9
                 cross_blocks[1] = 9
             elif self.backend.line_name == "Red Line":
-                cross_blocks[1] = 100
+                # HW Red territory crossing at block 47
+                cross_blocks[1] = 47
             elif self.backend.line_name == "Green Line":
-                cross_blocks[1] = 19
+                # HW Green territory crossing at block 108
+                cross_blocks[1] = 108
+
             for cid in cross_blocks:
                 crosses[cid] = "N/A"
+
         rows = max(len(crosses), 1)
 
         self.tbl_cross.blockSignals(True)
         try:
             self.tbl_cross.setRowCount(rows)
+
             if not crosses:
+                # No crossings at all; clear one row
                 for c in range(3):
                     self._set_item(self.tbl_cross, 0, c, "", editable=False)
             else:
-                for r, (cid, status) in enumerate(crosses.items()):
+                # Show each crossing: ID, block, status
+                for r, (cid, status) in enumerate(sorted(crosses.items())):
                     self._set_item(self.tbl_cross, r, 0, str(cid), editable=False)
-                    self._set_item(self.tbl_cross, r, 1, str(cross_blocks.get(cid, "-")), editable=False)
-                    self._set_item(self.tbl_cross, r, 2, status, editable=self.maintenance_enabled)
+                    self._set_item(
+                        self.tbl_cross,
+                        r,
+                        1,
+                        str(cross_blocks.get(cid, "-")),
+                        editable=False,
+                    )
+                    self._set_item(
+                        self.tbl_cross,
+                        r,
+                        2,
+                        status,
+                        editable=self.maintenance_enabled,
+                    )
+
             self.tbl_cross.resizeRowsToContents()
         finally:
             self.tbl_cross.blockSignals(False)
+            
+    def _refresh_switches(self) -> None:
+        switches = self.backend.switches
+        switch_map = self.backend.switch_map
+        blocks_data = self.backend.blocks 
+
+        # If backend has no layout (rare once HW backend initializes it),
+        # keep a tiny fallback for Blue only; Red/Green are defined in backend.
+        if not switch_map and not switches:
+            if self.backend.line_name == "Blue Line":
+                switch_map[5] = (5, 6, 11)
+                for sid in switch_map:
+                    switches.setdefault(sid, "N/A")
+
+        switch_ids = sorted(switch_map.keys())
+        rows = max(len(switch_ids), 1)
+
+        self.tbl_switch.blockSignals(True)
+        try:
+            self.tbl_switch.setRowCount(rows)
+
+            if not switch_ids:
+                # No switches: clear single row
+                for c in range(5):
+                    self._set_item(self.tbl_switch, 0, c, "", editable=False)
+            else:
+                for r, sid in enumerate(switch_ids):
+                    entry_block = straight_block = diverging_block = None
+                    blocks_tuple = switch_map.get(sid, ())
+                    if len(blocks_tuple) >= 1:
+                        entry_block = blocks_tuple[0]
+                    if len(blocks_tuple) >= 2:
+                        straight_block = blocks_tuple[1]
+                    if len(blocks_tuple) >= 3:
+                        diverging_block = blocks_tuple[2]
+
+                    # Col 0: Block (entry/root block, like partner UI)
+                    self._set_item(self.tbl_switch, r, 0, str(sid), editable=False)
+
+                    # Col 1: Position ("Normal"/"Alternate")
+                    pos = switches.get(sid, "N/A")
+                    self._set_item(self.tbl_switch, r, 1, str(pos), editable=self.maintenance_enabled)
+
+                    # Helper: compute signal text for a block id
+                    def signal_text_for(block_id: int | None) -> str:
+                        if block_id is None:
+                            return "N/A"
+                        blk_info = blocks_data.get(block_id, {})
+                        sig = blk_info.get("signal", "N/A")
+                        if isinstance(sig, SignalState):
+                            return sig.name.title()
+                        elif isinstance(sig, str):
+                            return sig
+                        return "N/A"
+
+                    # Helper: set and color a signal column
+                    def set_signal_col(col: int, block_id: int | None) -> None:
+                        txt = signal_text_for(block_id)
+                        self._set_item(self.tbl_switch, r, col, txt, editable=False)
+                        item = self.tbl_switch.item(r, col)
+                        if item:
+                            self._color_signal_item(item, txt)
+
+                    # Col 2: Entry Signal (entry block)
+                    set_signal_col(2, entry_block)
+
+                    # Col 3: Straight Signal
+                    set_signal_col(3, straight_block)
+
+                    # Col 4: Diverging Signal
+                    set_signal_col(4, diverging_block)
+
+            self.tbl_switch.resizeRowsToContents()
+        finally:
+            self.tbl_switch.blockSignals(False)
+
+    def _refresh_diagnostics(self) -> None:
+        """
+        Refresh Diagnostics tab from backend.get_failure_report().
+        Shows active failures and updates tab title with pending command count.
+        """
+        if not hasattr(self.backend, "get_failure_report"):
+            # Backend version without diagnostics support
+            self.tbl_diag.setRowCount(1)
+            self._set_item(self.tbl_diag, 0, 0, "N/A", editable=False)
+            self._set_item(self.tbl_diag, 0, 1, "-", editable=False)
+            self._set_item(self.tbl_diag, 0, 2, "-", editable=False)
+            self._set_item(self.tbl_diag, 0, 3, "Diagnostics not available", editable=False)
+            self.tabs.setTabText(self.diag_tab_index, "Diagnostics")
+            return
+
+        report = self.backend.get_failure_report()
+        active = report.get("active", []) or []
+        pending = int(report.get("pending_commands", 0) or 0)
+
+        self.tbl_diag.blockSignals(True)
+        try:
+            if not active:
+                self.tbl_diag.setRowCount(1)
+                self._set_item(self.tbl_diag, 0, 0, "None", editable=False)
+                self._set_item(self.tbl_diag, 0, 1, "-", editable=False)
+                self._set_item(self.tbl_diag, 0, 2, "-", editable=False)
+                self._set_item(self.tbl_diag, 0, 3, "No active failures", editable=False)
+            else:
+                self.tbl_diag.setRowCount(len(active))
+                for r, rec in enumerate(active):
+                    t = str(rec.get("type", ""))
+                    b = rec.get("block")
+                    when = rec.get("time", "")
+                    detail = rec.get("details", "")
+                    self._set_item(self.tbl_diag, r, 0, t or "", editable=False)
+                    self._set_item(self.tbl_diag, r, 1, "-" if b is None else str(b), editable=False)
+                    self._set_item(self.tbl_diag, r, 2, when, editable=False)
+                    self._set_item(self.tbl_diag, r, 3, detail, editable=False)
+            self.tbl_diag.resizeRowsToContents()
+        finally:
+            self.tbl_diag.blockSignals(False)
+
+        # Update tab title to show pending actuator checks
+        if pending > 0:
+            self.tabs.setTabText(self.diag_tab_index, f"Diagnostics ({pending})")
+        else:
+            self.tabs.setTabText(self.diag_tab_index, "Diagnostics")
 
     # -------------- Helpers --------------
     def _apply_edit_triggers(self) -> None:
@@ -609,7 +778,7 @@ class TrackControllerHWUI(QWidget):
     def _on_blocks_cell_changed(self, row: int, col: int) -> None:
         if not self.maintenance_enabled:
             return
-        
+
         # Block signals during this update to prevent recursive calls
         self.tbl_blocks.blockSignals(True)
         try:
@@ -665,16 +834,13 @@ class TrackControllerHWUI(QWidget):
 
 
 # -------------------- app boot --------------------
-def _build_networks() -> Dict[str, TrackModelAdapter]:
-    tm_blue = TrackModelAdapter()
-    tm_red = TrackModelAdapter()
-    tm_green = TrackModelAdapter()
-
-    tm_blue.ensure_blocks(list(range(1, 16)))
-    tm_red.ensure_blocks(list(range(74, 151)))
-    tm_green.ensure_blocks(list(range(1, 151)))
-
-    return {"Blue Line": tm_blue, "Red Line": tm_red, "Green Line": tm_green}
+def _build_networks() -> Dict[str, TrackNetwork]:
+    tm = TrackNetwork()
+    return {
+        "Blue Line": tm,
+        "Red Line": tm,
+        "Green Line": tm,
+    }
 
 
 if __name__ == "__main__":

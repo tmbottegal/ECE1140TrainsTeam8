@@ -3,12 +3,10 @@ import time, threading, logging
 from typing import Dict, Tuple, Any, Callable, List, Optional
 from enum import Enum
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
-
-# -------------------- Public enums & adapters (UI imports these) --------------------
 class SignalState(str, Enum):
     RED = "Red"
     YELLOW = "Yellow"
@@ -87,32 +85,25 @@ class TrackModelAdapter:
 
 
 # -------------------- Line partition (your HW ownership) --------------------
-### NEW: explicit HW-controlled vs HW-view-only maps
-
 # Blocks actually CONTROLLED by this hardware wayside
 HW_CONTROLLED_BLOCK_MAP: Dict[str, range] = {
-    # Blue line unused for HW in your spec; keep empty or adjust if needed
     "Blue Line":  range(1, 1),      # empty
-    # Red line: 35–71 (your HW territory)
     "Red Line":   range(35, 72),    # 35..71
-    # Green line: 63–121 (your HW territory)
     "Green Line": range(63, 122),   # 63..121
 }
 
 # Blocks that HW can *see* but does not control (view-only on HW side)
 HW_VIEW_ONLY_BLOCK_MAP: Dict[str, List[int]] = {
-    # Red: 24–34, 72–76
     "Red Line":   list(range(24, 35)) + list(range(72, 77)),
-    # Green: 58–62, 122–143
     "Green Line": list(range(58, 63)) + list(range(122, 144)),
-    "Blue Line":  [],  # no view-only defined
+    "Blue Line":  [],
 }
 
 # For backwards-compat (some UI may import this), keep as "controlled range"
 HW_LINE_BLOCK_MAP: Dict[str, range] = HW_CONTROLLED_BLOCK_MAP.copy()
 
 
-# -------------------- CTC interoperability types --------------------
+# -------------------- CTC interoperability & fault records --------------------
 @dataclass
 class WaysideStatusUpdate:
     block_id: int
@@ -122,15 +113,34 @@ class WaysideStatusUpdate:
     crossing_status: Optional[str]
 
 
+@dataclass
+class FailureSnapshot:
+    kind: str
+    block_id: Optional[int]
+    time: datetime
+    details: str
+    cleared: bool = False
+
+
+@dataclass
+class ActuatorCommandCheck:
+    block_id: int
+    actuator: str  # "signal" or "switch"
+    expected: Any
+    issued_at: datetime
+    cleared: bool = False
+
+
 # -------------------- Unified Backend (standalone; no external imports) --------------------
 class HardwareTrackControllerBackend:
     """
-    Single, original backend that includes:
+    Single backend that includes:
       - data/state for blocks, switches, crossings
       - suggested/commanded speed & authority (mph / yards)
       - maintenance-mode protections
-      - live polling loop and guard-block polling
-      - real PLC upload (Python + text) with simple conventions
+      - live polling loop + guard-block polling
+      - PLC upload (static variables or dynamic plc_logic)
+      - safety / fault inference (broken rail, power failure, track-circuit)
       - optional CTC + track-model integration via duck-typing
     """
     def __init__(self, track_model: TrackModelAdapter, line_name: str = "Blue Line") -> None:
@@ -144,7 +154,8 @@ class HardwareTrackControllerBackend:
         self.switch_map: Dict[int, Tuple[int, ...]] = {}   # switch_id -> (root, straight, diverging)
         self.crossings: Dict[int, str] = {}                # crossing_id -> "Active"/"Inactive"
         self.crossing_blocks: Dict[int, int] = {}          # crossing_id -> block_id
-
+        self._init_default_infrastructure()
+        
         # Internal caches
         self._known_occupancy: Dict[int, bool] = {}
         self._known_signal: Dict[int, SignalState] = {}
@@ -153,6 +164,21 @@ class HardwareTrackControllerBackend:
         self._commanded_speed_mph: Dict[int, int] = {}
         self._commanded_auth_yd: Dict[int, int] = {}
 
+        # Safety / fault detection
+        self.failures: Dict[str, FailureSnapshot] = {}
+        self.failure_history: List[FailureSnapshot] = []
+        self._previous_occupancy: Dict[int, bool] = {}
+        self._occupancy_timestamps: Dict[int, datetime] = {}
+        self._expected_stop_blocks: Dict[int, datetime] = {}
+        self._pending_actuator_checks: Dict[str, ActuatorCommandCheck] = {}
+        self._actuator_retry_count: Dict[str, int] = {}
+        self._command_timeout_sec: float = 5.0
+        self._max_command_attempts: int = 3
+
+        # Dynamic PLC
+        self._plc_logic_module: Any | None = None
+        self._plc_prev_occupancy: Dict[int, bool] = {}
+
         self.maintenance_mode: bool = False
         self._live_thread_running = False
 
@@ -160,9 +186,10 @@ class HardwareTrackControllerBackend:
         self.ctc_backend: Any | None = None
         self._ctc_update_enabled: bool = True
 
-        self.time: datetime = datetime(2000, 1, 1, 0, 0, 0) #global clock
+        # Global clock
+        self.time: datetime = datetime(2000, 1, 1, 0, 0, 0)
 
-        ### NEW: derive HW + view-only blocks for this line
+        # Derive HW + view-only blocks for this line
         self._hw_blocks: List[int] = list(HW_CONTROLLED_BLOCK_MAP.get(self.line_name, []))
         self._view_blocks: List[int] = list(HW_VIEW_ONLY_BLOCK_MAP.get(self.line_name, []))
         self._line_blocks: List[int] = sorted(set(self._hw_blocks) | set(self._view_blocks))
@@ -191,6 +218,38 @@ class HardwareTrackControllerBackend:
         # Initial read-back from the track model if possible
         self._initial_sync()
 
+    def _init_default_infrastructure(self) -> None:
+        
+        # --- Switch maps: key = entry/root block ---
+        if self.line_name == "Green Line":
+            # From layout: SWITCH (76-77; 77-101), SWITCH (85-86; 100-85)
+            self.switch_map = {
+                76: (76, 77, 101),
+                85: (85, 86, 100),
+            }
+
+        elif self.line_name == "Red Line":
+            # From layout: SWITCH (38-39; 38-71), (43-44; 44-67), (52-53; 52-66)
+            self.switch_map = {
+                38: (38, 39, 71),
+                43: (43, 44, 67),
+                52: (52, 53, 66),
+            }
+
+        # Ensure every switch has a position entry (default Normal)
+        for sid in self.switch_map:
+            self.switches.setdefault(sid, "Normal")
+
+        # --- Crossings owned by HW ---
+        if self.line_name == "Green Line":
+            # Railway crossing at block 108
+            self.crossing_blocks.setdefault(1, 108)
+            self.crossings.setdefault(1, "Inactive")
+
+        elif self.line_name == "Red Line":
+            # Railway crossing at block 47
+            self.crossing_blocks.setdefault(1, 47)
+            self.crossings.setdefault(1, "Inactive")
     # ---------- Listener handling ----------
     def add_listener(self, cb: Callable[[], None]) -> None:
         if cb not in self._listeners:
@@ -322,8 +381,9 @@ class HardwareTrackControllerBackend:
     def _on_occupancy_change(self, block_id: int, occupied: bool) -> None:
         """
         Central handler when a block's occupancy changes.
-        We enforce some safety rules here.
+        We enforce some safety rules and feed PLC + fault detection.
         """
+        previous = self._known_occupancy.get(block_id, False)
         self._known_occupancy[block_id] = occupied
 
         # If this block has a crossing, auto-control the gate
@@ -351,6 +411,195 @@ class HardwareTrackControllerBackend:
         if occupied:
             if block_id in self._commanded_auth_yd:
                 self._commanded_auth_yd[block_id] = 0
+
+        # Track history for fault detection
+        if previous != occupied:
+            self._occupancy_timestamps[block_id] = self.time
+            self._previous_occupancy[block_id] = previous
+
+        # Fault inference (broken rail / track circuit)
+        self._check_broken_rail(block_id, occupied)
+        self._check_track_circuit(block_id, previous, occupied)
+
+        # Allow PLC to react to live occupancy if a dynamic PLC is loaded
+        if self._plc_logic_module is not None:
+            try:
+                self._invoke_plc_logic()
+            except Exception:
+                logger.exception("PLC logic execution failed during occupancy change")
+
+    # ---------- Fault detection helpers ----------
+    def _record_failure(self, kind: str, block_id: Optional[int], details: str) -> None:
+        """
+        Register a new failure if we haven't already recorded an identical one.
+        """
+        key = f"{kind}:{block_id}" if block_id is not None else kind
+        if key in self.failures:
+            return
+        rec = FailureSnapshot(kind=kind, block_id=block_id, time=self.time, details=details)
+        self.failures[key] = rec
+        self.failure_history.append(rec)
+        logger.error("[%s] block=%s :: %s", kind, block_id, details)
+
+    def _adjacent_blocks(self, block_id: int) -> List[int]:
+        neighbors: List[int] = []
+        if block_id - 1 in self._line_blocks:
+            neighbors.append(block_id - 1)
+        if block_id + 1 in self._line_blocks:
+            neighbors.append(block_id + 1)
+        return neighbors
+
+    def _check_broken_rail(self, block_id: int, now_occupied: bool) -> None:
+        """
+        Broken rail heuristic:
+
+        If a block suddenly becomes occupied but neither the block behind nor
+        ahead has registered occupancy recently, we treat it as a possible
+        broken track circuit / rail.
+        """
+        if not now_occupied:
+            return
+        if block_id not in self._line_blocks:
+            return
+
+        neighbors = self._adjacent_blocks(block_id)
+        if not neighbors:
+            return
+
+        recent_window = timedelta(seconds=12)
+        saw_recent_neighbor = False
+        for nb in neighbors:
+            ts = self._occupancy_timestamps.get(nb)
+            if ts and (self.time - ts) <= recent_window:
+                saw_recent_neighbor = True
+                break
+
+        if not saw_recent_neighbor:
+            self._record_failure(
+                "broken_rail",
+                block_id,
+                f"Block {block_id} became occupied without adjacent blocks touching first.",
+            )
+
+    def _check_track_circuit(self, block_id: int, prev_occupied: bool, now_occupied: bool) -> None:
+        """
+        Track-circuit heuristic:
+
+        When we have commanded a stop at a block (speed/auth == 0), that block
+        shouldn't immediately empty as if the train ignored the command.
+        """
+        if block_id not in self._expected_stop_blocks:
+            return
+
+        # Only care about the train leaving a stopped block
+        if prev_occupied and not now_occupied:
+            cmd_time = self._expected_stop_blocks.get(block_id)
+            if not cmd_time:
+                self._expected_stop_blocks.pop(block_id, None)
+                return
+
+            elapsed = (self.time - cmd_time).total_seconds()
+            # If the block empties quickly after a "stop" command, flag it
+            if elapsed < 10.0:
+                self._record_failure(
+                    "track_circuit",
+                    block_id,
+                    f"Train left block {block_id} only {elapsed:.1f}s after stop command.",
+                )
+                # Defensive reaction: force a red "bubble" around the block
+                for b in [block_id - 2, block_id - 1, block_id, block_id + 1, block_id + 2]:
+                    if b in self._line_blocks:
+                        try:
+                            self.set_signal(b, SignalState.RED)
+                        except Exception:
+                            logger.exception("Failed to force RED on block %s after track circuit failure", b)
+                        try:
+                            self.set_commanded_speed(b, 0)
+                            self.set_commanded_authority(b, 0)
+                        except Exception:
+                            logger.exception("Failed to zero commands on block %s after track circuit failure", b)
+
+            # Once the block is empty, we don't keep expecting a stop here
+            self._expected_stop_blocks.pop(block_id, None)
+
+    def _schedule_actuator_verification(self, target_id: int, target_type: str, expected: Any) -> None:
+        """
+        Schedule a check that a given signal/switch actually reached the state
+        we requested. Used for power-failure detection.
+        """
+        key = f"{target_type}:{target_id}"
+        check = ActuatorCommandCheck(
+            block_id=target_id,
+            actuator=target_type,
+            expected=expected,
+            issued_at=self.time,
+        )
+        self._pending_actuator_checks[key] = check
+        self._actuator_retry_count[key] = self._actuator_retry_count.get(key, 0) + 1
+
+    def _review_actuator_responses(self) -> None:
+        """
+        Examine pending actuator commands to see if switch/signal state
+        appears "stuck" -> infer a power issue.
+        """
+        if not self._pending_actuator_checks:
+            return
+
+        now = self.time
+        segments = getattr(self.track_model, "segments", {})
+        to_drop: List[str] = []
+
+        for key, check in list(self._pending_actuator_checks.items()):
+            if check.cleared:
+                to_drop.append(key)
+                continue
+
+            elapsed = (now - check.issued_at).total_seconds()
+            if elapsed < self._command_timeout_sec:
+                continue
+
+            ok = False
+            if check.actuator == "signal":
+                seg = segments.get(check.block_id)
+                if seg is None:
+                    ok = True  # nothing to verify in this model
+                else:
+                    current = getattr(seg, "signal_state", None)
+                    ok = (current == check.expected)
+            elif check.actuator == "switch":
+                seg = segments.get(check.block_id)
+                if seg is None:
+                    ok = True
+                else:
+                    current = getattr(seg, "current_position", None)
+                    ok = (current == check.expected)
+
+            if ok:
+                check.cleared = True
+                to_drop.append(key)
+                continue
+
+            attempts = self._actuator_retry_count.get(key, 1)
+            if attempts >= self._max_command_attempts:
+                self._record_failure(
+                    "power_failure",
+                    check.block_id,
+                    f"No response for {check.actuator} command on {check.block_id} after {attempts} attempts.",
+                )
+                # As a minimal safeguard, drop speed at this location if it's switch-related
+                if check.actuator == "switch" and check.block_id in self._line_blocks:
+                    try:
+                        self.set_commanded_speed(check.block_id, 0)
+                    except Exception:
+                        logger.exception("Failed to clamp speed after power failure on switch %s", check.block_id)
+                to_drop.append(key)
+            else:
+                # Try again later; slide window
+                check.issued_at = now
+
+        for key in to_drop:
+            self._pending_actuator_checks.pop(key, None)
+            self._actuator_retry_count.pop(key, None)
 
     # ---------- Live link & polling ----------
     def start_live_link(self, poll_interval: float = 1.0) -> None:
@@ -404,6 +653,9 @@ class HardwareTrackControllerBackend:
         if changed_ctc:
             self._send_status_to_ctc()
 
+        # Power failure inference: are any commands "stuck"?
+        self._review_actuator_responses()
+
     def _guard_loop(self) -> None:
         while self._guard_thread_running:
             try:
@@ -441,18 +693,22 @@ class HardwareTrackControllerBackend:
         self._check_switch_clear_for_move(switch_id)
 
         pos = position.title()
-        if pos not in ("Normal", "Alternate"):
+        if pos not in ("Straight", "Diverging"):
             raise ValueError("Invalid switch position")
 
         # Update local state
         self.switches[switch_id] = pos
 
         # Try to tell the track model (if it supports it)
+        numeric = 0 if pos == "Straight" else 1
         try:
             if hasattr(self.track_model, "set_switch_position"):
-                self.track_model.set_switch_position(switch_id, 0 if pos == "Normal" else 1)
+                self.track_model.set_switch_position(switch_id, numeric)
         except Exception:
             logger.exception("Failed to set switch in track model")
+
+        # Schedule power-failure verification (only if model is non-trivial)
+        self._schedule_actuator_verification(switch_id, "switch", numeric)
 
         self._notify_listeners()
         self._send_status_to_ctc()
@@ -481,6 +737,37 @@ class HardwareTrackControllerBackend:
         except Exception:
             logger.exception("Failed to set crossing gate in track model")
 
+        self._notify_listeners()
+        self._send_status_to_ctc()
+
+    def _apply_switch_from_plc(self, switch_id: int, position: str) -> None:
+        """
+        PLC-controlled switch movement: still enforces occupancy checks,
+        but does *not* require maintenance mode.
+        """
+        self._check_switch_clear_for_move(switch_id)
+        self.switches[switch_id] = position
+        numeric = 0 if position == "Normal" else 1
+        try:
+            if hasattr(self.track_model, "set_switch_position"):
+                self.track_model.set_switch_position(switch_id, numeric)
+        except Exception:
+            logger.exception("Failed to set switch from PLC in track model")
+        self._notify_listeners()
+        self._send_status_to_ctc()
+
+    def _apply_crossing_from_plc(self, crossing_id: int, status: str) -> None:
+        """
+        PLC crossing control without needing maintenance mode.
+        """
+        self.crossings[crossing_id] = status
+        block_id = self.crossing_blocks.get(crossing_id)
+        if block_id is not None:
+            try:
+                if hasattr(self.track_model, "set_gate_status"):
+                    self.track_model.set_gate_status(block_id, status == "Active")
+            except Exception:
+                logger.exception("Failed to set crossing gate from PLC")
         self._notify_listeners()
         self._send_status_to_ctc()
 
@@ -519,29 +806,43 @@ class HardwareTrackControllerBackend:
 
         # Always keep local cache so PLC-only blocks still show in UI
         self._known_signal[block] = state
+
+        # Schedule power-failure verification on the signal
+        self._schedule_actuator_verification(block, "signal", state)
+
         self._notify_listeners()
         self._send_status_to_ctc()
 
     def set_commanded_speed(self, block: int, speed_mph: int) -> None:
-        self._commanded_speed_mph[block] = int(speed_mph)
+        speed_val = int(speed_mph)
+        self._commanded_speed_mph[block] = speed_val
+
+        # If we explicitly command a stop here, remember it for track-circuit checks
+        if speed_val == 0:
+            self._expected_stop_blocks[block] = self.time
 
         # Try to propagate to track model if it supports broadcast
         try:
             if hasattr(self.track_model, "broadcast_train_command"):
                 auth = self._commanded_auth_yd.get(block, 0)
-                self.track_model.broadcast_train_command(block, int(speed_mph), int(auth))
+                self.track_model.broadcast_train_command(block, speed_val, int(auth))
         except Exception:
             logger.exception("broadcast_train_command failed for speed")
 
         self._notify_listeners()
 
     def set_commanded_authority(self, block: int, auth_yd: int) -> None:
-        self._commanded_auth_yd[block] = int(auth_yd)
+        auth_val = int(auth_yd)
+        self._commanded_auth_yd[block] = auth_val
+
+        # Authority 0 also indicates a stop point for track-circuit checks
+        if auth_val == 0:
+            self._expected_stop_blocks.setdefault(block, self.time)
 
         try:
             if hasattr(self.track_model, "broadcast_train_command"):
                 spd = self._commanded_speed_mph.get(block, 0)
-                self.track_model.broadcast_train_command(block, int(spd), int(auth_yd))
+                self.track_model.broadcast_train_command(block, int(spd), auth_val)
         except Exception:
             logger.exception("broadcast_train_command failed for authority")
 
@@ -553,13 +854,27 @@ class HardwareTrackControllerBackend:
         Upload and apply a PLC file.
 
         Supports:
-          - Python PLC (.py): looks for simple globals:
+          - Dynamic Python PLC (.py) exposing:
+
+                def plc_logic(
+                    block_occupancies: list[bool],
+                    switch_positions: list[int],
+                    signal_codes: list[int],
+                    crossing_states: list[bool],
+                    previous_occupancies: list[bool],
+                    stop_flags: list[bool],
+                ) -> tuple[list[int], list[int], list[bool], list[bool]]
+
+            where signal_codes: 0=Red, 1=Yellow, 2=Green.
+
+          - Legacy Python PLC (.py) without plc_logic, using simple globals:
               block_<id>_occupied     -> bool
               switch_<id>             -> "Normal"/"Alternate"/0/1
               crossing_<id>           -> "Active"/"Inactive"/True/False
               commanded_speed_<id>    or cmd_speed_<id> -> mph
               commanded_auth_<id>     or cmd_auth_<id>  -> yards
               signal_<id>             -> "Red"/"Yellow"/"Green"
+
           - Text PLC (other): each non-comment line is:
               SWITCH <id> <Normal|Alternate|0|1>
               CROSSING <id> <Active|Inactive|true|false>
@@ -581,33 +896,87 @@ class HardwareTrackControllerBackend:
         except Exception:
             logger.exception("PLC upload failed for %s", path)
 
+        # Sync from Track Model after PLC, so our cache matches UI
+        self._sync_after_plc_upload()
+
         # After PLC, notify UI + CTC
         self._notify_listeners()
         self._send_status_to_ctc()
 
+    def _sync_after_plc_upload(self) -> None:
+        """
+        Read back signal state from the Track Model so that whatever we wrote
+        via set_signal / set_block_occupancy is reflected in our local caches.
+        """
+        segments = getattr(self.track_model, "segments", {})
+        if not isinstance(segments, dict):
+            return
+
+        for b in self.get_line_block_ids():
+            seg = segments.get(b)
+            if not seg:
+                continue
+
+            sig = getattr(seg, "signal_state", None)
+            if sig not in (None, "N/A"):
+                self._known_signal[b] = sig
+
     def _upload_plc_python(self, path: str) -> None:
+        """
+        Python-style PLC loader.
+
+        If the file defines plc_logic(...), we treat it as a dynamic PLC that
+        reacts to occupancy/switches/crossings/signals. Otherwise we fall back
+        to the simple "variable-based" PLC used earlier in the project.
+        """
         ns: Dict[str, Any] = {}
         with open(path, "r") as f:
             code = f.read()
         exec(code, ns, ns)  # PLC is trusted in this project
 
+        # Dynamic PLC: expose plc_logic
+        plc_func = ns.get("plc_logic")
+        if callable(plc_func):
+            class _PLCHolder:
+                pass
+            plc_obj = _PLCHolder()
+            for name, value in ns.items():
+                setattr(plc_obj, name, value)
+            self._plc_logic_module = plc_obj
+            logger.info("Dynamic PLC loaded with plc_logic()")
+            # Run once to initialize based on current state
+            try:
+                self._invoke_plc_logic()
+            except Exception:
+                logger.exception("Initial PLC logic execution failed")
+            return
+
+        # Legacy PLC: no plc_logic -> interpret globals as static commands
+        self._plc_logic_module = None
+        line_blocks = set(self.get_line_block_ids())
+
         for name, value in list(ns.items()):
             if name.startswith("__"):
                 continue
 
+            lname = name.lower()
+
             # block_XX_occupied
-            if name.startswith("block_") and name.endswith("_occupied"):
+            if lname.startswith("block_") and lname.endswith("_occupied"):
                 try:
-                    block_id = int(name[len("block_") : -len("_occupied")])
-                    self.set_block_occupancy(block_id, bool(value))
+                    core = lname[len("block_") : -len("_occupied")]
+                    block_id = int(core)
+                    if block_id in line_blocks:
+                        self.set_block_occupancy(block_id, bool(value))
                 except Exception:
                     logger.exception("Failed to apply PLC occupancy for %s", name)
                 continue
 
             # switch_XX
-            if name.startswith("switch_"):
+            if lname.startswith("switch_"):
                 try:
-                    switch_id = int(name[len("switch_") :])
+                    core = lname[len("switch_") :]
+                    switch_id = int(core)
                     pos_str = str(value).title()
                     if pos_str in ("0", "1"):
                         pos_str = "Normal" if pos_str == "0" else "Alternate"
@@ -617,45 +986,185 @@ class HardwareTrackControllerBackend:
                 continue
 
             # crossing_XX
-            if name.startswith("crossing_"):
+            if lname.startswith("crossing_"):
                 try:
-                    crossing_id = int(name[len("crossing_") :])
-                    val_str = str(value).title()
-                    if val_str in ("True", "False"):
+                    core = lname[len("crossing_") :]
+                    crossing_id = int(core)
+                    if isinstance(value, bool):
                         val_str = "Active" if value else "Inactive"
+                    else:
+                        val_str = str(value).title()
                     self.safe_set_crossing(crossing_id, val_str)
                 except Exception:
                     logger.exception("Failed to apply PLC crossing for %s", name)
                 continue
 
-            # commanded_speed_XX or cmd_speed_XX
-            if name.startswith("commanded_speed_") or name.startswith("cmd_speed_"):
-                key = "commanded_speed_" if name.startswith("commanded_speed_") else "cmd_speed_"
+            # commanded_speed_XX or cmd_speed_XX  (mph)
+            if lname.startswith("commanded_speed_") or lname.startswith("cmd_speed_"):
                 try:
-                    block_id = int(name[len(key) :])
-                    self.set_commanded_speed(block_id, int(value))
+                    core = lname.split("_")[-1]
+                    block_id = int(core)
+                    if block_id in line_blocks:
+                        self.set_commanded_speed(block_id, int(value))
                 except Exception:
                     logger.exception("Failed to apply PLC speed for %s", name)
                 continue
 
-            # commanded_auth_XX or cmd_auth_XX
-            if name.startswith("commanded_auth_") or name.startswith("cmd_auth_"):
-                key = "commanded_auth_" if name.startswith("commanded_auth_") else "cmd_auth_"
+            # commanded_auth_XX or cmd_auth_XX (yards)
+            if lname.startswith("commanded_auth_") or lname.startswith("cmd_auth_"):
                 try:
-                    block_id = int(name[len(key) :])
-                    self.set_commanded_authority(block_id, int(value))
+                    core = lname.split("_")[-1]
+                    block_id = int(core)
+                    if block_id in line_blocks:
+                        self.set_commanded_authority(block_id, int(value))
                 except Exception:
                     logger.exception("Failed to apply PLC authority for %s", name)
                 continue
 
             # signal_XX
-            if name.startswith("signal_"):
+            if lname.startswith("signal_"):
                 try:
-                    block_id = int(name[len("signal_") :])
-                    self.set_signal(block_id, str(value))
+                    core = lname[len("signal_") :]
+                    block_id = int(core)
+                    if block_id in line_blocks:
+                        val = value
+                        if isinstance(val, bool):
+                            val = "GREEN" if val else "RED"
+                        self.set_signal(block_id, value)
                 except Exception:
                     logger.exception("Failed to apply PLC signal for %s", name)
                 continue
+
+    def _invoke_plc_logic(self) -> None:
+        """
+        Call into a dynamic PLC module, if one has been uploaded.
+
+        Contract for plc_logic:
+
+            def plc_logic(
+                block_occupancies: list[bool],
+                switch_positions: list[int],
+                signal_codes: list[int],
+                crossing_states: list[bool],
+                previous_occupancies: list[bool],
+                stop_flags: list[bool],
+            ) -> tuple[list[int], list[int], list[bool], list[bool]]
+
+        where signal_codes uses: 0=Red, 1=Yellow, 2=Green.
+        """
+        plc = self._plc_logic_module
+        if plc is None or not hasattr(plc, "plc_logic"):
+            return
+
+        blocks = self.get_line_block_ids()
+        if not blocks:
+            return
+
+        max_block_index = max(blocks) + 1
+        current_occ = [False] * max_block_index
+        prev_occ = [False] * max_block_index
+        stop_flags = [False] * max_block_index
+        signal_codes = [0] * max_block_index  # default red
+
+        for b in blocks:
+            if b >= max_block_index:
+                continue
+            current_occ[b] = self._known_occupancy.get(b, False)
+            prev_occ[b] = self._plc_prev_occupancy.get(b, False)
+            sig = self._known_signal.get(b)
+            if sig == SignalState.GREEN:
+                signal_codes[b] = 2
+            elif sig == SignalState.YELLOW:
+                signal_codes[b] = 1
+            else:
+                signal_codes[b] = 0
+
+        # Switch list indexed by sorted switch id order
+        switch_ids = sorted(self.switches.keys())
+        switch_positions: List[int] = []
+        for sid in switch_ids:
+            label = self.switches.get(sid, "Normal")
+            switch_positions.append(0 if label == "Normal" else 1)
+
+        # Crossing list indexed by sorted crossing id order
+        crossing_ids = sorted(self.crossing_blocks.keys())
+        crossing_states: List[bool] = []
+        for cid in crossing_ids:
+            crossing_states.append(self.crossings.get(cid, "Inactive") == "Active")
+
+        try:
+            out_switches, out_signals, out_crossings, out_stops = plc.plc_logic(
+                current_occ,
+                switch_positions,
+                signal_codes,
+                crossing_states,
+                prev_occ,
+                stop_flags,
+            )
+        except Exception:
+            logger.exception("PLC plc_logic() raised an exception")
+            return
+
+        # Update switches from PLC
+        for idx, sid in enumerate(switch_ids):
+            if idx >= len(out_switches):
+                break
+            desired_raw = int(out_switches[idx])
+            desired_label = "Normal" if desired_raw == 0 else "Alternate"
+            if self.switches.get(sid) != desired_label:
+                try:
+                    self._apply_switch_from_plc(sid, desired_label)
+                except Exception:
+                    logger.exception("Failed to apply PLC switch %s", sid)
+
+        # Update signals from PLC
+        for b in blocks:
+            if b >= len(out_signals):
+                continue
+            code = int(out_signals[b])
+            if code <= 0:
+                state = SignalState.RED
+            elif code == 1:
+                state = SignalState.YELLOW
+            else:
+                state = SignalState.GREEN
+            if self._known_signal.get(b) != state:
+                try:
+                    self.set_signal(b, state)
+                except Exception:
+                    logger.exception("Failed to apply PLC signal for block %s", b)
+
+        # Update crossings from PLC
+        for idx, cid in enumerate(crossing_ids):
+            if idx >= len(out_crossings):
+                break
+            active = bool(out_crossings[idx])
+            desired_status = "Active" if active else "Inactive"
+            if self.crossings.get(cid) != desired_status:
+                try:
+                    self._apply_crossing_from_plc(cid, desired_status)
+                except Exception:
+                    logger.exception("Failed to apply PLC crossing %s", cid)
+
+        # Use PLC stop flags to clamp commanded speed/authority and avoid collisions
+        if out_stops is not None:
+            for b in blocks:
+                if b >= len(out_stops):
+                    continue
+                if bool(out_stops[b]):
+                    # full stop here
+                    self.set_commanded_speed(b, 0)
+                    self.set_commanded_authority(b, 0)
+                else:
+                    # pass-through CTC suggestions when allowed
+                    if b in self._suggested_speed_mph:
+                        self.set_commanded_speed(b, self._suggested_speed_mph[b])
+                    if b in self._suggested_auth_yd:
+                        self.set_commanded_authority(b, self._suggested_auth_yd[b])
+
+        # Remember occupancy for next dynamic PLC call
+        for b in blocks:
+            self._plc_prev_occupancy[b] = current_occ[b]
 
     def _upload_plc_text(self, path: str) -> None:
         with open(path, "r") as f:
@@ -703,7 +1212,7 @@ class HardwareTrackControllerBackend:
 
     # ---------- Data exposure for UI ----------
     def get_line_block_ids(self) -> List[int]:
-        ### NEW: always use union of HW + view-only for this line
+        # always use union of HW + view-only for this line
         return list(self._line_blocks)
 
     @property
@@ -736,13 +1245,59 @@ class HardwareTrackControllerBackend:
             "crossings": self.crossings.copy(),
             "crossing_blocks": self.crossing_blocks.copy(),
         }
-        # ---------- Global clock integration ----------
+
+    # ---------- Failure reporting API for UI ----------
+    def get_failure_report(self) -> Dict[str, Any]:
+        """
+        Summarize active and historical fault conditions for UI diagnostics.
+        """
+        return {
+            "active": [
+                {
+                    "type": f.kind,
+                    "block": f.block_id,
+                    "time": f.time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "details": f.details,
+                    "cleared": f.cleared,
+                }
+                for f in self.failures.values()
+            ],
+            "history": [
+                {
+                    "type": f.kind,
+                    "block": f.block_id,
+                    "time": f.time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "details": f.details,
+                    "cleared": f.cleared,
+                }
+                for f in self.failure_history[-20:]
+            ],
+            "pending_commands": len(self._pending_actuator_checks),
+        }
+
+    def clear_failures(self) -> None:
+        """
+        Mark all current failures as cleared and reset tracking.
+
+        Requires maintenance mode (these are safety-critical flags).
+        """
+        if not self.maintenance_mode:
+            raise PermissionError("Must be in maintenance mode to clear failures")
+        for rec in self.failures.values():
+            rec.cleared = True
+        self.failures.clear()
+        self._pending_actuator_checks.clear()
+        self._actuator_retry_count.clear()
+        logger.info("%s: failures cleared by operator", self.line_name)
+        self._notify_listeners()
+
+    # ---------- Global clock integration ----------
     def set_time(self, new_time: datetime) -> None:
         """
         Called by the global clock/UI to update this wayside's notion of time.
         """
         self.time = new_time
-        # If you add time-based safety logic later, use self.time there.
+        # Time-based safety logic uses self.time
         self._notify_listeners()
 
     def manual_set_time(
@@ -787,7 +1342,7 @@ class HardwareTrackControllerBackend:
         }
 
 def build_backend_for_sim(
-    track_model: TrackModelAdapter, 
+    track_model: TrackModelAdapter,
     line_name: str = "Blue Line",
 ) -> HardwareTrackControllerBackend:
     return HardwareTrackControllerBackend(track_model, line_name=line_name)

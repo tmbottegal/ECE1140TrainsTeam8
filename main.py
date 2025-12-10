@@ -70,7 +70,7 @@ if __name__ == "__main__":
     hw_controllers = {
     "Green Line": HardwareTrackControllerBackend(network1, "Green Line"),
     # Add Red Line if needed:
-    # "Red Line": HardwareTrackControllerBackend(tm, "Red Line"),
+    "Red Line": HardwareTrackControllerBackend(network2, "Red Line"),
 }
 
     for ctrl in hw_controllers.values():

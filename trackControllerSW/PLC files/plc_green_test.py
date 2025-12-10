@@ -94,7 +94,7 @@ def plc_logic(
         light_signals[4] = False  # Straight signal
         light_signals[5] = True  # Diverging signal
 
-    # Control switch 2 (block 62)
+    # Control switch 2 (block 58)
     switch_positions[2] = 1 if train_near_end or train_in_underground else 0
     light_signals[6] = True  # Previous signal
 
@@ -104,6 +104,17 @@ def plc_logic(
     else:
         light_signals[7] = False  # Straight signal
         light_signals[8] = True  # Diverging signal
+
+    # Control switch 3 (block 62)
+    switch_positions[3] = 1 if train_near_end or train_in_underground else 0
+    light_signals[9] = True  # Previous signal
+
+    if switch_positions[3] == 0:
+        light_signals[10] = True  # Straight signal
+        light_signals[11] = False  # Diverging signal
+    else:
+        light_signals[10] = False  # Straight signal
+        light_signals[11] = True  # Diverging signal
 
     # Control crossing 0 (block 19)
     crossing_signals[0] = train_near_crossing_19

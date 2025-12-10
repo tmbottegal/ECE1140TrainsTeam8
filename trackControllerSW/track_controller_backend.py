@@ -1137,19 +1137,19 @@ class TrackControllerBackend(FailureDetection):
         self._send_status_to_ctc()
         logger.info('PLC uploaded successfully for %s', self.line_name)
 
-        # def _set_placeholder_values(self) -> None:
-        #     default_speed_mps = 20
-        #     default_authority_m = 150
-        #     for block_id in self._line_block_ids():
-        #         if block_id not in self._commanded_speed_mps:
-        #             self._commanded_speed_mps[block_id] = default_speed_mps
-        #             self._known_commanded_speed[block_id] = default_speed_mps
-        #         if block_id not in self._commanded_auth_m:
-        #             self._commanded_auth_m[block_id] = default_authority_m
-        #             self._known_commanded_auth[block_id] = default_authority_m
-        #         try:
-        #             self.track_model.broadcast_train_command(block_id, int(self._commanded_speed_mps[block_id]), int(self._commanded_auth_m[block_id]))
-        #         except Exception as e: logger.warning("placehold no work")
+    # def _set_placeholder_values(self) -> None:
+    #     default_speed_mps = 20
+    #     default_authority_m = 150
+    #     for block_id in self._line_block_ids():
+    #         if block_id not in self._commanded_speed_mps:
+    #             self._commanded_speed_mps[block_id] = default_speed_mps
+    #             self._known_commanded_speed[block_id] = default_speed_mps
+    #         if block_id not in self._commanded_auth_m:
+    #             self._commanded_auth_m[block_id] = default_authority_m
+    #             self._known_commanded_auth[block_id] = default_authority_m
+    #         try:
+    #             self.track_model.broadcast_train_command(block_id, int(self._commanded_speed_mps[block_id]), int(self._commanded_auth_m[block_id]))
+    #         except Exception as e: logger.warning("placehold no work")
 
     def _upload_plc_python(self, filepath: str) -> None:
         """Load and execute a Python PLC file.

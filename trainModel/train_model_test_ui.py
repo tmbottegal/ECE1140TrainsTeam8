@@ -333,7 +333,7 @@ class TrainModelTestUI(QWidget):
         if not beacon or beacon == "None":
             return
         next_station = beacon.strip()
-        announcement = f"{next_station}"
+        announcement = f"Next Station: {next_station}"
         self.backend.set_inputs(announcement=announcement)
 
     def _sync_from_backend(self) -> None:

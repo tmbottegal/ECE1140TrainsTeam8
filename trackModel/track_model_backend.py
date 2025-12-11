@@ -202,8 +202,8 @@ class TrackSegment:
         if TrackFailureType.BROKEN_RAIL in self.failures:
             return
         self.occupied = occupied
-        if not occupied:
-            self.active_command = None
+        #if not occupied:
+        #    self.active_command = None
 
     def set_beacon_data(self, beacon_data: str) -> None:
         """Set beacon data for this track segment.
@@ -1299,7 +1299,7 @@ class TrackNetwork:
                     segment.sell_tickets()
                 except Exception as e:
                     pass
-        if new_time.second % 10 == 0:
+        if new_time.second % 5 == 0:
             self.temperature_sim()
 
     def manual_set_time(self, year: int, month: int, day: int,

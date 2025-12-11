@@ -238,7 +238,7 @@ class HardwareTrackControllerBackend:
 
         # Ensure every switch has a position entry (default Normal)
         for sid in self.switch_map:
-            self.switches.setdefault(sid, "Normal")
+            self.switches.setdefault(sid, "Straight")
 
         # --- Crossings owned by HW ---
         if self.line_name == "Green Line":
@@ -686,65 +686,49 @@ class HardwareTrackControllerBackend:
             if self._known_occupancy.get(b, False):
                 raise PermissionError(f"Cannot move switch {switch_id}; block {b} is occupied")
 
-    def safe_set_switch(self, switch_id: int, position: str) -> None:
+    def safe_set_switch(self, switch_id: int, position: str | int | bool) -> None:
         if not self.maintenance_mode:
             raise PermissionError("Must be in maintenance mode to change switches")
 
+        # Safety: cannot move a switch if any connected block is occupied
         self._check_switch_clear_for_move(switch_id)
 
-        pos = position.title()
-        if pos not in ("Straight", "Diverging"):
-            raise ValueError("Invalid switch position")
+        # Normalize the position input
+        raw = str(position).strip().lower()
 
-        # Update local state
-        self.switches[switch_id] = pos
+        if isinstance(position, bool):
+            # Boolean from PLC
+            int_pos = 1 if position else 0
+            pos_label = "Diverging" if position else "Straight"
 
-        # Try to tell the track model (if it supports it)
-        numeric = 0 if pos == "Straight" else 1
+        elif raw in ("0", "straight", "normal"):
+            # Treat Normal as Straight
+            int_pos = 0
+            pos_label = "Straight"
+
+        elif raw in ("1", "diverging", "alternate"):
+            # Treat Alternate as Diverging
+            int_pos = 1
+            pos_label = "Diverging"
+
+        else:
+            raise ValueError(f"Invalid switch position: {position}")
+
+        # Store normalized label for UI
+        self.switches[switch_id] = pos_label
+
+        # Try to update the Track Model (0 = Straight, 1 = Diverging)
         try:
             if hasattr(self.track_model, "set_switch_position"):
-                self.track_model.set_switch_position(switch_id, numeric)
+                self.track_model.set_switch_position(switch_id, int_pos)
         except Exception:
             logger.exception("Failed to set switch in track model")
 
-        # Schedule power-failure verification (only if model is non-trivial)
-        self._schedule_actuator_verification(switch_id, "switch", numeric)
-
-        self._notify_listeners()
-        self._send_status_to_ctc()
-
-    def safe_set_crossing(self, crossing_id: int, status: str) -> None:
-        if not self.maintenance_mode:
-            raise PermissionError("Must be in maintenance mode to change crossings")
-
-        stat = status.title()
-        if stat not in ("Active", "Inactive"):
-            raise ValueError("Invalid crossing status")
-
-        # Safety: don't inactivate crossing if its block is occupied
-        block_id = self.crossing_blocks.get(crossing_id)
-        if block_id is not None and stat == "Inactive":
-            if self._known_occupancy.get(block_id, False):
-                raise PermissionError(
-                    f"Cannot inactivate crossing {crossing_id}; block {block_id} is occupied"
-                )
-
-        self.crossings[crossing_id] = stat
-
-        try:
-            if block_id is not None and hasattr(self.track_model, "set_gate_status"):
-                self.track_model.set_gate_status(block_id, stat == "Active")
-        except Exception:
-            logger.exception("Failed to set crossing gate in track model")
-
+        # Update all observers
         self._notify_listeners()
         self._send_status_to_ctc()
 
     def _apply_switch_from_plc(self, switch_id: int, position: str) -> None:
-        """
-        PLC-controlled switch movement: still enforces occupancy checks,
-        but does *not* require maintenance mode.
-        """
         self._check_switch_clear_for_move(switch_id)
         self.switches[switch_id] = position
         numeric = 0 if position == "Normal" else 1
@@ -784,8 +768,17 @@ class HardwareTrackControllerBackend:
         self._send_status_to_ctc()
 
     def set_signal(self, block: int, color: str | SignalState) -> None:
-        seg = getattr(self.track_model, "segments", {}).get(block)
+        """
+        Set the signal aspect for a block.
 
+        We try to update the underlying segment if it exposes set_signal_state,
+        but we don't require the TrackModel itself to have a set_signal_state()
+        API. We always keep a local cache so UI/CTC can see the signal.
+        """
+        segments = getattr(self.track_model, "segments", {})
+        seg = segments.get(block)
+
+        # Normalize input color into a SignalState
         if isinstance(color, SignalState):
             state = color
         else:
@@ -794,15 +787,12 @@ class HardwareTrackControllerBackend:
                 return  # silently ignore invalid text
             state = SignalState[key]
 
-        # Try to push into track model if segment exists, but don't require it
-        if seg:
+        # Try to push into the segment, if it supports it
+        if seg and hasattr(seg, "set_signal_state"):
             try:
-                if hasattr(seg, "set_signal_state"):
-                    seg.set_signal_state(state)
-                elif hasattr(self.track_model, "set_signal_state"):
-                    self.track_model.set_signal_state(block, state)
+                seg.set_signal_state(state)
             except Exception:
-                logger.exception("Failed to set signal in track model")
+                logger.exception("Failed to set signal in track model segment")
 
         # Always keep local cache so PLC-only blocks still show in UI
         self._known_signal[block] = state
@@ -977,10 +967,8 @@ class HardwareTrackControllerBackend:
                 try:
                     core = lname[len("switch_") :]
                     switch_id = int(core)
-                    pos_str = str(value).title()
-                    if pos_str in ("0", "1"):
-                        pos_str = "Normal" if pos_str == "0" else "Alternate"
-                    self.safe_set_switch(switch_id, pos_str)
+                    # Let safe_set_switch do the normalization; we just forward the raw value.
+                    self.safe_set_switch(switch_id, value)
                 except Exception:
                     logger.exception("Failed to apply PLC switch for %s", name)
                 continue

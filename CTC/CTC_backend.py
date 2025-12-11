@@ -966,6 +966,32 @@ class TrackState:
 
       # --------------------------------------------------------
     
+    def push_full_block_suggestions(self):
+        """
+        For EVERY block in the line, send suggested speed/authority.
+        Blocks not in the path get (0,0).
+        The block containing a train gets its current suggestions.
+        """
+        line_blocks = sorted(self.track_model.segments.keys())
+
+        # Build a per-block table initialized to zero
+        speed_map = {bid: 0.0 for bid in line_blocks}
+        auth_map  = {bid: 0.0 for bid in line_blocks}
+
+        # For each train, fill in its CURRENT block values
+        for train_id, (speed, auth) in self._train_suggestions.items():
+            train = self.track_model.trains.get(train_id)
+            if not train or not train.current_segment:
+                continue
+            block = train.current_segment.block_id
+            speed_map[block] = speed
+            auth_map[block] = auth
+
+        # SEND ALL BLOCKS TO BOTH CONTROLLERS
+        for bid in line_blocks:
+            self.track_controller.receive_ctc_suggestion(bid, speed_map[bid], auth_map[bid])
+            self.track_controller_hw.receive_ctc_suggestion(bid, speed_map[bid], auth_map[bid])
+
     # Manual tick: CTC drives time for all subsystems
     # --------------------------------------------------------
     def tick_all_modules(self):
@@ -1221,6 +1247,9 @@ class TrackState:
                 print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
                 print(f"[CTC] Suggestion → Train {train_id} in block {block}: "
                     f"{speed_mps:.2f} m/s, {new_auth:.1f} m authority")
+                
+                self.push_full_block_suggestions()
+
 
 
     # --------------------------------------------------------

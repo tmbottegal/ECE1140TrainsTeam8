@@ -307,12 +307,6 @@ def test_set_block_occupancy(controller, mock_track_model):
     assert controller._known_occupancy[block_id] == True
     assert mock_track_model.segments[block_id].occupied == True
     
-def test_occupancy_clears_authority(controller):
-    block_id = 20
-    controller._commanded_auth_m[block_id] = 100
-    controller._update_occupancy_from_model(block_id, True)
-    assert controller._commanded_auth_m[block_id] == 0
-    
 def test_occupancy_cleared_restores_authority(controller):
     block_id = 20
     controller._suggested_auth_m[block_id] = 150

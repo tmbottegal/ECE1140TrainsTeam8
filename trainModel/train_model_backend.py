@@ -414,6 +414,10 @@ class Train:
         self.current_segment: Optional[object] = None
         self.segment_displacement_m: float = 0.0
 
+        self._prev_left_doors = False
+        self._prev_right_doors = False
+
+
         clock.register_listener(self._auto_tick)
         self._last_tick_time: Optional[datetime] = None
 
@@ -683,7 +687,7 @@ class Train:
         """
         called by TrackModel when a new train command is available
         """
-        if block_id is self.current_segment.block_id:
+        if self.current_segment and self.current_segment.block_id == block_id:
             self.apply_train_command(self.current_segment.active_command)
         pass
 

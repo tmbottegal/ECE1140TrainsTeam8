@@ -1124,7 +1124,7 @@ class TrackControllerBackend(FailureDetection):
         ext = os.path.splitext(filepath)[1].lower()
         logger.info('Uploading PLC file: %s', filepath)
 
-        # self._set_placeholder_values()
+        # self._set_placeholder_suggested_values()
 
         if ext == '.py':
             self._upload_plc_python(filepath)
@@ -1137,19 +1137,12 @@ class TrackControllerBackend(FailureDetection):
         self._send_status_to_ctc()
         logger.info('PLC uploaded successfully for %s', self.line_name)
 
-    # def _set_placeholder_values(self) -> None:
+    # def _set_placeholder_suggested_values(self) -> None:
     #     default_speed_mps = 20
     #     default_authority_m = 150
     #     for block_id in self._line_block_ids():
-    #         if block_id not in self._commanded_speed_mps:
-    #             self._commanded_speed_mps[block_id] = default_speed_mps
-    #             self._known_commanded_speed[block_id] = default_speed_mps
-    #         if block_id not in self._commanded_auth_m:
-    #             self._commanded_auth_m[block_id] = default_authority_m
-    #             self._known_commanded_auth[block_id] = default_authority_m
-    #         try:
-    #             self.track_model.broadcast_train_command(block_id, int(self._commanded_speed_mps[block_id]), int(self._commanded_auth_m[block_id]))
-    #         except Exception as e: logger.warning("placehold no work")
+    #         if block_id not in self._suggested_speed_mps: self._suggested_speed_mps[block_id] = default_speed_mps
+    #         if block_id not in self._suggested_auth_m: self._suggested_auth_m[block_id] = default_authority_m
 
     def _upload_plc_python(self, filepath: str) -> None:
         """Load and execute a Python PLC file.
@@ -1480,12 +1473,19 @@ class TrackControllerBackend(FailureDetection):
             occupied,
         )
 
+        # Only re-execute PLC if not in maintenance mode
         if old_state != occupied and self._plc_module is not None:
-            logger.info(
-                'Occupancy changed for block %d, re-executing PLC logic',
-                block_id,
-            )
-            self._execute_plc_logic()
+            if not self.maintenance_mode:
+                logger.info(
+                    'Occupancy changed for block %d, re-executing PLC logic',
+                    block_id,
+                )
+                self._execute_plc_logic()
+            else:
+                logger.info(
+                    'Occupancy changed for block %d, but PLC execution skipped (maintenance mode)',
+                    block_id,
+                )
 
         # Auto-manage crossing gates
         for cid, cblock in self.crossing_blocks.items():
@@ -1517,6 +1517,7 @@ class TrackControllerBackend(FailureDetection):
 
         self._detect_broken_rail(block_id, occupied)
         self._detect_track_circuit_failure(block_id)
+
 
     def start_live_link(self, poll_interval: float = 1.0) -> None:
         """Start live polling of Track Model state.
@@ -1698,9 +1699,13 @@ class TrackControllerBackend(FailureDetection):
                 logger.debug('Error polling block %d: %s', block_id, error)
                 continue
 
+        # Only execute PLC if not in maintenance mode
         if occupancy_changed and self._plc_module is not None:
-            logger.info('Occupancy changed, re-executing PLC logic')
-            self._execute_plc_logic()
+            if not self.maintenance_mode:
+                logger.info('Occupancy changed, re-executing PLC logic')
+                self._execute_plc_logic()
+            else:
+                logger.info('Occupancy changed, but PLC execution skipped (maintenance mode)')
 
         if state_changed:
             self._notify_listeners()
@@ -2027,22 +2032,53 @@ class TrackControllerBackend(FailureDetection):
                             f'block {block_id} is occupied'
                         )
 
+        # Store old position in case we need to revert
+        old_position = self.switches.get(switch_id, 0)
+        
+        # Update local state
         self.switches[switch_id] = pos_int
 
         try:
+            # Update Track Model
             self.track_model.set_switch_position(switch_id, pos_int)
             logger.info(
                 'Sent to Track Model: Switch %d -> %d', switch_id, pos_int
             )
+            
+            # Verify the update by reading back from Track Model
+            if switch_id in self.track_model.segments:
+                segment = self.track_model.segments[switch_id]
+                if hasattr(segment, 'current_position'):
+                    actual_position = segment.current_position
+                    if actual_position != pos_int:
+                        logger.error(
+                            'Switch %d position mismatch: expected %d, got %d',
+                            switch_id, pos_int, actual_position
+                        )
+                        # Revert local state
+                        self.switches[switch_id] = old_position
+                        raise RuntimeError(
+                            f'Switch {switch_id} failed to update in Track Model'
+                        )
+                    else:
+                        logger.info(
+                            'Verified switch %d position: %d', 
+                            switch_id, actual_position
+                        )
+                        
         except Exception as error:
-            logger.warning(
+            logger.exception(
                 'Failed to set switch %d in Track Model: %s',
                 switch_id,
                 error,
             )
+            # Revert local state on failure
+            self.switches[switch_id] = old_position
+            raise  # Re-raise to show error in UI
 
         self._notify_listeners()
         self._send_status_to_ctc()
+
 
     def safe_set_crossing(
         self, crossing_id: int, status: Union[bool, str]
@@ -2084,6 +2120,10 @@ class TrackControllerBackend(FailureDetection):
                         f'block {block} is occupied'
                     )
 
+        # Store old status in case we need to revert
+        old_status = self.crossings.get(crossing_id, False)
+        
+        # Update local state
         self.crossings[crossing_id] = stat_bool
 
         if block:
@@ -2097,146 +2137,43 @@ class TrackControllerBackend(FailureDetection):
                         block,
                         stat_bool,
                     )
+                    
+                    # Verify the update by reading back from Track Model
+                    if hasattr(seg, 'gate_status'):
+                        actual_status = seg.gate_status
+                        if actual_status != stat_bool:
+                            logger.error(
+                                'Crossing %d status mismatch: expected %s, got %s',
+                                crossing_id, stat_bool, actual_status
+                            )
+                            # Revert local state
+                            self.crossings[crossing_id] = old_status
+                            raise RuntimeError(
+                                f'Crossing {crossing_id} failed to update in Track Model'
+                            )
+                        else:
+                            logger.info(
+                                'Verified crossing %d status: %s',
+                                crossing_id, actual_status
+                            )
                 else:
                     logger.warning(
                         'Block %d does not have set_gate_status method', block
                     )
+                    # Revert since we can't actually set it
+                    self.crossings[crossing_id] = old_status
+                    raise RuntimeError(
+                        f'Block {block} does not support crossing control'
+                    )
             except Exception as error:
-                logger.warning(
+                logger.exception(
                     'Failed to set crossing %d in Track Model: %s',
                     crossing_id,
                     error,
                 )
+                # Revert local state on failure
+                self.crossings[crossing_id] = old_status
+                raise  # Re-raise to show error in UI
 
         self._notify_listeners()
         self._send_status_to_ctc()
-
-    def set_time(self, new_time: datetime) -> None:
-        """Set the current system time.
-
-        Args:
-            new_time: The new time to set.
-        """
-        self.time = new_time
-        self._notify_listeners()
-
-    def manual_set_time(
-        self,
-        year: int,
-        month: int,
-        day: int,
-        hour: int,
-        minute: int,
-        second: int,
-    ) -> None:
-        """Manually set the system time with individual components.
-
-        Args:
-            year: Year value.
-            month: Month value (1-12).
-            day: Day value (1-31).
-            hour: Hour value (0-23).
-            minute: Minute value (0-59).
-            second: Second value (0-59).
-        """
-        self.time = datetime(year, month, day, hour, minute, second)
-        logger.info(
-            '%s: Time manually set to %s',
-            self.line_name,
-            self.time.strftime('%Y-%m-%d %H:%M:%S'),
-        )
-        self._notify_listeners()
-
-    def _plc_set_switch(self, switch_id: int, position: Union[int, str]) -> None:
-        """Set switch position from PLC (bypasses safety checks).
-
-        Args:
-            switch_id: The switch to set.
-            position: The position to set (0/'Normal' or 1/'Alternate').
-        """
-        if isinstance(position, str):
-            pos_str = position.title()
-            pos_int = 0 if pos_str == 'Normal' else 1
-        else:
-            pos_int = int(position)
-
-        self.switches[switch_id] = pos_int
-
-        try:
-            self.track_model.set_switch_position(switch_id, pos_int)
-            logger.info('PLC set switch %d -> %d', switch_id, pos_int)
-        except Exception as error:
-            logger.warning(
-                'Failed to set switch %d in Track Model: %s',
-                switch_id,
-                error,
-            )
-
-    def _plc_set_crossing(
-        self, crossing_id: int, status: Union[bool, str]
-    ) -> None:
-        """Set crossing gate status from PLC (bypasses safety checks).
-
-        Args:
-            crossing_id: The crossing to set.
-            status: The gate status (True/'Active' or False/'Inactive').
-        """
-        if isinstance(status, str):
-            stat_bool = True if status.title() == 'Active' else False
-        else:
-            stat_bool = bool(status)
-
-        self.crossings[crossing_id] = stat_bool
-        block = self.crossing_blocks.get(crossing_id)
-
-        if block and block in self.track_model.segments:
-            try:
-                seg = self.track_model.segments[block]
-                if hasattr(seg, 'set_gate_status'):
-                    seg.set_gate_status(stat_bool)
-                    logger.info(
-                        'PLC set crossing %d (block %d): %s',
-                        crossing_id,
-                        block,
-                        stat_bool,
-                    )
-                else:
-                    logger.warning('Block %d is not a level crossing', block)
-            except Exception as error:
-                logger.warning(
-                    'Failed to set crossing %d: %s', crossing_id, error
-                )
-        else:
-            logger.warning(
-                'Crossing %d has no valid block mapping or block not in track model',
-                crossing_id,
-            )
-
-    def _verify_commands(self) -> None:
-        """Verify that pending commands have been executed."""
-        if not hasattr(self, '_pending_verifications'):
-            self._pending_verifications = {}
-            return
-
-        if not hasattr(self, '_verification_timeout'):
-            self._verification_timeout = timedelta(seconds=5)
-
-        current_time = self.time
-        expired_verifications = []
-
-        for key, verification in list(self._pending_verifications.items()):
-            if verification.verified:
-                continue
-
-            time_since_command = current_time - verification.timestamp
-            if time_since_command > self._verification_timeout:
-                self._detect_power_failure(
-                    verification.block_id,
-                    verification.command_type,
-                    verification.expected_value,
-                )
-                expired_verifications.append(key)
-
-        for key in expired_verifications:
-            if key in self._pending_verifications:
-                del self._pending_verifications[key]

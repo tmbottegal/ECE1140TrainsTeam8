@@ -6,7 +6,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-
+    
 from trackModel.track_model_backend import TrackNetwork
 
 try:
@@ -25,6 +25,9 @@ except ModuleNotFoundError:
         HW_CONTROLLED_BLOCK_MAP,
         HW_VIEW_ONLY_BLOCK_MAP,
     )
+RED = SignalState.RED
+YELLOW = SignalState.YELLOW
+GREEN = SignalState.GREEN
 
 from universal.global_clock import clock as global_clock
 
@@ -505,56 +508,105 @@ class TrackControllerHWUI(QWidget):
             self.tbl_cross.blockSignals(False)
 
     def _refresh_switches(self) -> None:
+        """Refresh the switches status table (matches SW UI pattern)."""
         switches = self.backend.switches
-        switch_map = self.backend.switch_map
 
-        if not switch_map and not switches and self.backend.line_name == "Blue Line":
-            switch_map[5] = (5, 6, 11)
-            switches.setdefault(5, "N/A")
+        if switches:
+            self.tbl_switch.setRowCount(len(switches))
+            self.tbl_switch.setColumnCount(5)
+            self.tbl_switch.setHorizontalHeaderLabels([
+                'Block',
+                'Position',
+                'Prev Signal',
+                'Straight Signal',
+                'Diverging Signal',
+            ])
+            self.tbl_switch.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch
+            )
+            self.tbl_switch.verticalHeader().setVisible(False)
 
-        switch_ids = sorted(switch_map.keys())
-        self.tbl_switch.blockSignals(True)
-        try:
-            self.tbl_switch.setRowCount(max(len(switch_ids), 1))
-            if not switch_ids:
-                for c in range(5):
-                    self._set_item(self.tbl_switch, 0, c, "", editable=False)
-            else:
-                for r, sid in enumerate(switch_ids):
-                    # Block ID
-                    self._set_item(self.tbl_switch, r, 0, str(sid), editable=False)
-                    
-                    # Position - use "Straight" / "Diverging"
-                    pos = switches.get(sid, "N/A")
-                    if pos == "Normal":
-                        pos = "Straight"
-                    elif pos == "Alternate":
-                        pos = "Diverging"
-                    self._set_item(self.tbl_switch, r, 1, str(pos), editable=self.maintenance_enabled)
+            for i, (sid, pos) in enumerate(switches.items()):
+                # Switch ID
+                self.tbl_switch.setItem(i, 0, QTableWidgetItem(str(sid)))
 
-                    # Get switch signals from backend (synced with track model)
-                    prev_sig = self._get_switch_signal(sid, 0)    # Previous (side 0)
-                    straight_sig = self._get_switch_signal(sid, 1) # Straight (side 1)
-                    diverging_sig = self._get_switch_signal(sid, 2) # Diverging (side 2)
-                    
-                    # Previous Signal (col 2)
-                    self._set_item(self.tbl_switch, r, 2, prev_sig, editable=False)
-                    if item := self.tbl_switch.item(r, 2):
-                        self._color_signal_item(item, prev_sig)
-                    
-                    # Straight Signal (col 3)
-                    self._set_item(self.tbl_switch, r, 3, straight_sig, editable=False)
-                    if item := self.tbl_switch.item(r, 3):
-                        self._color_signal_item(item, straight_sig)
-                    
-                    # Diverging Signal (col 4)
-                    self._set_item(self.tbl_switch, r, 4, diverging_sig, editable=False)
-                    if item := self.tbl_switch.item(r, 4):
-                        self._color_signal_item(item, diverging_sig)
+                # Position - convert to display text
+                if isinstance(pos, int):
+                    pos_text = 'Straight' if pos == 0 else 'Diverging'
+                else:
+                    pos_text = 'Straight' if pos in ('Straight', 'Normal', 0) else 'Diverging'
+                item = QTableWidgetItem(pos_text)
+                self._apply_editable(item, editable=self.maintenance_enabled)
+                self.tbl_switch.setItem(i, 1, item)
 
-            self.tbl_switch.resizeRowsToContents()
-        finally:
-            self.tbl_switch.blockSignals(False)
+                # Signals - access _switch_signals directly like SW UI
+                switch_signals = getattr(self.backend, '_switch_signals', {})
+
+                prev_sig = switch_signals.get((sid, 0), 'N/A')
+                prev_item = self._create_signal_item(prev_sig)
+                self.tbl_switch.setItem(i, 2, prev_item)
+
+                straight_sig = switch_signals.get((sid, 1), 'N/A')
+                straight_item = self._create_signal_item(straight_sig)
+                self.tbl_switch.setItem(i, 3, straight_item)
+
+                diverging_sig = switch_signals.get((sid, 2), 'N/A')
+                diverging_item = self._create_signal_item(diverging_sig)
+                self.tbl_switch.setItem(i, 4, diverging_item)
+        else:
+            self.tbl_switch.setRowCount(1)
+            self.tbl_switch.setColumnCount(5)
+            self.tbl_switch.setHorizontalHeaderLabels([
+                'Block', 'Position', 'Prev Signal', 'Straight Signal', 'Diverging Signal'
+            ])
+            for col in range(5):
+                self.tbl_switch.setItem(0, col, QTableWidgetItem('No switches'))
+    
+    def _create_signal_item(self, signal_state) -> QTableWidgetItem:
+        # Normalize to plain text: RED / YELLOW / GREEN / N/A
+        if hasattr(signal_state, "name"):
+        # Any Enum-like object
+            sig_name = signal_state.name
+        elif isinstance(signal_state, str) and signal_state != "N/A":
+        # Handle strings like "SignalState.RED" or "RED"
+            sig_name = signal_state.split(".")[-1]
+        else:
+            sig_name = signal_state  # probably "N/A"
+
+        if sig_name == "N/A":
+            item = QTableWidgetItem("N/A")
+        else:
+            text = str(sig_name).upper()          # -> "RED"
+            item = QTableWidgetItem(text)
+            # Try to color it using our SignalState enum
+            try:
+                enum_state = SignalState[text]    # RED/YELLOW/GREEN -> SignalState.RED/...
+                self._color_signal_item_by_state(item, enum_state)
+            except KeyError:
+                pass
+
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+    
+    def _color_signal_item_by_state(self, item: QTableWidgetItem, sig: SignalState) -> None:
+        """Apply color styling to a signal item based on its state (matches SW UI)."""
+        if sig == RED:
+            item.setBackground(QColor("#ef4444"))  # Red
+            item.setForeground(QColor("#000000"))
+        elif sig == YELLOW:
+            item.setBackground(QColor("#eab308"))  # Yellow
+            item.setForeground(QColor("#000000"))
+        elif sig == GREEN:
+            item.setBackground(QColor("#22c55e"))  # Green
+            item.setForeground(QColor("#000000"))
+    
+    def _apply_editable(self, item: QTableWidgetItem, editable: bool = False) -> None:
+        """Apply editable flag to item (matches SW UI pattern)."""
+        if editable:
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        else:
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
 
     def _get_block_signal(self, blocks_data: Dict, block_id: int | None) -> str:
         """Get signal state for a block, defaulting to RED."""
@@ -605,7 +657,15 @@ class TrackControllerHWUI(QWidget):
 
     # -------------- Helpers --------------
     def _get_switch_signal(self, switch_id: int, signal_side: int) -> str:
-
+        """Get switch signal state from backend.
+        
+        Args:
+            switch_id: The switch block ID.
+            signal_side: 0=previous, 1=straight, 2=diverging.
+            
+        Returns:
+            Signal state as string ("Red", "Yellow", "Green").
+        """
         if hasattr(self.backend, "get_switch_signal"):
             sig = self.backend.get_switch_signal(switch_id, signal_side)
             if isinstance(sig, SignalState):

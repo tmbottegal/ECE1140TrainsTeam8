@@ -36,19 +36,24 @@ from PyQt6.QtGui import QFont, QColor
 from sys import argv
 
 class NetworkStatusUI(QWidget):
+    """Test UI for displaying and interacting with the TrackNetworks."""
     def __init__(self, track_network1=None, track_network2=None):
         super().__init__()
         
         # initialize multiple TrackNetwork instances
-        self.track_network1 = track_network1 if track_network1 is not None else TrackNetwork()
-        self.track_network2 = track_network2 if track_network2 is not None else TrackNetwork()
+        self.track_network1 = (track_network1 if track_network1 is not None 
+                              else TrackNetwork())
+        self.track_network2 = (track_network2 if track_network2 is not None 
+                              else TrackNetwork())
         
         # track_network object points to the currently active network
         # initially points to track_network1
         self.track_network = self.track_network1
-        self.active_network_index = 1  # track which network is currently active (1 or 2)
+        # track which network is currently active (1 or 2)
+        self.active_network_index = 1
         
-        self.updating_temperature = False  # flag to prevent recursive updates
+        # flag to prevent recursive updates
+        self.updating_temperature = False
         self.init_ui()
         
         # load track layouts for both networks if not provided
@@ -68,6 +73,7 @@ class NetworkStatusUI(QWidget):
         clock.register_listener(self.auto_refresh_status)
         
     def init_ui(self):
+        """Initializes the UI components and layout."""
         self.setWindowTitle("Track Model - Test Network Status")
         self.setGeometry(100, 100, 1400, 800)
         
@@ -195,7 +201,7 @@ class NetworkStatusUI(QWidget):
         self.setLayout(layout)
         
     def create_track_info_widget(self):
-        """Create the Track Info tab with table and failure controls"""
+        """Creates the Track Info tab with table and failure controls"""
         widget = QWidget()
         layout = QHBoxLayout()
         
@@ -270,7 +276,7 @@ class NetworkStatusUI(QWidget):
         return widget
     
     def create_segment_info_widget(self):
-        """Create the Segment Info tab with table and segment editing 
+        """Creates the Segment Info tab with table and segment editing 
         controls."""
         widget = QWidget()
         layout = QHBoxLayout()
@@ -399,7 +405,7 @@ class NetworkStatusUI(QWidget):
         return widget
     
     def create_station_info_widget(self):
-        """Create the Station Info tab with table and station operation 
+        """Creates the Station Info tab with table and station operation 
         controls."""
         widget = QWidget()
         layout = QHBoxLayout()
@@ -497,7 +503,7 @@ class NetworkStatusUI(QWidget):
         return widget
     
     def broadcast_train_command(self): 
-        """Broadcast a train command with the specified parameters"""
+        """Broadcasts a train command with the specified parameters"""
         try:
             # get input values
             speed_str = self.commanded_speed_input.text().strip()
@@ -539,14 +545,18 @@ class NetworkStatusUI(QWidget):
             )
             
             # determine block_id from selected segment dropdowns (edit or general)
-            selected_segment = self.edit_segment_dropdown.currentText() or self.segment_dropdown.currentText()
+            edit_selection = self.edit_segment_dropdown.currentText()
+            segment_selection = self.segment_dropdown.currentText()
+            selected_segment = edit_selection or segment_selection
             if not selected_segment:
-                self.status_display.append("Error: No segment selected for broadcasting train command")
+                err_message = "Error: No segment selected for broadcasting train command"
+                self.status_display.append(err_message)
                 return
             try:
                 block_id = int(selected_segment)
             except (ValueError, TypeError):
-                self.status_display.append(f"Error: Invalid segment id '{selected_segment}'")
+                error_message = f"Error: Invalid segment id '{selected_segment}'"
+                self.status_display.append(error_message)
                 return
 
             # call the backend method with speed in m/s and authority in meters
@@ -569,7 +579,7 @@ class NetworkStatusUI(QWidget):
             )
         
     def load_track_layout_for_network(self, network, csv_filename):
-        """Load the track layout from CSV file for a specific network"""
+        """Loads the track layout from CSV file for a specific network"""
         try:
             # load track layout with proper path
             csv_path = os.path.join(os.path.dirname(__file__), csv_filename)
@@ -583,7 +593,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error loading track layout for network: {str(e)}")
     
     def switch_active_network(self, network_index):
-        """Switch the active network between track_network1 and track_network2"""
+        """Switches the active network between track_network1 and track_network2"""
         try:
             # switch to the specified network
             if network_index == 1:
@@ -604,11 +614,14 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error switching active network: {str(e)}")
     
     def get_active_network_name(self):
-        """Get the name of the currently active network"""
-        return self.track_network.line_name if hasattr(self.track_network, 'line_name') else f"Network {self.active_network_index}"
+        """Gets the name of the currently active network"""
+        if hasattr(self.track_network, 'line_name'):
+            return self.track_network.line_name
+        else:
+            return f"Network {self.active_network_index}"
     
     def populate_network_selector(self):
-        """Populate the network selector dropdown with available networks"""
+        """Populates the network selector dropdown with available networks"""
         try:
             # temporarily disconnect the signal to avoid triggering during population
             self.network_selector.currentTextChanged.disconnect()
@@ -616,8 +629,12 @@ class NetworkStatusUI(QWidget):
             self.network_selector.clear()
             
             # get network names
-            network1_name = self.track_network1.line_name if hasattr(self.track_network1, 'line_name') else "Network 1"
-            network2_name = self.track_network2.line_name if hasattr(self.track_network2, 'line_name') else "Network 2"
+            network1_name = (self.track_network1.line_name 
+                           if hasattr(self.track_network1, 'line_name') 
+                           else "Network 1")
+            network2_name = (self.track_network2.line_name 
+                           if hasattr(self.track_network2, 'line_name') 
+                           else "Network 2")
             
             self.status_display.append(f"Populating network selector with: '{network1_name}' and '{network2_name}'")
             
@@ -644,8 +661,12 @@ class NetworkStatusUI(QWidget):
             except:
                 pass
     
-    def on_network_changed(self, network_name):
-        """Handle network selection change from dropdown"""
+    def on_network_changed(self, network_name: str):
+        """Handles network selection change from dropdown
+        
+            Args:
+                network_name: The name of the selected network
+        """
         try:
             self.status_display.append(f"Network dropdown changed to: '{network_name}'")
             
@@ -655,11 +676,18 @@ class NetworkStatusUI(QWidget):
                 return
             
             # determine which network was selected
-            network1_name = self.track_network1.line_name if hasattr(self.track_network1, 'line_name') else "Network 1"
-            network2_name = self.track_network2.line_name if hasattr(self.track_network2, 'line_name') else "Network 2"
+            network1_name = (self.track_network1.line_name 
+                           if hasattr(self.track_network1, 'line_name') 
+                           else "Network 1")
+            network2_name = (self.track_network2.line_name 
+                           if hasattr(self.track_network2, 'line_name') 
+                           else "Network 2")
             
-            self.status_display.append(f"Network 1 name: '{network1_name}', Network 2 name: '{network2_name}'")
-            self.status_display.append(f"Current active network index: {self.active_network_index}")
+            network_info = (f"Network 1 name: '{network1_name}', "
+                          f"Network 2 name: '{network2_name}'")
+            self.status_display.append(network_info)
+            active_info = f"Current active network index: {self.active_network_index}"
+            self.status_display.append(active_info)
             
             if network_name == network1_name and self.active_network_index != 1:
                 self.status_display.append("Switching to Network 1...")
@@ -674,7 +702,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error changing network: {str(e)}")
     
     def refresh_status(self):
-        """Manually refresh the network status display"""
+        """Manually refreshes the network status display"""
         try:
             # get and display network status
             self.status_display.append("Refreshing network status...")
@@ -689,7 +717,11 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error refreshing status: {str(e)}")
 
     def auto_refresh_status(self, current_time=None):
-        """Automatically refresh the network status display"""
+        """Automatically refreshes the network status display
+        
+            Args:
+                current_time: The current time from the global clock (optional)
+        """
         try:
             # get and display network status
             network_status = self.track_network.get_network_status()
@@ -705,7 +737,11 @@ class NetworkStatusUI(QWidget):
         self.refresh_status() 
 
     def populate_status_table(self, network_status):
-        """populate the status tables with network data"""
+        """Populates the status tables with network data
+        
+            Args:
+                network_status: The network status data to display
+        """
         if not network_status:
             self.status_display.append("No network status data available.")
             return
@@ -783,8 +819,13 @@ class NetworkStatusUI(QWidget):
         id_column_name="ID", details_column_name="Details"
     ):
         """Helper function to populate a table with dictionary data.
-        
         Handles nested structures. Only updates cells that have changed.
+
+            Args:
+                table_widget: The QTableWidget to populate
+                data_dict: The dictionary data to display
+                id_column_name: The name of the ID column
+                details_column_name: The name of the Details column
         """
         if not data_dict:
             # If no data, clear the table
@@ -802,9 +843,10 @@ class NetworkStatusUI(QWidget):
         
         # custom column order for segment info
         segment_column_order = [
-            'block_id', 'type', 'occupied', 'prev_sig', 'str_sig', 'div_sig', 'speed_limit', 'length', 'grade', 
-            'elevation', 'direction', 'cmd_speed', 'cmd_auth', 'prev_seg', 'next_seg', 
-            'current_pos', 'gate_status', 'beacon_data',
+            'block_id', 'type', 'occupied', 'prev_sig', 'str_sig', 'div_sig', 
+            'speed_limit', 'length', 'grade', 'elevation', 'direction', 
+            'cmd_speed', 'cmd_auth', 'prev_seg', 'next_seg', 'current_pos', 
+            'gate_status', 'beacon_data',
         ]
         
         # column aliases for display
@@ -878,7 +920,8 @@ class NetworkStatusUI(QWidget):
                 # first add the columns in the specified order
                 for col in segment_column_order:
                     # check both original name and alias
-                    original_col = next((k for k, v in column_aliases.items() if v == col), col)
+                    alias_lookup = column_aliases.items()
+                    original_col = next((k for k, v in alias_lookup if v == col), col)
                     if col in all_keys or original_col in all_keys:
                         ordered_columns.append(col)
                         all_keys.discard(col)
@@ -945,7 +988,7 @@ class NetworkStatusUI(QWidget):
                                     display_value = f"{yards_value:.2f} yds"
                                     item = QTableWidgetItem(display_value)
                                 elif original_col_name == 'direction':
-                                    # convert direction to user-friendly display with arrows
+                                    # convert direction to user-friendly display
                                     direction_str = str(cell_value).upper()
                                     
                                     if direction_str in ['DIRECTION.BIDIRECTIONAL']:
@@ -961,7 +1004,10 @@ class NetworkStatusUI(QWidget):
                                         display_value = str(cell_value)
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
-                                elif original_col_name in ['previous_signal_state', 'straight_signal_state', 'diverging_signal_state']:
+                                signal_state_columns = ['previous_signal_state', 
+                                                       'straight_signal_state', 
+                                                       'diverging_signal_state']
+                                if original_col_name in signal_state_columns:
                                     if hasattr(cell_value, 'name'):
                                         signal_name = cell_value.name
                                     else:
@@ -969,19 +1015,19 @@ class NetworkStatusUI(QWidget):
                                     
                                     if signal_name == 'RED' or str(cell_value) == 'SignalState.RED':
                                         display_value = "🔴 Red"
-                                        color = QColor(255, 200, 200)  # light red background
+                                        color = QColor(255, 200, 200)
                                     elif signal_name == 'YELLOW' or str(cell_value) == 'SignalState.YELLOW':
                                         display_value = "🟡 Yellow"
-                                        color = QColor(255, 255, 200)  # light yellow background
+                                        color = QColor(255, 255, 200)
                                     elif signal_name == 'GREEN' or str(cell_value) == 'SignalState.GREEN':
                                         display_value = "🟢 Green"
-                                        color = QColor(200, 255, 200)  # light green background
+                                        color = QColor(200, 255, 200) 
                                     elif signal_name == 'SUPERGREEN' or str(cell_value) == 'SignalState.SUPERGREEN':
                                         display_value = "🟢 Super Green"
-                                        color = QColor(150, 255, 150)  # brighter green background
+                                        color = QColor(150, 255, 150)
                                     else:
                                         display_value = str(cell_value)
-                                        color = QColor(240, 240, 240)  # light gray background
+                                        color = QColor(240, 240, 240) 
                                     
                                     item = QTableWidgetItem(display_value)
                                     item.setBackground(color)
@@ -1089,7 +1135,11 @@ class NetworkStatusUI(QWidget):
         table_widget.resizeColumnsToContents()
     
     def populate_segments_table(self, segments_data):
-        """Populate the segments table"""
+        """Populates the segments table.
+        
+            Args:
+                segments_data: The segments data to display
+        """
         if not segments_data:
             return
             
@@ -1107,7 +1157,11 @@ class NetworkStatusUI(QWidget):
             self.segment_table.verticalHeader().setVisible(False)
     
     def populate_track_info_table(self, track_info):
-        """Populate the track info table"""
+        """Populate the track info table.
+        
+            Args:
+                track_info: The track information to display
+        """
         if not track_info:
             return
         
@@ -1175,7 +1229,12 @@ class NetworkStatusUI(QWidget):
         self.track_info_table.resizeColumnsToContents()
     
     def on_temperature_changed(self, row, column):
-        """Handle temperature value changes in the track info table"""
+        """Handles temperature value changes in the track info table.
+        
+            Args:
+                row: The row index of the changed cell
+                column: The column index of the changed cell
+        """
         if column != 1:  # only handle value column changes
             return
         
@@ -1227,7 +1286,7 @@ class NetworkStatusUI(QWidget):
             self.updating_temperature = False  # always reset the flag
     
     def execute_command(self):
-        """Execute a backend command entered in the terminal"""
+        """Executes a backend command entered in the terminal."""
         command = self.command_input.text().strip()
         if not command:
             return
@@ -1284,7 +1343,7 @@ class NetworkStatusUI(QWidget):
         )
     
     def apply_track_failures(self):
-        """Apply or clear track failures based on checkbox states"""
+        """Applies or clears track failures based on checkbox states"""
         try:
             selected_segment = self.segment_dropdown.currentText()
             if not selected_segment:
@@ -1334,7 +1393,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error applying track failures: {str(e)}")
     
     def on_edit_segment_selected(self):
-        """Update the control values when a segment is selected for editing"""
+        """Updates the control values when a segment is selected for editing"""
         try:
             selected_segment = self.edit_segment_dropdown.currentText()
             if not selected_segment:
@@ -1397,7 +1456,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error updating segment controls: {str(e)}")
     
     def apply_segment_changes(self):
-        """Apply the selected changes to the segment"""
+        """Applies the selected changes to the segment"""
         try:
             selected_segment = self.edit_segment_dropdown.currentText()
             if not selected_segment:
@@ -1487,7 +1546,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error applying segment changes: {str(e)}")
     
     def apply_switch_position(self):
-        """Apply the selected switch position"""
+        """Applies the selected switch position"""
         try:
             selected_switch = self.switch_dropdown.currentText()
             if not selected_switch:
@@ -1513,7 +1572,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error applying switch position: {str(e)}")
     
     def apply_signal_state(self):
-        """Apply the selected signal state to the selected switch"""
+        """Applies the selected signal state to the selected switch"""
         try:
             selected_switch = self.switch_dropdown.currentText()
             if not selected_switch:
@@ -1558,7 +1617,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error applying signal state: {str(e)}")
     
     def sell_tickets(self):
-        """Sell tickets at the selected station"""
+        """Sells tickets at the selected station"""
         try:
             selected_station = self.station_dropdown.currentText()
             if not selected_station:
@@ -1597,7 +1656,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error selling tickets: {str(e)}")
     
     def board_passengers(self):
-        """Board passengers at the selected station"""
+        """Boards passengers at the selected station"""
         try:
             selected_station = self.station_dropdown.currentText()
             if not selected_station:
@@ -1649,7 +1708,7 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error boarding passengers: {str(e)}")
     
     def exit_passengers(self):
-        """Exit passengers at the selected station"""
+        """Make passengers exit at the selected station"""
         try:
             selected_station = self.station_dropdown.currentText()
             if not selected_station:
@@ -1699,7 +1758,11 @@ class NetworkStatusUI(QWidget):
             self.status_display.append(f"Error exiting passengers: {str(e)}")
     
     def populate_segment_dropdown(self, segments_data):
-        """Populate the segment dropdown with available segments"""
+        """Populates the segment dropdown with available segments.
+        
+            Args:
+                segments_data: The segments data to extract IDs from
+        """
         self.segment_dropdown.clear()
         self.edit_segment_dropdown.clear()  # also clear the edit dropdown
         self.switch_dropdown.clear()  # also clear the switch dropdown
@@ -1880,7 +1943,12 @@ class NetworkStatusUI(QWidget):
         self.station_table.resizeColumnsToContents()
     
     def populate_train_table(self, trains_data):
-        """Populate the train info table with train-specific data"""
+        """Populates the train info table with train-specific data.
+        
+        
+            Args:
+                trains_data: The trains data to populate the table
+        """
         if not trains_data:
             # no trains found
             self.train_table.setRowCount(1)

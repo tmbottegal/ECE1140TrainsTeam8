@@ -143,10 +143,9 @@ class HardwareTrackControllerServer:
 
         self._handle_wayside_status(line_name, updates)
 
-    def _handle_wayside_status(self, line_name: str, updates: List[Dict[str, Any]]) -> None:
-        if not line_name:
-            logger.warning("[HWTC-Server] Missing line name in wayside_status")
-            return
+    def _handle_wayside_status(self, msg: Dict[str, Any]) -> None:
+        line_name: str = msg.get("line", "Unknown Line")
+        updates: List[Dict[str, Any]] = msg.get("updates", [])
 
         ctc_backend = self.backends_by_line.get(line_name)
         if ctc_backend is None:
@@ -157,65 +156,39 @@ class HardwareTrackControllerServer:
             block_id = u.get("block_id")
             if block_id is None:
                 continue
-            try:
-                block_id = int(block_id)
-            except (TypeError, ValueError):
-                logger.warning("[HWTC-Server] Invalid block_id in update: %r", u)
-                continue
+            block_id = int(block_id)
 
-            # ----------------- Occupancy -----------------
+            # ----- Block occupancy -----
             if "occupied" in u and hasattr(ctc_backend, "update_block_occupancy"):
-                occupied_raw = u["occupied"]
-                # We expect a bool from the Pi, but be defensive.
-                occupied = bool(occupied_raw)
-                self._call_ctc_method(
-                    ctc_backend,
-                    "update_block_occupancy",
-                    line_name,
-                    block_id,
-                    occupied,
-                )
+                try:
+                    # TrackState: update_block_occupancy(line_name, block_id, occupied)
+                    ctc_backend.update_block_occupancy(line_name, block_id, bool(u["occupied"]))
+                except Exception:
+                    logger.exception("[HWTC-Server] update_block_occupancy failed")
 
-            # ----------------- Signal state -----------------
+            # ----- Signal state (string: 'Red', 'Yellow', 'Green') -----
             if "signal_state" in u and hasattr(ctc_backend, "update_signal_state"):
-                sig = u["signal_state"]
-                self._call_ctc_method(
-                    ctc_backend,
-                    "update_signal_state",
-                    line_name,
-                    block_id,
-                    sig,
-                )
+                try:
+                    ctc_backend.update_signal_state(line_name, block_id, u["signal_state"])
+                except Exception:
+                    logger.exception("[HWTC-Server] update_signal_state failed")
 
-            # ----------------- Switch position -----------------
+            # ----- Switch position -----
+            # we treat block_id as the switch block id; position is 0/1 or label
             if "switch_position" in u and u["switch_position"] is not None:
                 if hasattr(ctc_backend, "update_switch_position"):
-                    switch_val = u["switch_position"]
-                    # Forward as-is; CTC can decide if it wants "Straight"/"Diverging"
-                    # or a boolean/int.
-                    self._call_ctc_method(
-                        ctc_backend,
-                        "update_switch_position",
-                        line_name,
-                        block_id,
-                        switch_val,
-                    )
+                    try:
+                        ctc_backend.update_switch_position(line_name, block_id, u["switch_position"])
+                    except Exception:
+                        logger.exception("[HWTC-Server] update_switch_position failed")
 
-            # ----------------- Crossing status -----------------
+            # ----- Crossing status -----
             if "crossing_status" in u and u["crossing_status"] is not None:
                 if hasattr(ctc_backend, "update_crossing_status"):
-                    raw = u["crossing_status"]
-                    if isinstance(raw, str):
-                        closed = raw.strip().lower() in ("active", "closed", "true", "1")
-                    else:
-                        closed = bool(raw)
-                    self._call_ctc_method(
-                        ctc_backend,
-                        "update_crossing_status",
-                        line_name,
-                        block_id,
-                        closed,
-                    )
+                    try:
+                        ctc_backend.update_crossing_status(line_name, block_id, bool(u["crossing_status"]))
+                    except Exception:
+                        logger.exception("[HWTC-Server] update_crossing_status failed")
 
     # ------------------------------------------------------------------ #
     # Helper to handle different CTC method signatures

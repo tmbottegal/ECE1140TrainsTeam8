@@ -1,5 +1,7 @@
 import sys
 import os
+import logging
+logging.basicConfig(level=logging.INFO)
 
 # Set up sys.path for module imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'CTC'))

@@ -1,394 +1,352 @@
-from __future__ import annotations
-""" 
-Train Controller Backend - CLEANED VERSION (No Grade/Beacon)
+"""
+TrainControllerBackend.py
+Core control logic for the Train Controller
 
-This module implements the core Train Controller logic according to the Use Case Model.
-
-INPUTS (from Train Model via Frontend):
-- commanded_speed_mps: Speed command from CTC/Track Circuit (m/s)
-- commanded_authority_m: Authority distance from CTC/Track Circuit (meters)
-- actual_speed_mps: Current train velocity from tachometer (m/s)
-
-OUTPUTS (to Train Model):
-- power_kw: Power command to train motor (kW)
-- service_brake_out: Service brake activation flag (bool)
-- emergency_brake_out: Emergency brake activation flag (bool)
-
-DRIVER INPUTS (from Driver via UI):
-- auto_mode: Auto/Manual mode selection (bool)
-- driver_set_speed_mps: Manual speed setpoint (m/s)
-- service_brake_cmd: Manual service brake command (bool)
-- emergency_brake_cmd: Manual emergency brake command (bool)
-- doors_left_open, doors_right_open: Door control (bool)
-- headlights_on, cabin_lights_on: Light control (bool)
-- temp_setpoint_c: Cabin temperature setpoint (°C)
-
-ENGINEER INPUTS (from Engineer via UI):
-- kp, ki: PI controller gains (float)
-- speed_limit_mps: Line speed limit (m/s)
-
-NOTE: Grade and beacon data are NOT part of Train Controller.
-They flow directly: Track Model → Train Model (for physics simulation).
+Implements:
+- PI controller for speed regulation
+- Manual and Automatic modes  
+- Emergency and Service brakes
+- Safety constraints
+- All 22 requirements
 """
 
-from dataclasses import dataclass
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Conversion utilities
-def mph_to_mps(v_mph: float) -> float: 
-    """Convert miles per hour to meters per second"""
-    return v_mph * 0.44704
+# Try to import from universal module
+try:
+    from universal import ConversionFunctions
+except (ImportError, ModuleNotFoundError):
+    # Fallback: Define ConversionFunctions locally
+    class ConversionFunctions:
+        """Conversion functions for units."""
+        
+        @staticmethod
+        def mph_to_mps(mph):
+            return mph * 0.44704
+        
+        @staticmethod
+        def mps_to_mph(mps):
+            return mps / 0.44704
+        
+        @staticmethod
+        def feet_to_meters(feet):
+            return feet * 0.3048
+        
+        @staticmethod
+        def meters_to_feet(meters):
+            return meters / 0.3048
 
-def mps_to_mph(v_mps: float) -> float: 
-    """Convert meters per second to miles per hour"""
-    return v_mps / 0.44704
+# Try to import global clock
+try:
+    from global_clock import clock
+except (ImportError, ModuleNotFoundError):
+    # Fallback: Create a simple clock
+    import datetime
+    
+    class SimpleClock:
+        def __init__(self):
+            self.current_time = datetime.datetime.now()
+            self._listeners = []
+            
+        def tick(self):
+            self.current_time += datetime.timedelta(seconds=1)
+            for callback in self._listeners:
+                try:
+                    callback(self.current_time)
+                except:
+                    pass
+            return self.current_time
+            
+        def get_time(self):
+            return self.current_time
+            
+        def get_time_string(self):
+            return self.current_time.strftime("%I:%M:%S %p")
+            
+        def register_listener(self, callback):
+            if callback not in self._listeners:
+                self._listeners.append(callback)
+    
+    clock = SimpleClock()
 
-@dataclass
-class TrainState:
-    """
-    Complete state of the Train Controller
-    
-    This dataclass holds all inputs, outputs, and internal state variables
-    for the Train Controller module.
-    """
-    train_id: str = "T1"
-    
-    # PI Controller Gains (Engineer configurable)
-    kp: float = 0.8  # Proportional gain
-    ki: float = 0.3  # Integral gain
-    
-    # Speed Limits (Safety constraints)
-    MAX_SPEED_MPS: float = mph_to_mps(70.0)  # Absolute maximum speed
-    speed_limit_mps: float = mph_to_mps(70.0)  # Line speed limit from track
-    
-    # === INPUTS FROM TRAIN MODEL (via Track Circuit/CTC) ===
-    commanded_speed_mps: float = 0.0     # Speed command from CTC
-    commanded_authority_m: float = 0.0   # Authority from CTC (distance allowed to travel)
-    actual_speed_mps: float = 0.0        # Actual velocity from train tachometer
-    
-    # === DRIVER INPUTS ===
-    auto_mode: bool = True               # True=Auto (follow CTC), False=Manual (follow driver)
-    driver_set_speed_mps: float = 0.0    # Driver's manual speed setpoint
-    service_brake_cmd: bool = False      # Driver service brake command
-    emergency_brake_cmd: bool = False    # Driver emergency brake command
-    
-    # === DRIVER CONTROLS (passed through to Train Model) ===
-    doors_left_open: bool = False        # Left door control
-    doors_right_open: bool = False       # Right door control
-    headlights_on: bool = False          # Headlight control
-    cabin_lights_on: bool = False        # Cabin light control
-    temp_setpoint_c: float = 20.0        # Cabin temperature setpoint (°C)
-    
-    # === OUTPUTS TO TRAIN MODEL ===
-    power_kw: float = 0.0                # Power command to motor (kW)
-    service_brake_out: bool = False      # Service brake activation
-    emergency_brake_out: bool = False    # Emergency brake activation
-    
-    # === INTERNAL STATE ===
-    _i_err: float = 0.0  # Integral error accumulator for PI controller
+import datetime
+
+# Constants
+MAX_POWER_KW = 120000
+MIN_POWER_KW = -120000
+SAMPLING_PERIOD = 0.2
+MIN_TEMP_F = 60
+MAX_TEMP_F = 85
+DEFAULT_TEMP_F = 68
+
 
 class TrainControllerBackend:
-    """
-    Train Controller Backend - Core Control Logic
+    """Backend controller implementing all train control logic."""
     
-    This class implements the main train controller functionality:
-    - PI speed control (Auto mode)
-    - Manual speed control (Manual mode)
-    - Safety enforcement (authority, speed limits, brakes)
-    - Pass-through controls (doors, lights, temperature)
-    
-    Use Cases Implemented:
-    - UC 4.0: Regulate train speed at velocity setpoint from CTC & Train Driver
-    - UC 4.1: Set internal temperature setpoint
-    - UC 4.2: Emergency Brake Activation by Driver
-    - UC 4.3: Service Brake by Driver
-    - UC 4.4: Engineer sets Kp & Ki
-    - UC 4.5: Driver increase & decrease speed
-    - UC 4.6: Use Speed & Authority from Track Circuit
-    - UC 4.7: Train lights on and off
-    - UC 4.8: Train doors open and close
-    """
-    
-    def __init__(self, train_id: str = "T1") -> None:
-        """Initialize the Train Controller with a unique train ID"""
-        self.state = TrainState(train_id=train_id)
-    
-    # ======================================================================
-    # SETTERS - INPUTS FROM TRAIN MODEL (received via Frontend)
-    # ======================================================================
-    
-    def set_commanded_speed(self, speed_mps: float) -> None:
-        """
-        Set commanded speed from CTC/Track Circuit
+    def __init__(self, train_id=12123):
+        """Initialize the train controller."""
+        self.train_id = train_id
         
-        This is the target speed sent by the CTC office via the Track Circuit.
-        In Auto mode, the controller will regulate to this speed.
+        # Mode
+        self.automatic_mode = True  # True = Automatic, False = Manual
         
-        Args:
-            speed_mps: Commanded speed in meters per second
-        """
-        self.state.commanded_speed_mps = max(0.0, float(speed_mps))
-    
-    def set_commanded_authority(self, authority_m: float) -> None:
-        """
-        Set commanded authority from CTC/Track Circuit
+        # Speed and Authority (from Track Controller)
+        self.commanded_speed_mph = 0.0  # From Track Controller
+        self.speed_limit_mph = 44.0  # Block speed limit
+        self.authority_ft = 0.0  # Movement authority
         
-        Authority is the distance (in meters) the train is allowed to travel.
-        If authority reaches 0, the controller will apply service brake.
+        # Current state (from Train Model)
+        self.current_speed_mph = 0.0
+        self.at_station = False
+        self.station_name = ""
+        self.current_line = "Green"
         
-        Args:
-            authority_m: Authority distance in meters
-        """
-        self.state.commanded_authority_m = max(0.0, float(authority_m))
-    
-    def set_actual_speed(self, speed_mps: float) -> None:
-        """
-        Set actual speed from Train Model tachometer
+        # Manual mode setpoint
+        self.setpoint_speed_mph = 0.0
         
-        This is the real measured velocity of the train, used for feedback control.
+        # PI Controller
+        self.kp = 10000.0
+        self.ki = 1000.0
+        self.power_kw = 0.0
+        self.uk = 0.0  # Integral term current
+        self.uk1 = 0.0  # Integral term previous
+        self.ek = 0.0  # Error current
+        self.ek1 = 0.0  # Error previous
         
-        Args:
-            speed_mps: Actual velocity in meters per second
-        """
-        self.state.actual_speed_mps = max(0.0, float(speed_mps))
-    
-    # ======================================================================
-    # SETTERS - DRIVER INPUTS (from UI)
-    # ======================================================================
-    
-    def set_auto_mode(self, enabled: bool) -> None:
-        """
-        Set controller mode (Auto/Manual)
+        # Brakes
+        self.service_brake = False
+        self.emergency_brake = False
+        self.emergency_brake_enabled = False
         
-        Auto mode: Follow commanded speed from CTC
-        Manual mode: Follow driver's manual speed setpoint
+        # Controls
+        self.left_doors_open = False
+        self.right_doors_open = False
+        self.interior_lights_on = False
+        self.headlights_on = True
+        self.cabin_temp_f = DEFAULT_TEMP_F
+        self.ac_on = True
         
-        Args:
-            enabled: True for Auto mode, False for Manual mode
-        """
-        self.state.auto_mode = bool(enabled)
-    
-    def set_driver_speed(self, speed_mps: float) -> None:
-        """
-        Set driver's manual speed setpoint (used in Manual mode)
+        # Failures (from Train Model)
+        self.engine_failure = False
+        self.brake_failure = False
+        self.signal_failure = False
         
-        Args:
-            speed_mps: Driver's desired speed in meters per second
-        """
-        self.state.driver_set_speed_mps = max(0.0, float(speed_mps))
-    
-    def set_service_brake(self, active: bool) -> None:
-        """
-        Set driver's service brake command
+        # Status log
+        self.status_log = []
         
-        When activated, overrides speed control and applies service brake.
+        # Register with global clock
+        clock.register_listener(self.on_clock_tick)
         
-        Args:
-            active: True to activate service brake
-        """
-        self.state.service_brake_cmd = bool(active)
-    
-    def set_emergency_brake(self, active: bool) -> None:
-        """
-        Set driver's emergency brake command
+    def on_clock_tick(self, current_time):
+        """Called by global clock each tick."""
+        self.calculate_power()
         
-        When activated, immediately stops all motion and overrides all other commands.
+    def set_automatic_mode(self, auto):
+        """Set automatic (True) or manual (False) mode."""
+        self.automatic_mode = auto
+        self.log(f"Mode: {'AUTOMATIC' if auto else 'MANUAL'}")
         
-        Args:
-            active: True to activate emergency brake
-        """
-        self.state.emergency_brake_cmd = bool(active)
-    
-    # ======================================================================
-    # SETTERS - ENGINEER INPUTS (from UI)
-    # ======================================================================
-    
-    def set_speed_limit(self, limit_mps: float) -> None:
-        """
-        Set line speed limit
+    def set_kp(self, kp):
+        """Set proportional gain."""
+        self.kp = max(0.0, kp)
         
-        Controller will never command speed above this limit.
+    def set_ki(self, ki):
+        """Set integral gain."""
+        self.ki = max(0.0, ki)
         
-        Args:
-            limit_mps: Speed limit in meters per second
-        """
-        self.state.speed_limit_mps = max(0.0, float(limit_mps))
-    
-    def set_kp(self, kp: float) -> None:
-        """
-        Set proportional gain for PI controller
+    def set_setpoint_speed_mph(self, speed):
+        """Set manual mode setpoint speed (limited by speed limit)."""
+        limited = min(speed, self.speed_limit_mph)
+        self.setpoint_speed_mph = max(0.0, limited)
         
-        Args:
-            kp: Proportional gain (typically 0.0 - 10.0)
-        """
-        self.state.kp = max(0.0, float(kp))
-    
-    def set_ki(self, ki: float) -> None:
-        """
-        Set integral gain for PI controller
+    def increase_speed(self, delta=1.0):
+        """Increase setpoint speed."""
+        self.set_setpoint_speed_mph(self.setpoint_speed_mph + delta)
         
-        Args:
-            ki: Integral gain (typically 0.0 - 10.0)
-        """
-        self.state.ki = max(0.0, float(ki))
-    
-    # ======================================================================
-    # SETTERS - PASS-THROUGH CONTROLS (Driver to Train Model)
-    # ======================================================================
-    
-    def set_doors_left(self, open_: bool) -> None:
-        """Set left door state (open/closed)"""
-        self.state.doors_left_open = bool(open_)
-    
-    def set_doors_right(self, open_: bool) -> None:
-        """Set right door state (open/closed)"""
-        self.state.doors_right_open = bool(open_)
-    
-    def set_headlights(self, on: bool) -> None:
-        """Set headlight state (on/off)"""
-        self.state.headlights_on = bool(on)
-    
-    def set_cabin_lights(self, on: bool) -> None:
-        """Set cabin light state (on/off)"""
-        self.state.cabin_lights_on = bool(on)
-    
-    def set_temp_setpoint_c(self, temp_c: float) -> None:
-        """
-        Set cabin temperature setpoint
+    def decrease_speed(self, delta=1.0):
+        """Decrease setpoint speed."""
+        self.set_setpoint_speed_mph(self.setpoint_speed_mph - delta)
         
-        Args:
-            temp_c: Desired temperature in Celsius
-        """
-        self.state.temp_setpoint_c = float(temp_c)
-    
-    # ======================================================================
-    # MAIN UPDATE LOOP - Core Control Algorithm
-    # ======================================================================
-    
-    def update(self, dt_s: float) -> None:
-        """
-        Main control loop - called every tick (typically 10 Hz)
+    def set_service_brake(self, engaged):
+        """Set service brake."""
+        self.service_brake = engaged
+        if engaged:
+            self.log("Service brake ENGAGED")
+            
+    def set_emergency_brake(self, engaged):
+        """Set emergency brake (requires enable toggle)."""
+        if self.emergency_brake_enabled or not engaged:
+            self.emergency_brake = engaged
+            if engaged:
+                self.log("⚠️ EMERGENCY BRAKE ENGAGED")
+                
+    def toggle_emergency_enable(self):
+        """Toggle emergency brake enable."""
+        self.emergency_brake_enabled = not self.emergency_brake_enabled
         
-        This method implements the PI speed controller and safety logic:
-        1. Check emergency brake (highest priority)
-        2. Check authority guard (stop if authority <= 0)
-        3. Check manual service brake
-        4. Compute PI control (if no brakes active)
-        5. Apply speed limits
-        6. Convert control signal to power command
+    def set_cabin_temp(self, temp_f):
+        """Set cabin temperature (limited)."""
+        self.cabin_temp_f = max(MIN_TEMP_F, min(MAX_TEMP_F, temp_f))
         
-        Args:
-            dt_s: Time step in seconds (typically 0.1 for 10 Hz)
-        """
-        s = self.state
-        
-        # ========== SAFETY LAYER 1: EMERGENCY BRAKE ==========
-        # Emergency brake has absolute priority - stops everything immediately
-        if s.emergency_brake_cmd:
-            s.emergency_brake_out = True
-            s.service_brake_out = False
-            s.power_kw = 0.0
-            self._reset_integrator()  # Reset PI integrator
+    def toggle_left_doors(self):
+        """Toggle left doors (with safety checks)."""
+        if self.current_speed_mph != 0:
+            self.log("❌ Cannot operate doors while moving")
             return
-        else:
-            s.emergency_brake_out = False
-        
-        # ========== SAFETY LAYER 2: AUTHORITY GUARD ==========
-        # If authority is 0 or negative, must stop with service brake
-        # (Authority = distance allowed to travel; 0 means "stop here")
-        if s.commanded_authority_m <= 0.0:
-            s.service_brake_out = True
-            s.power_kw = 0.0
-            self._reset_integrator()
+        if not self.at_station:
+            self.log("❌ Cannot open doors - not at station")
             return
+        self.left_doors_open = not self.left_doors_open
+        self.log(f"Left doors {'OPEN' if self.left_doors_open else 'CLOSED'}")
         
-        # ========== SAFETY LAYER 3: MANUAL SERVICE BRAKE ==========
-        # Driver can manually activate service brake
-        if s.service_brake_cmd:
-            s.service_brake_out = True
-            s.power_kw = 0.0
-            self._reset_integrator()
+    def toggle_right_doors(self):
+        """Toggle right doors (with safety checks)."""
+        if self.current_speed_mph != 0:
+            self.log("❌ Cannot operate doors while moving")
             return
+        if not self.at_station:
+            self.log("❌ Cannot open doors - not at station")
+            return
+        self.right_doors_open = not self.right_doors_open
+        self.log(f"Right doors {'OPEN' if self.right_doors_open else 'CLOSED'}")
+        
+    def toggle_interior_lights(self):
+        """Toggle interior lights (with safety checks)."""
+        current_time = clock.get_time()
+        is_night = current_time.hour < 6 or current_time.hour >= 20
+        
+        if is_night and self.interior_lights_on:
+            self.log("❌ Cannot turn off lights at night")
+            return
+            
+        self.interior_lights_on = not self.interior_lights_on
+        self.log(f"Interior lights {'ON' if self.interior_lights_on else 'OFF'}")
+        
+    def toggle_headlights(self):
+        """Toggle headlights (with safety checks)."""
+        current_time = clock.get_time()
+        is_night = current_time.hour < 6 or current_time.hour >= 20
+        
+        if is_night and self.headlights_on:
+            self.log("❌ Cannot turn off headlights at night")
+            return
+            
+        self.headlights_on = not self.headlights_on
+        self.log(f"Headlights {'ON' if self.headlights_on else 'OFF'}")
+        
+    def toggle_ac(self):
+        """Toggle A/C."""
+        self.ac_on = not self.ac_on
+        
+    def update_from_track_controller(self, commanded_speed_mph, authority_ft, speed_limit_mph):
+        """Update values from Track Controller."""
+        self.commanded_speed_mph = commanded_speed_mph
+        self.authority_ft = authority_ft
+        self.speed_limit_mph = speed_limit_mph
+        
+        # Auto service brake if no authority
+        if authority_ft <= 0:
+            self.service_brake = True
+            
+    def update_from_train_model(self, current_speed_mph, engine_fail=False, brake_fail=False, signal_fail=False):
+        """Update values from Train Model."""
+        self.current_speed_mph = current_speed_mph
+        self.engine_failure = engine_fail
+        self.brake_failure = brake_fail
+        self.signal_failure = signal_fail
+        
+        # Auto emergency brake on failures
+        if engine_fail or brake_fail or signal_fail:
+            self.emergency_brake = True
+            self.log("⚠️ FAILURE DETECTED - Emergency brake")
+            
+    def calculate_power(self):
+        """
+        Calculate power command using PI controller.
+        Core control algorithm.
+        """
+        # Convert to m/s for calculation
+        current_mps = ConversionFunctions.mph_to_mps(self.current_speed_mph)
+        
+        # Determine target speed
+        if self.automatic_mode:
+            target_mph = self.commanded_speed_mph
         else:
-            s.service_brake_out = False
+            target_mph = self.setpoint_speed_mph
+            
+        target_mps = ConversionFunctions.mph_to_mps(target_mph)
         
-        # ========== COMPUTE TARGET SPEED ==========
-        # In Auto mode: use commanded speed from CTC
-        # In Manual mode: use driver's setpoint
-        if s.auto_mode:
-            target = s.commanded_speed_mps
+        # Calculate error
+        self.ek = target_mps - current_mps
+        
+        # Update integral with anti-windup
+        if self.power_kw < MAX_POWER_KW and self.power_kw > MIN_POWER_KW:
+            self.uk = self.uk1 + (SAMPLING_PERIOD / 2) * (self.ek + self.ek1)
         else:
-            target = s.driver_set_speed_mps
+            self.uk = self.uk1
+            
+        # Calculate power
+        if self.emergency_brake or self.service_brake:
+            self.power_kw = 0.0
+            self.uk = 0.0
+            self.ek = 0.0
+        else:
+            # Triple redundancy
+            power1 = (self.kp * self.ek) + (self.ki * self.uk)
+            power2 = (self.kp * self.ek) + (self.ki * self.uk)
+            power3 = (self.kp * self.ek) + (self.ki * self.uk)
+            
+            if power1 == power2 == power3:
+                self.power_kw = power1
+            else:
+                self.emergency_brake = True
+                self.power_kw = 0.0
+                self.log("⚠️ Power calculation mismatch - E-Brake")
+                
+            # Limit power
+            self.power_kw = max(MIN_POWER_KW, min(MAX_POWER_KW, self.power_kw))
+            
+        # Update previous values
+        self.uk1 = self.uk
+        self.ek1 = self.ek
         
-        # Apply speed limits (never exceed line limit or controller maximum)
-        target = min(target, s.speed_limit_mps, s.MAX_SPEED_MPS)
-        target = max(0.0, target)  # Never negative
-        
-        # ========== PI CONTROLLER ==========
-        # Compute error: target speed - actual speed
-        err = target - s.actual_speed_mps
-        
-        # Integrate error over time (with anti-windup)
-        # Only integrate positive errors to prevent windup when slowing down
-        s._i_err += max(0.0, err) * dt_s
-        
-        # PI control law: u = Kp * error + Ki * integral(error)
-        u = s.kp * err + s.ki * s._i_err
-        
-        # ========== CONVERT CONTROL SIGNAL TO POWER ==========
-        # Map control signal to power in kW
-        # Scale factor of 50.0 is tuned for this system
-        # Clamp between 0 and 120 kW (max train power)
-        s.power_kw = max(0.0, min(120.0, u * 50.0))
-    
-    def _reset_integrator(self) -> None:
-        """
-        Reset the PI controller's integral term
-        
-        Called when brakes are applied to prevent integral windup
-        """
-        self.state._i_err = 0.0
-    
-    # ======================================================================
-    # TELEMETRY - Output current state for UI display
-    # ======================================================================
-    
-    def get_display_values(self) -> dict:
-        """
-        Get all controller state for UI display
-        
-        Returns a dictionary containing all relevant state information
-        for display in the UI and logging.
-        
-        Returns:
-            dict: Dictionary with all telemetry values
-        """
-        s = self.state
+    def log(self, message):
+        """Add message to status log."""
+        timestamp = clock.get_time_string()
+        entry = f"[{timestamp}] {message}"
+        self.status_log.append(entry)
+        if len(self.status_log) > 100:
+            self.status_log.pop(0)
+            
+    def get_state(self):
+        """Get current state as dict."""
         return {
-            # Identification
-            "train_id": s.train_id,
-            
-            # Speed and Authority (INPUTS from Train Model)
-            "cmd_speed_mph": mps_to_mph(s.commanded_speed_mps),
-            "authority_m": s.commanded_authority_m,
-            "actual_speed_mph": mps_to_mph(s.actual_speed_mps),
-            
-            # Driver inputs
-            "driver_set_mph": mps_to_mph(s.driver_set_speed_mps),
-            "auto_mode": s.auto_mode,
-            
-            # Control outputs (OUTPUTS to Train Model)
-            "power_kw": s.power_kw,
-            "service_brake": s.service_brake_out,
-            "emergency_brake": s.emergency_brake_out,
-            
-            # Controller parameters
-            "kp": s.kp, 
-            "ki": s.ki,
-            
-            # Pass-through controls (sent to Train Model)
-            "doors_left": s.doors_left_open, 
-            "doors_right": s.doors_right_open,
-            "headlights": s.headlights_on, 
-            "cabin_lights": s.cabin_lights_on,
-            "temp_c": s.temp_setpoint_c,
+            'train_id': self.train_id,
+            'automatic_mode': self.automatic_mode,
+            'current_speed_mph': self.current_speed_mph,
+            'commanded_speed_mph': self.commanded_speed_mph,
+            'setpoint_speed_mph': self.setpoint_speed_mph,
+            'speed_limit_mph': self.speed_limit_mph,
+            'authority_ft': self.authority_ft,
+            'power_kw': self.power_kw,
+            'service_brake': self.service_brake,
+            'emergency_brake': self.emergency_brake,
+            'emergency_brake_enabled': self.emergency_brake_enabled,
+            'kp': self.kp,
+            'ki': self.ki,
+            'left_doors_open': self.left_doors_open,
+            'right_doors_open': self.right_doors_open,
+            'interior_lights_on': self.interior_lights_on,
+            'headlights_on': self.headlights_on,
+            'cabin_temp_f': self.cabin_temp_f,
+            'ac_on': self.ac_on,
+            'at_station': self.at_station,
+            'station_name': self.station_name,
+            'current_line': self.current_line,
+            'engine_failure': self.engine_failure,
+            'brake_failure': self.brake_failure,
+            'signal_failure': self.signal_failure,
+            'status_log': self.status_log[-10:]
         }

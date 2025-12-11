@@ -1,302 +1,645 @@
-from __future__ import annotations
 """
-Train Controller Frontend - CLEANED VERSION (No Grade/Beacon)
+TrainControllerFrontend.py
+PyQt6 UI for Train Controller matching the provided screenshot
 
-This module acts as the glue between the UI and the Backend, and handles
-integration with the Train Model.
-
-DATA FLOW ARCHITECTURE:
-======================
-
-Train Model → Train Controller → Train Model
-
-The correct data flow is:
-1. Train Model provides INPUTS to Train Controller:
-   - commanded_speed (from CTC via Track Circuit)
-   - authority (from CTC via Track Circuit)  
-   - actual_speed (from tachometer)
-
-2. Train Controller computes control outputs
-
-3. Train Controller sends OUTPUTS to Train Model:
-   - power_kw
-   - service_brake
-   - emergency_brake
-   - (plus pass-through controls: doors, lights, temperature)
-
-IMPORTANT: The Train Controller does NOT push CTC commands to the Train Model.
-Instead, it RECEIVES CTC commands FROM the Train Model (which gets them from 
-Track Circuit/CTC).
-
-Grade and beacon data DO NOT flow through Train Controller. They go directly:
-Track Model → Train Model (for physics simulation and passenger information).
+Creates a UI with:
+- Driver and Engineer tabs
+- All controls and displays
+- Dark gray/beige theme matching screenshot
+- Real-time updates
 """
 
-from typing import Optional
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLabel, QPushButton, QLineEdit, QGroupBox, QTextEdit,
+                             QTabWidget, QDoubleSpinBox, QCheckBox, QSlider, QSpinBox)
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QFont
+
+# Import backend - this will handle its own universal/clock imports
+from TrainControllerBackend import TrainControllerBackend
+
+# Import ConversionFunctions (for any additional UI needs)
 try:
-    from .TrainControllerBackend import TrainControllerBackend, mph_to_mps, mps_to_mph
-except Exception:
-    from TrainControllerBackend import TrainControllerBackend, mph_to_mps, mps_to_mph
+    from universal import ConversionFunctions
+except (ImportError, ModuleNotFoundError):
+    # Use the one from Backend
+    from TrainControllerBackend import ConversionFunctions
 
-# Optional Train Model import (same-process integration)
+# Import global clock
 try:
-    from train_model_backend import TrainModelBackend  # type: ignore
-except Exception:  # running without the TM in path
-    TrainModelBackend = None  # type: ignore
+    from global_clock import clock
+except (ImportError, ModuleNotFoundError):
+    # Use the one from Backend
+    from TrainControllerBackend import clock
 
 
-class TrainControllerFrontend:
-    """
-    Frontend - Integration layer between UI, Backend, and Train Model
+class TrainControllerUI(QMainWindow):
+    """Main Train Controller UI window."""
     
-    This class handles:
-    1. Connecting to the Train Model (if available)
-    2. Pulling inputs FROM the Train Model each tick
-    3. Running the controller logic
-    4. Pushing outputs TO the Train Model
-    5. Managing demo mode when no Train Model is attached
-    
-    The key concept: Train Controller is PASSIVE - it receives data from
-    Train Model and responds with control outputs. It does NOT command
-    the Train Model what speed/authority to use.
-    """
-    
-    def __init__(self, train_id: str = "T1", train_model: Optional["TrainModelBackend"] = None) -> None:
-        """
-        Initialize the Frontend
+    def __init__(self):
+        super().__init__()
+        self.backend = TrainControllerBackend()
+        self.init_ui()
         
-        Args:
-            train_id: Unique identifier for this train
-            train_model: Optional Train Model backend for integration
-                        If None, runs in demo mode with simulated physics
-        """
-        # Create the controller backend
-        self.ctrl = TrainControllerBackend(train_id=train_id)
+        # Update timer (50ms = 20Hz)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_display)
+        self.timer.timeout.connect(self.tick_clock)
+        self.timer.start(50)
         
-        # Store reference to Train Model (may be None)
-        self.tm: Optional["TrainModelBackend"] = train_model
+    def init_ui(self):
+        """Initialize the UI."""
+        self.setWindowTitle(f"Train Controller - Train {self.backend.train_id}")
+        self.setGeometry(100, 100, 1250, 850)
         
-        # Demo mode: simulated speed when no Train Model attached
-        # This is ONLY for testing the UI without a full Train Model
-        self._demo_speed_mps = 0.0
-        self._demo_cmd_speed_mps = 0.0  # For demo mode only
-        self._demo_authority_m = 0.0     # For demo mode only
-    
-    # ======================================================================
-    # FEATURE FLAGS - For UI to adjust behavior
-    # ======================================================================
-    
-    def has_train_model(self) -> bool:
-        """Check if a Train Model is connected"""
-        return self.tm is not None
-    
-    # ======================================================================
-    # UI → CONTROLLER SETTERS (Driver/Engineer inputs)
-    # ======================================================================
-    
-    def set_auto_mode(self, enabled: bool) -> None:
-        """Set Auto/Manual mode"""
-        self.ctrl.set_auto_mode(enabled)
-    
-    def set_driver_speed_mph(self, mph: float) -> None:
-        """Set driver's manual speed setpoint (in mph)"""
-        self.ctrl.set_driver_speed(mph_to_mps(mph))
-    
-    def set_speed_limit_mph(self, mph: float) -> None:
-        """Set line speed limit (in mph)"""
-        self.ctrl.set_speed_limit(mph_to_mps(mph))
-    
-    def set_kp(self, kp: float) -> None:
-        """Set proportional gain"""
-        self.ctrl.set_kp(kp)
-    
-    def set_ki(self, ki: float) -> None:
-        """Set integral gain"""
-        self.ctrl.set_ki(ki)
-    
-    def set_service_brake(self, active: bool) -> None:
-        """Set service brake command"""
-        self.ctrl.set_service_brake(active)
-    
-    def set_emergency_brake(self, active: bool) -> None:
-        """Set emergency brake command"""
-        self.ctrl.set_emergency_brake(active)
-    
-    def set_doors_left(self, open_: bool) -> None:
-        """Set left door state"""
-        self.ctrl.set_doors_left(open_)
-    
-    def set_doors_right(self, open_: bool) -> None:
-        """Set right door state"""
-        self.ctrl.set_doors_right(open_)
-    
-    def set_headlights(self, on: bool) -> None:
-        """Set headlight state"""
-        self.ctrl.set_headlights(on)
-    
-    def set_cabin_lights(self, on: bool) -> None:
-        """Set cabin light state"""
-        self.ctrl.set_cabin_lights(on)
-    
-    def set_temp_c(self, temp_c: float) -> None:
-        """Set cabin temperature setpoint"""
-        self.ctrl.set_temp_setpoint_c(temp_c)
-    
-    # ======================================================================
-    # DEMO MODE ONLY - Simulated inputs (used when no Train Model)
-    # ======================================================================
-    
-    def set_actual_speed_mph(self, mph: float) -> None:
-        """
-        DEMO MODE ONLY: Manually set actual speed
+        # Set color scheme matching screenshot
+        self.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #4a4a4a;
+                color: #ffffff;
+                font-family: Arial;
+            }
+            QGroupBox {
+                border: 2px solid #d4af37;
+                border-radius: 5px;
+                margin-top: 10px;
+                font-weight: bold;
+                padding: 15px;
+                background-color: #5a5a5a;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                padding: 0 5px;
+                color: #d4af37;
+            }
+            QPushButton {
+                background-color: #6a6a6a;
+                border: 1px solid #888;
+                border-radius: 3px;
+                padding: 8px;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7a7a7a;
+            }
+            QPushButton:pressed {
+                background-color: #5a5a5a;
+            }
+            QPushButton#greenButton {
+                background-color: #4CAF50;
+            }
+            QPushButton#redButton {
+                background-color: #d32f2f;
+                font-size: 14pt;
+            }
+            QLineEdit {
+                background-color: #6a6a6a;
+                border: 1px solid #888;
+                border-radius: 3px;
+                padding: 5px;
+                color: white;
+            }
+            QLineEdit[readOnly="true"] {
+                background-color: #5a5a5a;
+            }
+            QTextEdit {
+                background-color: #5a5a5a;
+                border: 1px solid #888;
+                color: white;
+            }
+            QTabWidget::pane {
+                border: 1px solid #888;
+            }
+            QTabBar::tab {
+                background-color: #6a6a6a;
+                color: white;
+                padding: 10px 20px;
+                border: 1px solid #888;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background-color: #d4af37;
+                color: black;
+            }
+        """)
         
-        This is only used when no Train Model is attached, to allow
-        testing the UI. In real operation, actual speed comes from
-        the Train Model's tachometer.
+        # Central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
         
-        Args:
-            mph: Simulated actual speed in miles per hour
-        """
-        if self.tm is None:
-            self._demo_speed_mps = mph_to_mps(mph)
-            self.ctrl.set_actual_speed(self._demo_speed_mps)
-    
-    def set_demo_ctc_command(self, speed_mph: float, authority_m: float) -> None:
-        """
-        DEMO MODE ONLY: Simulate CTC commands
+        # Header with date/time and train ID
+        header = QHBoxLayout()
+        self.date_label = QLabel()
+        self.date_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: white;")
+        self.time_label = QLabel()
+        self.time_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: white;")
+        header.addWidget(self.date_label)
+        header.addStretch()
+        header.addWidget(self.time_label)
+        main_layout.addLayout(header)
         
-        In real operation, these values come FROM the Train Model
-        (which receives them from Track Circuit/CTC). This method
-        is only for testing without a Train Model.
+        # Train ID
+        train_label = QLabel(f"Train {self.backend.train_id}")
+        train_label.setStyleSheet("font-size: 16pt; font-weight: bold; color: #d4af37;")
+        main_layout.addWidget(train_label)
         
-        Args:
-            speed_mph: Simulated commanded speed
-            authority_m: Simulated authority
-        """
-        if self.tm is None:
-            self._demo_cmd_speed_mps = mph_to_mps(speed_mph)
-            self._demo_authority_m = authority_m
-            self.ctrl.set_commanded_speed(self._demo_cmd_speed_mps)
-            self.ctrl.set_commanded_authority(self._demo_authority_m)
-    
-    # ======================================================================
-    # MAIN TICK - Integration loop with Train Model
-    # ======================================================================
-    
-    def tick(self, dt_s: float) -> dict:
-        """
-        Main integration loop - called every frame (typically 10 Hz)
+        # Tabs
+        self.tabs = QTabWidget()
+        self.driver_tab = QWidget()
+        self.engineer_tab = QWidget()
+        self.tabs.addTab(self.driver_tab, "Driver")
+        self.tabs.addTab(self.engineer_tab, "Engineer")
+        main_layout.addWidget(self.tabs)
         
-        DATA FLOW WITH TRAIN MODEL:
-        1. Pull inputs FROM Train Model (commanded speed, authority, actual velocity)
-        2. Run controller update() to compute power/brake outputs
-        3. Push outputs TO Train Model (power, brakes, doors, lights, temp)
-        4. Train Model steps its physics simulation
+        self.setup_driver_tab()
+        self.setup_engineer_tab()
         
-        DATA FLOW IN DEMO MODE (no Train Model):
-        1. Use simulated inputs
-        2. Run controller update()
-        3. Run toy physics simulation to move the needle
+    def setup_driver_tab(self):
+        """Setup driver tab matching screenshot."""
+        layout = QVBoxLayout(self.driver_tab)
         
-        Args:
-            dt_s: Time step in seconds (typically 0.1 for 10 Hz)
-            
-        Returns:
-            dict: Telemetry dictionary for UI display
-        """
+        # Top row: Control Parameters + Train Speed + Right buttons
+        top = QHBoxLayout()
         
-        if self.tm is not None:
-            # ========== INTEGRATED MODE (Train Model attached) ==========
-            
-            # STEP 1: Pull inputs FROM Train Model
-            # The Train Model has received CTC commands from Track Circuit
-            # and has measured the actual train velocity
-            state = self.tm.report_state()
-            
-            # Extract speed and authority (these came from CTC via Track Circuit)
-            actual_velocity_mps = float(state.get("velocity", 0.0))
-            commanded_speed_mps = float(state.get("commanded_speed", 0.0))
-            commanded_authority_m = float(state.get("authority", 0.0))
-            
-            # Feed these inputs into the controller
-            self.ctrl.set_actual_speed(actual_velocity_mps)
-            self.ctrl.set_commanded_speed(commanded_speed_mps)
-            self.ctrl.set_commanded_authority(commanded_authority_m)
-            
-            # STEP 2: Run the controller algorithm
-            # This computes power and brake commands based on the inputs
-            self.ctrl.update(dt_s)
-            
-            # Get the computed outputs
-            outputs = self.ctrl.get_display_values()
-            
-            # STEP 3: Push outputs TO Train Model
-            # The Train Model will use these to update its physics simulation
-            # NOTE: Grade and beacon are NOT provided by Train Controller!
-            # They come directly from Track Model to Train Model.
-            # If the Train Model's set_inputs requires them, they should be
-            # passed through from Track Model or default to 0/"None".
-            
-            # Check if train model expects these parameters
-            try:
-                self.tm.set_inputs(
-                    power_kw=float(outputs["power_kw"]),
-                    service_brake=bool(outputs["service_brake"]),
-                    emergency_brake=bool(outputs["emergency_brake"]),
-                )
-            except TypeError:
-                # If set_inputs requires grade/beacon, the Train Model should
-                # get those from Track Model, not from us. This is a fallback.
-                pass
-            
-            # Also send pass-through controls (doors, lights, temperature)
-            # These go directly to the Train Model without controller logic
-            if hasattr(self.tm, 'set_doors'):
-                self.tm.set_doors(
-                    left=bool(outputs["doors_left"]),
-                    right=bool(outputs["doors_right"])
-                )
-            if hasattr(self.tm, 'set_lights'):
-                self.tm.set_lights(
-                    headlights=bool(outputs["headlights"]),
-                    cabin=bool(outputs["cabin_lights"])
-                )
-            if hasattr(self.tm, 'set_temperature'):
-                self.tm.set_temperature(float(outputs["temp_c"]))
-            
-            return outputs
+        # Control Parameters
+        ctrl_group = QGroupBox("Control Parameters")
+        ctrl_layout = QVBoxLayout()
         
+        speed_lim = QHBoxLayout()
+        speed_lim.addWidget(QLabel("Speed Limit:"))
+        self.speed_limit_disp = QLineEdit("44 MPH")
+        self.speed_limit_disp.setReadOnly(True)
+        speed_lim.addWidget(self.speed_limit_disp)
+        ctrl_layout.addLayout(speed_lim)
+        
+        cmd_spd = QHBoxLayout()
+        cmd_spd.addWidget(QLabel("Commanded Speed:"))
+        self.cmd_speed_disp = QLineEdit("0.0 MPH")
+        self.cmd_speed_disp.setReadOnly(True)
+        cmd_spd.addWidget(self.cmd_speed_disp)
+        ctrl_layout.addLayout(cmd_spd)
+        
+        auth = QHBoxLayout()
+        auth.addWidget(QLabel("Authority:"))
+        self.authority_disp = QLineEdit("0 ft")
+        self.authority_disp.setReadOnly(True)
+        auth.addWidget(self.authority_disp)
+        ctrl_layout.addLayout(auth)
+        
+        ctrl_group.setLayout(ctrl_layout)
+        top.addWidget(ctrl_group)
+        
+        # Train Speed
+        speed_group = QGroupBox("Train Speed")
+        speed_layout = QVBoxLayout()
+        
+        cur_spd = QHBoxLayout()
+        cur_spd.addWidget(QLabel("Current Measured Speed:"))
+        self.current_speed_disp = QLineEdit("0")
+        self.current_speed_disp.setReadOnly(True)
+        self.current_speed_disp.setStyleSheet("font-size: 20pt; font-weight: bold;")
+        cur_spd.addWidget(self.current_speed_disp)
+        cur_spd.addWidget(QLabel("MPH"))
+        speed_layout.addLayout(cur_spd)
+        
+        set_spd = QHBoxLayout()
+        set_spd.addWidget(QLabel("Set Speed:"))
+        self.set_speed_input = QDoubleSpinBox()
+        self.set_speed_input.setRange(0, 100)
+        self.set_speed_input.setSuffix(" MPH")
+        set_spd.addWidget(self.set_speed_input)
+        self.set_speed_btn = QPushButton("Set Speed")
+        self.set_speed_btn.clicked.connect(self.on_set_speed)
+        set_spd.addWidget(self.set_speed_btn)
+        speed_layout.addLayout(set_spd)
+        
+        spd_btns = QHBoxLayout()
+        self.spd_minus = QPushButton("-")
+        self.spd_minus.clicked.connect(lambda: self.backend.decrease_speed(1))
+        spd_btns.addWidget(self.spd_minus)
+        self.spd_plus = QPushButton("+")
+        self.spd_plus.clicked.connect(lambda: self.backend.increase_speed(1))
+        spd_btns.addWidget(self.spd_plus)
+        speed_layout.addLayout(spd_btns)
+        
+        self.mode_btn = QPushButton("Toggle Manual and Automatic")
+        self.mode_btn.clicked.connect(self.toggle_mode)
+        speed_layout.addWidget(self.mode_btn)
+        
+        speed_group.setLayout(speed_layout)
+        top.addWidget(speed_group)
+        
+        # Right side buttons
+        right_btns = QVBoxLayout()
+        
+        self.right_doors_btn = QPushButton("Right Doors\nClosed")
+        self.right_doors_btn.setObjectName("greenButton")
+        self.right_doors_btn.clicked.connect(self.backend.toggle_right_doors)
+        self.right_doors_btn.setMinimumHeight(60)
+        right_btns.addWidget(self.right_doors_btn)
+        
+        self.left_doors_btn = QPushButton("Left Doors\nClosed")
+        self.left_doors_btn.setObjectName("greenButton")
+        self.left_doors_btn.clicked.connect(self.backend.toggle_left_doors)
+        self.left_doors_btn.setMinimumHeight(60)
+        right_btns.addWidget(self.left_doors_btn)
+        
+        self.interior_lights_btn = QPushButton("Indoor Lights\nOff")
+        self.interior_lights_btn.clicked.connect(self.backend.toggle_interior_lights)
+        right_btns.addWidget(self.interior_lights_btn)
+        
+        self.headlights_btn = QPushButton("Headlights\nOn")
+        self.headlights_btn.clicked.connect(self.backend.toggle_headlights)
+        right_btns.addWidget(self.headlights_btn)
+        
+        self.ac_btn = QPushButton("A/C\nOn")
+        self.ac_btn.setObjectName("greenButton")
+        self.ac_btn.clicked.connect(self.backend.toggle_ac)
+        right_btns.addWidget(self.ac_btn)
+        
+        top.addLayout(right_btns)
+        layout.addLayout(top)
+        
+        # Middle row: Engine Commands + Route Info + Emergency/Temp
+        middle = QHBoxLayout()
+        
+        # Engine Commands
+        engine_group = QGroupBox("Engine Commands")
+        engine_layout = QVBoxLayout()
+        
+        set_spd_e = QHBoxLayout()
+        set_spd_e.addWidget(QLabel("Set Speed:"))
+        self.engine_speed_disp = QLineEdit("0 MPH")
+        self.engine_speed_disp.setReadOnly(True)
+        set_spd_e.addWidget(self.engine_speed_disp)
+        engine_layout.addLayout(set_spd_e)
+        
+        pwr = QHBoxLayout()
+        pwr.addWidget(QLabel("Output Power:"))
+        self.power_disp = QLineEdit("0 kW")
+        self.power_disp.setReadOnly(True)
+        pwr.addWidget(self.power_disp)
+        engine_layout.addLayout(pwr)
+        
+        engine_group.setLayout(engine_layout)
+        middle.addWidget(engine_group)
+        
+        # Route Info
+        route_group = QGroupBox("Route Information")
+        route_layout = QVBoxLayout()
+        
+        nxt_stn = QHBoxLayout()
+        nxt_stn.addWidget(QLabel("Next Station:"))
+        self.station_disp = QLineEdit("")
+        self.station_disp.setReadOnly(True)
+        nxt_stn.addWidget(self.station_disp)
+        route_layout.addLayout(nxt_stn)
+        
+        line = QHBoxLayout()
+        line.addWidget(QLabel("Current Train Line:"))
+        self.line_disp = QLineEdit("Green")
+        self.line_disp.setReadOnly(True)
+        line.addWidget(self.line_disp)
+        route_layout.addLayout(line)
+        
+        route_group.setLayout(route_layout)
+        middle.addWidget(route_group)
+        
+        # Emergency brake + temp
+        right_ctrl = QVBoxLayout()
+        
+        # Emergency brake
+        self.ebrake_enable = QCheckBox("Enable Emergency Brake")
+        self.ebrake_enable.stateChanged.connect(lambda: self.backend.toggle_emergency_enable())
+        right_ctrl.addWidget(self.ebrake_enable)
+        
+        self.ebrake_btn = QPushButton("Emergency Brake")
+        self.ebrake_btn.setObjectName("redButton")
+        self.ebrake_btn.setMinimumHeight(80)
+        self.ebrake_btn.clicked.connect(lambda: self.backend.set_emergency_brake(True))
+        right_ctrl.addWidget(self.ebrake_btn)
+        
+        # Service brake label
+        sbrake_lbl = QLabel("Service Brake")
+        sbrake_lbl.setStyleSheet("font-weight: bold; color: #d4af37;")
+        sbrake_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_ctrl.addWidget(sbrake_lbl)
+        
+        self.sbrake_slider = QSlider(Qt.Orientation.Vertical)
+        self.sbrake_slider.setRange(0, 100)
+        self.sbrake_slider.setValue(0)
+        self.sbrake_slider.valueChanged.connect(self.on_sbrake_change)
+        self.sbrake_slider.setMinimumHeight(100)
+        right_ctrl.addWidget(self.sbrake_slider, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        self.sbrake_label = QLabel("0% Brake")
+        self.sbrake_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_ctrl.addWidget(self.sbrake_label)
+        
+        # Temperature
+        temp_btns = QHBoxLayout()
+        self.temp_minus = QPushButton("-")
+        self.temp_minus.clicked.connect(lambda: self.backend.set_cabin_temp(self.backend.cabin_temp_f - 1))
+        temp_btns.addWidget(self.temp_minus)
+        
+        self.temp_disp = QLabel("68°F")
+        self.temp_disp.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        self.temp_disp.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        temp_btns.addWidget(self.temp_disp)
+        
+        self.temp_plus = QPushButton("+")
+        self.temp_plus.clicked.connect(lambda: self.backend.set_cabin_temp(self.backend.cabin_temp_f + 1))
+        temp_btns.addWidget(self.temp_plus)
+        right_ctrl.addLayout(temp_btns)
+        
+        self.curr_temp_lbl = QLabel("Current Car Temp: 68°F")
+        self.curr_temp_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_ctrl.addWidget(self.curr_temp_lbl)
+        
+        middle.addLayout(right_ctrl)
+        layout.addLayout(middle)
+        
+        # Bottom row: Status Log + Failures
+        bottom = QHBoxLayout()
+        
+        # Status Log
+        log_group = QGroupBox("Status Log")
+        log_layout = QVBoxLayout()
+        self.status_log = QTextEdit()
+        self.status_log.setReadOnly(True)
+        self.status_log.setMaximumHeight(150)
+        log_layout.addWidget(self.status_log)
+        log_group.setLayout(log_layout)
+        bottom.addWidget(log_group)
+        
+        # Failures
+        fail_group = QGroupBox("Failures")
+        fail_layout = QVBoxLayout()
+        
+        eng_fail = QHBoxLayout()
+        eng_fail.addWidget(QLabel("Engine Failure:"))
+        self.engine_fail_disp = QLineEdit("NONE")
+        self.engine_fail_disp.setReadOnly(True)
+        eng_fail.addWidget(self.engine_fail_disp)
+        fail_layout.addLayout(eng_fail)
+        
+        brk_fail = QHBoxLayout()
+        brk_fail.addWidget(QLabel("Brake Failure:"))
+        self.brake_fail_disp = QLineEdit("NONE")
+        self.brake_fail_disp.setReadOnly(True)
+        brk_fail.addWidget(self.brake_fail_disp)
+        fail_layout.addLayout(brk_fail)
+        
+        sig_fail = QHBoxLayout()
+        sig_fail.addWidget(QLabel("Signal Failure:"))
+        self.signal_fail_disp = QLineEdit("NONE")
+        self.signal_fail_disp.setReadOnly(True)
+        sig_fail.addWidget(self.signal_fail_disp)
+        fail_layout.addLayout(sig_fail)
+        
+        fail_group.setLayout(fail_layout)
+        bottom.addWidget(fail_group)
+        
+        layout.addLayout(bottom)
+        
+    def setup_engineer_tab(self):
+        """Setup engineer tab."""
+        layout = QVBoxLayout(self.engineer_tab)
+        
+        # PI Gains
+        gains_group = QGroupBox("PI Controller Gains")
+        gains_layout = QVBoxLayout()
+        
+        kp_row = QHBoxLayout()
+        kp_row.addWidget(QLabel("Kp (Proportional):"))
+        self.kp_input = QDoubleSpinBox()
+        self.kp_input.setRange(0, 100000)
+        self.kp_input.setValue(10000)
+        self.kp_input.setSingleStep(100)
+        kp_row.addWidget(self.kp_input)
+        gains_layout.addLayout(kp_row)
+        
+        ki_row = QHBoxLayout()
+        ki_row.addWidget(QLabel("Ki (Integral):"))
+        self.ki_input = QDoubleSpinBox()
+        self.ki_input.setRange(0, 100000)
+        self.ki_input.setValue(1000)
+        self.ki_input.setSingleStep(100)
+        ki_row.addWidget(self.ki_input)
+        gains_layout.addLayout(ki_row)
+        
+        set_gains_btn = QPushButton("Set Gains")
+        set_gains_btn.clicked.connect(self.on_set_gains)
+        gains_layout.addWidget(set_gains_btn)
+        
+        gains_group.setLayout(gains_layout)
+        layout.addWidget(gains_group)
+        
+        # Test inputs
+        test_group = QGroupBox("Test Inputs (for testing without Train Model)")
+        test_layout = QVBoxLayout()
+        
+        test_spd = QHBoxLayout()
+        test_spd.addWidget(QLabel("Simulate Current Speed (MPH):"))
+        self.test_speed = QDoubleSpinBox()
+        self.test_speed.setRange(0, 100)
+        test_spd.addWidget(self.test_speed)
+        test_spd_btn = QPushButton("Set")
+        test_spd_btn.clicked.connect(self.on_test_speed)
+        test_spd.addWidget(test_spd_btn)
+        test_layout.addLayout(test_spd)
+        
+        test_cmd = QHBoxLayout()
+        test_cmd.addWidget(QLabel("Simulate Commanded Speed (MPH):"))
+        self.test_cmd = QDoubleSpinBox()
+        self.test_cmd.setRange(0, 100)
+        test_cmd.addWidget(self.test_cmd)
+        test_cmd_btn = QPushButton("Set")
+        test_cmd_btn.clicked.connect(self.on_test_cmd)
+        test_cmd.addWidget(test_cmd_btn)
+        test_layout.addLayout(test_cmd)
+        
+        test_auth = QHBoxLayout()
+        test_auth.addWidget(QLabel("Simulate Authority (ft):"))
+        self.test_auth = QDoubleSpinBox()
+        self.test_auth.setRange(0, 10000)
+        self.test_auth.setValue(1000)
+        test_auth.addWidget(self.test_auth)
+        test_auth_btn = QPushButton("Set")
+        test_auth_btn.clicked.connect(self.on_test_auth)
+        test_auth.addWidget(test_auth_btn)
+        test_layout.addLayout(test_auth)
+        
+        self.test_station = QCheckBox("Simulate at Station")
+        self.test_station.stateChanged.connect(self.on_test_station)
+        test_layout.addWidget(self.test_station)
+        
+        fail_row = QHBoxLayout()
+        self.test_eng_fail = QCheckBox("Engine Failure")
+        self.test_eng_fail.stateChanged.connect(self.on_test_failures)
+        fail_row.addWidget(self.test_eng_fail)
+        
+        self.test_brk_fail = QCheckBox("Brake Failure")
+        self.test_brk_fail.stateChanged.connect(self.on_test_failures)
+        fail_row.addWidget(self.test_brk_fail)
+        test_layout.addLayout(fail_row)
+        
+        test_group.setLayout(test_layout)
+        layout.addWidget(test_group)
+        
+        layout.addStretch()
+        
+    def tick_clock(self):
+        """Advance the global clock."""
+        clock.tick()
+        
+    def update_display(self):
+        """Update all displays."""
+        state = self.backend.get_state()
+        
+        # Date/time
+        dt = clock.get_time()
+        self.date_label.setText(f"Date: {dt.strftime('%m/%d/%Y')}")
+        self.time_label.setText(f"Time: {dt.strftime('%I:%M:%S %p')}")
+        
+        # Control params
+        self.speed_limit_disp.setText(f"{state['speed_limit_mph']:.0f} MPH")
+        
+        if state['automatic_mode']:
+            self.cmd_speed_disp.setText(f"{state['commanded_speed_mph']:.1f} MPH")
         else:
-            # ========== DEMO MODE (No Train Model) ==========
-            # Simulate the data flow using toy physics
+            self.cmd_speed_disp.setText(f"{state['setpoint_speed_mph']:.1f} MPH")
             
-            # Use demo inputs (set by UI for testing)
-            self.ctrl.set_actual_speed(self._demo_speed_mps)
-            self.ctrl.set_commanded_speed(self._demo_cmd_speed_mps)
-            self.ctrl.set_commanded_authority(self._demo_authority_m)
+        self.authority_disp.setText(f"{state['authority_ft']:.0f} ft")
+        
+        # Speed
+        self.current_speed_disp.setText(f"{state['current_speed_mph']:.0f}")
+        self.engine_speed_disp.setText(f"{state['setpoint_speed_mph']:.0f} MPH")
+        
+        # Power
+        self.power_disp.setText(f"{state['power_kw']:.0f} kW")
+        
+        # Doors
+        self.right_doors_btn.setText(f"Right Doors\n{'Open' if state['right_doors_open'] else 'Closed'}")
+        self.left_doors_btn.setText(f"Left Doors\n{'Open' if state['left_doors_open'] else 'Closed'}")
+        
+        # Lights
+        self.interior_lights_btn.setText(f"Indoor Lights\n{'On' if state['interior_lights_on'] else 'Off'}")
+        self.headlights_btn.setText(f"Headlights\n{'On' if state['headlights_on'] else 'Off'}")
+        
+        # A/C
+        self.ac_btn.setText(f"A/C\n{'On' if state['ac_on'] else 'Off'}")
+        
+        # Temp
+        self.temp_disp.setText(f"{state['cabin_temp_f']:.0f}°F")
+        self.curr_temp_lbl.setText(f"Current Car Temp: {state['cabin_temp_f']:.0f}°F")
+        
+        # Route
+        self.station_disp.setText(state['station_name'])
+        self.line_disp.setText(state['current_line'])
+        
+        # Failures
+        self.engine_fail_disp.setText("FAILURE" if state['engine_failure'] else "NONE")
+        self.engine_fail_disp.setStyleSheet(
+            f"background-color: {'#cc0000' if state['engine_failure'] else '#5a5a5a'};"
+        )
+        
+        self.brake_fail_disp.setText("FAILURE" if state['brake_failure'] else "NONE")
+        self.brake_fail_disp.setStyleSheet(
+            f"background-color: {'#cc0000' if state['brake_failure'] else '#5a5a5a'};"
+        )
+        
+        self.signal_fail_disp.setText("FAILURE" if state['signal_failure'] else "NONE")
+        self.signal_fail_disp.setStyleSheet(
+            f"background-color: {'#cc0000' if state['signal_failure'] else '#5a5a5a'};"
+        )
+        
+        # Status log
+        log_text = "\n".join(state['status_log'])
+        if log_text != self.status_log.toPlainText():
+            self.status_log.setText(log_text)
+            self.status_log.verticalScrollBar().setValue(
+                self.status_log.verticalScrollBar().maximum()
+            )
+        
+        # Mode button
+        self.mode_btn.setText(f"Mode: {'AUTOMATIC' if state['automatic_mode'] else 'MANUAL'}")
+        
+        # Service brake slider
+        if state['service_brake']:
+            self.sbrake_slider.setValue(100)
+        else:
+            self.sbrake_slider.setValue(0)
             
-            # Run controller
-            self.ctrl.update(dt_s)
+    def on_set_speed(self):
+        """Handle set speed button."""
+        self.backend.set_setpoint_speed_mph(self.set_speed_input.value())
+        
+    def toggle_mode(self):
+        """Toggle automatic/manual mode."""
+        self.backend.set_automatic_mode(not self.backend.automatic_mode)
+        
+    def on_sbrake_change(self, value):
+        """Handle service brake slider."""
+        self.backend.set_service_brake(value > 50)
+        self.sbrake_label.setText(f"{value}% Brake")
+        
+    def on_set_gains(self):
+        """Handle set gains button."""
+        self.backend.set_kp(self.kp_input.value())
+        self.backend.set_ki(self.ki_input.value())
+        
+    def on_test_speed(self):
+        """Handle test speed input."""
+        self.backend.update_from_train_model(self.test_speed.value())
+        
+    def on_test_cmd(self):
+        """Handle test commanded speed."""
+        self.backend.update_from_track_controller(
+            self.test_cmd.value(),
+            self.backend.authority_ft,
+            self.backend.speed_limit_mph
+        )
+        
+    def on_test_auth(self):
+        """Handle test authority."""
+        self.backend.update_from_track_controller(
+            self.backend.commanded_speed_mph,
+            self.test_auth.value(),
+            self.backend.speed_limit_mph
+        )
+        
+    def on_test_station(self):
+        """Handle test station checkbox."""
+        self.backend.at_station = self.test_station.isChecked()
+        if self.backend.at_station:
+            self.backend.station_name = "Test Station"
+        else:
+            self.backend.station_name = ""
             
-            # Get outputs
-            outputs = self.ctrl.get_display_values()
-            
-            # Simple toy physics to make the speed change
-            power_kw = float(outputs.get("power_kw", 0.0))
-            eb_active = bool(outputs.get("emergency_brake", False))
-            sb_active = bool(outputs.get("service_brake", False))
-            
-            # Compute acceleration based on outputs
-            if eb_active:
-                accel = -3.0  # Hard braking
-            elif sb_active:
-                accel = -1.0  # Moderate braking
-            else:
-                accel = 0.02 * power_kw  # Power → acceleration
-            
-            # Update demo speed
-            self._demo_speed_mps = max(0.0, self._demo_speed_mps + accel * dt_s)
-            self.ctrl.set_actual_speed(self._demo_speed_mps)
-            
-            return self.ctrl.get_display_values()
+    def on_test_failures(self):
+        """Handle test failure checkboxes."""
+        self.backend.update_from_train_model(
+            self.backend.current_speed_mph,
+            self.test_eng_fail.isChecked(),
+            self.test_brk_fail.isChecked(),
+            False
+        )
+
+
+def main():
+    """Main entry point."""
+    app = QApplication(sys.argv)
+    window = TrainControllerUI()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()

@@ -684,11 +684,11 @@ class NetworkStatusUI(QWidget):
                                     item = QTableWidgetItem(display_value)
                                 elif (original_col_name == 'elevation' and 
                                       isinstance(cell_value, (int, float))):
-                                    # convert elevation from meters to yards
+                                    # convert elevation from meters to feet
                                     yards_value = (
                                         ConversionFunctions.meters_to_yards(
-                                            cell_value))
-                                    display_value = f"{yards_value:.2f} yds"
+                                            cell_value)/3)
+                                    display_value = f"{yards_value:.2f} ft"
                                     item = QTableWidgetItem(display_value)
                                 elif original_col_name == 'direction':
                                     # convert direction to user-friendly

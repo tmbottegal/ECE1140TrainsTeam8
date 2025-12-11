@@ -715,11 +715,14 @@ class TrackState:
             speed_mps = suggested_speed_mph * 0.44704
             auth_m = suggested_auth_yd * 0.9144
 
-            new_train = Train(train_id)
-            self.track_model.add_train(new_train)
-            start_block = int(start_block)
-            self.track_model.connect_train(train_id, start_block, displacement=0.0)
-            #self.track_model.connect_train(train_id, start_block, displacement=0.0, direction="FORWARD")
+            if getattr(self, "on_train_created", None):
+                self.on_train_created(train_id, self.line_name, start_block)
+            else:
+                new_train = Train(train_id)
+                self.track_model.add_train(new_train)
+                start_block = int(start_block)
+                self.track_model.connect_train(train_id, start_block, displacement=0.0)
+                #self.track_model.connect_train(train_id, start_block, displacement=0.0, direction="FORWARD")
 
 
             # ⭐ STORE DESTINATION FOR AUTHORITY LOGIC
@@ -744,9 +747,6 @@ class TrackState:
             self._train_progress[train_id] = 0.0
 
             print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed_mph} mph, {suggested_auth_yd} yd")
-
-            if getattr(self, "on_train_created", None):
-                self.on_train_created(train_id, self.line_name, start_block)
 
         except Exception as e:
             print(f"[CTC] Error dispatching train: {e}")

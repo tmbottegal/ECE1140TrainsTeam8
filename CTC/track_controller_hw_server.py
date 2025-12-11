@@ -129,21 +129,18 @@ class HardwareTrackControllerServer:
     # Message handling
     # ------------------------------------------------------------------ #
 
-    def _handle_message(self, payload: Dict[str, Any]) -> None:
-        msg_type = payload.get("type")
-        if msg_type != "wayside_status":
-            logger.warning("[HWTC-Server] Unknown message type: %r", msg_type)
-            return
-
-        line_name = payload.get("line")
-        updates = payload.get("updates") or []
-        if not isinstance(updates, list):
-            logger.warning("[HWTC-Server] Bad updates payload: %r", updates)
-            return
-
-        self._handle_wayside_status(line_name, updates)
+    def _handle_message(self, msg: Dict[str, Any]) -> None:
+        msg_type = msg.get("type")
+        logger.info("[HWTC-Server] Received message type '%s': %s", msg_type, msg)
+        if msg_type == "wayside_status":
+            self._handle_wayside_status(msg)
+        else:
+            logger.warning("[HWTC-Server] Unknown message type '%s'", msg_type)
 
     def _handle_wayside_status(self, msg: Dict[str, Any]) -> None:
+        """
+        Apply wayside status updates coming from the Pi to the correct CTC backend.
+        """
         line_name: str = msg.get("line", "Unknown Line")
         updates: List[Dict[str, Any]] = msg.get("updates", [])
 
@@ -161,12 +158,12 @@ class HardwareTrackControllerServer:
             # ----- Block occupancy -----
             if "occupied" in u and hasattr(ctc_backend, "update_block_occupancy"):
                 try:
-                    # TrackState: update_block_occupancy(line_name, block_id, occupied)
+                    # TrackState signature: (line_name, block_id, occupied)
                     ctc_backend.update_block_occupancy(line_name, block_id, bool(u["occupied"]))
                 except Exception:
                     logger.exception("[HWTC-Server] update_block_occupancy failed")
 
-            # ----- Signal state (string: 'Red', 'Yellow', 'Green') -----
+            # ----- Signal state (e.g. 'Red', 'Yellow', 'Green') -----
             if "signal_state" in u and hasattr(ctc_backend, "update_signal_state"):
                 try:
                     ctc_backend.update_signal_state(line_name, block_id, u["signal_state"])
@@ -174,7 +171,6 @@ class HardwareTrackControllerServer:
                     logger.exception("[HWTC-Server] update_signal_state failed")
 
             # ----- Switch position -----
-            # we treat block_id as the switch block id; position is 0/1 or label
             if "switch_position" in u and u["switch_position"] is not None:
                 if hasattr(ctc_backend, "update_switch_position"):
                     try:
@@ -182,13 +178,13 @@ class HardwareTrackControllerServer:
                     except Exception:
                         logger.exception("[HWTC-Server] update_switch_position failed")
 
-            # ----- Crossing status -----
+            # ----- Crossing gate status -----
             if "crossing_status" in u and u["crossing_status"] is not None:
                 if hasattr(ctc_backend, "update_crossing_status"):
                     try:
                         ctc_backend.update_crossing_status(line_name, block_id, bool(u["crossing_status"]))
                     except Exception:
-                        logger.exception("[HWTC-Server] update_crossing_status failed")
+                        logger.exception("[HWTC-Server] update_crossing_status failed") 
 
     # ------------------------------------------------------------------ #
     # Helper to handle different CTC method signatures

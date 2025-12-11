@@ -12,71 +12,141 @@ logger.addHandler(logging.NullHandler())
 class HardwareTrackControllerServer:
     """
     TCP server that listens for wayside status messages from the hardware
-    track controller running on the Raspberry Pi.
+    track controller running on the Raspberry Pi and forwards them into the
+    CTC backends (TrackState instances) running on the laptop.
 
-    We DON'T change CTC code. Instead, we call existing methods on the
-    per-line TrackState objects (one for Green, one for Red).
+    The Pi sends JSON lines that look like:
+
+        {
+            "type": "wayside_status",
+            "line": "Green Line",
+            "updates": [
+                {
+                    "block_id": 12,
+                    "occupied": true,
+                    "signal_state": "Green",
+                    "switch_position": "Straight" | "Diverging" | null,
+                    "crossing_status": "Active" | "Inactive" | true | false | null
+                },
+                ...
+            ]
+        }
     """
 
-    def __init__(self, backends_by_line: Dict[str, Any],
-                 host: str = "0.0.0.0", port: int = 6000) -> None:
-        """
-        backends_by_line: {"Green Line": TrackState(...), "Red Line": TrackState(...)}
-        """
+    def __init__(self,
+                 backends_by_line: Dict[str, Any],
+                 host: str = "0.0.0.0",
+                 port: int = 6000) -> None:
         self.backends_by_line = backends_by_line
         self.host = host
         self.port = port
+        self._server_socket: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._running = False
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
 
     def start(self) -> None:
-        thread = threading.Thread(target=self._serve, daemon=True)
-        thread.start()
+        if self._running:
+            return
+
+        self._running = True
+        self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Reuse port on restart
+        self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server_socket.bind((self.host, self.port))
+        self._server_socket.listen(5)
+
         logger.info("[HWTC-Server] Listening on %s:%d", self.host, self.port)
 
-    # ------------- internal server loop -------------
+        self._thread = threading.Thread(
+            target=self._serve_forever,
+            name="HardwareTrackControllerServer",
+            daemon=True,
+        )
+        self._thread.start()
 
-    def _serve(self) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.host, self.port))
-            s.listen()
-            while True:
-                conn, addr = s.accept()
-                threading.Thread(
-                    target=self._handle_client,
-                    args=(conn, addr),
-                    daemon=True,
-                ).start()
+    def stop(self) -> None:
+        self._running = False
+        if self._server_socket is not None:
+            try:
+                self._server_socket.close()
+            except OSError:
+                pass
+            self._server_socket = None
 
-    def _handle_client(self, conn: socket.socket, addr) -> None:
-        logger.info("[HWTC-Server] Connection from %s", addr)
-        with conn:
-            buf = b""
-            while True:
-                data = conn.recv(4096)
+    # ------------------------------------------------------------------ #
+    # Internal server loop
+    # ------------------------------------------------------------------ #
+
+    def _serve_forever(self) -> None:
+        assert self._server_socket is not None
+        while self._running:
+            try:
+                client_sock, addr = self._server_socket.accept()
+            except OSError:
+                # Socket was closed during shutdown
+                break
+
+            logger.info("[HWTC-Server] Connection from %s:%d", *addr)
+            t = threading.Thread(
+                target=self._handle_client,
+                args=(client_sock, addr),
+                daemon=True,
+            )
+            t.start()
+
+    def _handle_client(self, sock: socket.socket, addr: Any) -> None:
+        with sock:
+            buffer = b""
+            while self._running:
+                try:
+                    data = sock.recv(4096)
+                except OSError:
+                    break
                 if not data:
                     break
-                buf += data
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
+                buffer += data
+
+                # Messages are newline-delimited JSON
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         msg = json.loads(line.decode("utf-8"))
-                        self._handle_message(msg)
-                    except Exception:
-                        logger.exception("[HWTC-Server] Bad message from Pi")
+                    except json.JSONDecodeError:
+                        logger.exception("[HWTC-Server] Failed to decode JSON from %s:%d", *addr)
+                        continue
+                    self._handle_message(msg)
 
-    def _handle_message(self, msg: Dict[str, Any]) -> None:
-        msg_type = msg.get("type")
-        if msg_type == "wayside_status":
-            self._handle_wayside_status(msg)
-        else:
-            logger.warning("[HWTC-Server] Unknown message type '%s'", msg_type)
+        logger.info("[HWTC-Server] Connection closed from %s:%d", *addr)
 
-    def _handle_wayside_status(self, msg: Dict[str, Any]) -> None:
-        line_name: str = msg.get("line", "Unknown Line")
-        updates: List[Dict[str, Any]] = msg.get("updates", [])
+    # ------------------------------------------------------------------ #
+    # Message handling
+    # ------------------------------------------------------------------ #
+
+    def _handle_message(self, payload: Dict[str, Any]) -> None:
+        msg_type = payload.get("type")
+        if msg_type != "wayside_status":
+            logger.warning("[HWTC-Server] Unknown message type: %r", msg_type)
+            return
+
+        line_name = payload.get("line")
+        updates = payload.get("updates") or []
+        if not isinstance(updates, list):
+            logger.warning("[HWTC-Server] Bad updates payload: %r", updates)
+            return
+
+        self._handle_wayside_status(line_name, updates)
+
+    def _handle_wayside_status(self, line_name: str, updates: List[Dict[str, Any]]) -> None:
+        if not line_name:
+            logger.warning("[HWTC-Server] Missing line name in wayside_status")
+            return
 
         ctc_backend = self.backends_by_line.get(line_name)
         if ctc_backend is None:
@@ -87,35 +157,88 @@ class HardwareTrackControllerServer:
             block_id = u.get("block_id")
             if block_id is None:
                 continue
-            block_id = int(block_id)
+            try:
+                block_id = int(block_id)
+            except (TypeError, ValueError):
+                logger.warning("[HWTC-Server] Invalid block_id in update: %r", u)
+                continue
 
-            # Block occupancy
+            # ----------------- Occupancy -----------------
             if "occupied" in u and hasattr(ctc_backend, "update_block_occupancy"):
-                try:
-                    # Most likely signature: update_block_occupancy(block_id, occupied)
-                    ctc_backend.update_block_occupancy(block_id, bool(u["occupied"]))
-                except Exception:
-                    logger.exception("[HWTC-Server] update_block_occupancy failed")
+                occupied_raw = u["occupied"]
+                # We expect a bool from the Pi, but be defensive.
+                occupied = bool(occupied_raw)
+                self._call_ctc_method(
+                    ctc_backend,
+                    "update_block_occupancy",
+                    line_name,
+                    block_id,
+                    occupied,
+                )
 
-            # Signal state string (e.g. "Red", "Yellow", "Green")
+            # ----------------- Signal state -----------------
             if "signal_state" in u and hasattr(ctc_backend, "update_signal_state"):
-                try:
-                    ctc_backend.update_signal_state(block_id, u["signal_state"])
-                except Exception:
-                    logger.exception("[HWTC-Server] update_signal_state failed")
+                sig = u["signal_state"]
+                self._call_ctc_method(
+                    ctc_backend,
+                    "update_signal_state",
+                    line_name,
+                    block_id,
+                    sig,
+                )
 
-            # Switch position (we treat block_id as the switch's block id)
+            # ----------------- Switch position -----------------
             if "switch_position" in u and u["switch_position"] is not None:
                 if hasattr(ctc_backend, "update_switch_position"):
-                    try:
-                        ctc_backend.update_switch_position(block_id, int(u["switch_position"]))
-                    except Exception:
-                        logger.exception("[HWTC-Server] update_switch_position failed")
+                    switch_val = u["switch_position"]
+                    # Forward as-is; CTC can decide if it wants "Straight"/"Diverging"
+                    # or a boolean/int.
+                    self._call_ctc_method(
+                        ctc_backend,
+                        "update_switch_position",
+                        line_name,
+                        block_id,
+                        switch_val,
+                    )
 
-            # Crossing gate status (True/False)
+            # ----------------- Crossing status -----------------
             if "crossing_status" in u and u["crossing_status"] is not None:
                 if hasattr(ctc_backend, "update_crossing_status"):
-                    try:
-                        ctc_backend.update_crossing_status(block_id, bool(u["crossing_status"]))
-                    except Exception:
-                        logger.exception("[HWTC-Server] update_crossing_status failed")
+                    raw = u["crossing_status"]
+                    if isinstance(raw, str):
+                        closed = raw.strip().lower() in ("active", "closed", "true", "1")
+                    else:
+                        closed = bool(raw)
+                    self._call_ctc_method(
+                        ctc_backend,
+                        "update_crossing_status",
+                        line_name,
+                        block_id,
+                        closed,
+                    )
+
+    # ------------------------------------------------------------------ #
+    # Helper to handle different CTC method signatures
+    # ------------------------------------------------------------------ #
+
+    def _call_ctc_method(
+        self,
+        backend: Any,
+        method_name: str,
+        line_name: str,
+        block_id: int,
+        value: Any,
+    ) -> None:
+        func = getattr(backend, method_name, None)
+        if func is None:
+            return
+
+        try:
+            # Some backends are per-line and want (block_id, value)
+            try:
+                func(block_id, value)
+            except TypeError:
+                # Others implement a "global" interface and want (line_name, block_id, value)
+                func(line_name, block_id, value)
+        except Exception:
+            logger.exception("[HWTC-Server] %s failed", method_name)

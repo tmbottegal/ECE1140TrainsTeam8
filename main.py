@@ -36,7 +36,7 @@ from trainModel.train_model_test_ui import TrainModelTestUI
 
 # Train Controller import
 from trainControllerSW.TrainControllerBackend import TrainControllerBackend as TC_Backend
-from trainControllerSW.TrainControllerUI import TrainControllerUI
+# from trainControllerSW.TrainControllerUI import TrainControllerUI
 
 # Universal import
 from universal.universal import TrainCommand, SignalState, ConversionFunctions
@@ -68,18 +68,18 @@ if __name__ == "__main__":
         ctrl.start_live_link(poll_interval=1.0)
     #------------------------------------------------------------------------------------------------
     # track controller hw
-    hw_controllers = {
-    "Green Line": HardwareTrackControllerBackend(network1, "Green Line"),
+    # hw_controllers = {
+    # "Green Line": HardwareTrackControllerBackend(network1, "Green Line"),
     # Add Red Line if needed:
-    "Red Line": HardwareTrackControllerBackend(network2, "Red Line"),
-}
+    # "Red Line": HardwareTrackControllerBackend(network2, "Red Line"),
+# }
 
-    for ctrl in hw_controllers.values():
-        ctrl.start_live_link(1.0)
+    # for ctrl in hw_controllers.values():
+    #     ctrl.start_live_link(1.0)
 
-    hw_ui = TrackControllerHWUI(hw_controllers)
-    hw_ui.setWindowTitle("Wayside Controller – Hardware UI")
-    hw_ui.show()
+    # hw_ui = TrackControllerHWUI(hw_controllers)
+    # hw_ui.setWindowTitle("Wayside Controller – Hardware UI")
+    # hw_ui.show()
     #-----------------------------------------------------------------------------------------------
     TrackModelUI = NetworkStatusUI(network1, network2)
     TrackModelUI.show()

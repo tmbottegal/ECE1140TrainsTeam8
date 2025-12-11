@@ -26,6 +26,12 @@ class TrainCommand:
     commanded_speed: int
     authority: int
 
+@dataclass
+class BeaconData:
+    """Data structure for beacon information."""
+    next_station: str
+    previous_station: str
+
 class ConversionFunctions:
     """Holds conversion factors for various units."""
     

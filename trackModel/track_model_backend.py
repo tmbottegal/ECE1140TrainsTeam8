@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 # Local imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from universal.universal import SignalState, TrainCommand
+from universal.universal import SignalState, TrainCommand, BeaconData
 
 if TYPE_CHECKING:
     from trainModel.train_model_backend import Train
@@ -39,6 +39,7 @@ class Direction(Enum):
     FORWARD = "forward"
     BACKWARD = "backward"
     BIDIRECTIONAL = "bidirectional"
+
 
 class TrackSegment:
     """Base class for all track segments in the railway network.
@@ -93,7 +94,6 @@ class TrackSegment:
         self.previous_segment: Optional['TrackSegment'] = None
         # Flag to indicate train should enter at max displacement
         self.next_segment_reverse_entry: bool = False
-        # Flag for backward movement
         self.previous_segment_reverse_entry: bool = False
         self.network = None
         
@@ -104,7 +104,7 @@ class TrackSegment:
         self.failures: set[TrackFailureType] = set()
 
         # Beacon and track circuit information
-        self.beacon_data = ""
+        self.beacon_data: Optional['BeaconData'] = None
         self.active_command: Optional['TrainCommand'] = None
         
     def set_occupancy(self, occupied: bool) -> None:
@@ -123,9 +123,31 @@ class TrackSegment:
         """Set beacon data for this track segment.
         
         Args:
-            beacon_data: The beacon information to set.
+            beacon_data: The beacon information to set in format "[next_station];[previous_station]".
         """
-        self.beacon_data = beacon_data
+        self.beacon_data = self._parse_beacon_data(beacon_data)
+    
+    def _parse_beacon_data(self, beacon_data: str) -> Optional['BeaconData']:
+        """Parse beacon data string into BeaconData object.
+        
+        Args:
+            beacon_data: String in format "[next_station];[previous_station]" or legacy format.
+            
+        Returns:
+            BeaconData object or None if empty.
+        """
+        if not beacon_data or not beacon_data.strip():
+            return None
+            
+        # format: [next_station];[previous_station]
+        if ';' in beacon_data:
+            parts = beacon_data.split(';', 1)  # Split on first semicolon only
+            next_station = parts[0].strip() if parts[0].strip() else ""
+            previous_station = parts[1].strip() if len(parts) > 1 and parts[1].strip() else ""
+            return BeaconData(next_station=next_station, previous_station=previous_station)
+        else:
+            # legacy format (assume it's next station only)
+            return BeaconData(next_station=beacon_data.strip(), previous_station="")
         
     def set_track_failure(self, failure_type: TrackFailureType) -> None:
         """Add a failure condition (activated by Murphy).
@@ -970,7 +992,7 @@ class TrackNetwork:
         
         Args:
             block_id: ID of the block to set beacon data for.
-            beacon_data: The beacon information to set.
+            beacon_data: The beacon information to set in format "[next_station];[previous_station]".
         """
         segment = self.segments.get(block_id)
         if segment is None:

@@ -38,7 +38,7 @@ from trainModel.train_model_test_ui import TrainModelTestUI
 
 # Train Controller import
 from trainControllerSW.TrainControllerBackend import TrainControllerBackend as TC_Backend
-# from trainControllerSW.TrainControllerUI import TrainControllerUI
+from trainControllerSW.TrainControllerFrontend import TrainControllerUI as TrainControllerWindow
 
 # Universal import
 from universal.universal import TrainCommand, SignalState, ConversionFunctions
@@ -189,81 +189,112 @@ if __name__ == "__main__":
     ctc_ui.setWindowTitle("Centralized Traffic Controller")
     ctc_ui.show()
  #-----------------------------------------------------------------------------------------------
-    '''
-    # === TRAIN CONTROLLER INTEGRATION (WORKAROUND VERSION) ===
+    # === TRAIN CONTROLLER INTEGRATION ===
     print("\n" + "="*60)
-    print("INTEGRATING TRAIN CONTROLLER...")
-    print("="*60)
-    print("NOTE: Using workaround method (clock listener)")
-    print("      Ideal: Train Model calls controller in tick()")
-    print("      Current: main.py listener calls controller manually")
+    print("SETTING UP TRAIN CONTROLLER INTEGRATION")
     print("="*60)
     
-    # Create Train Controller backend
-    print("\n[1/4] Creating Train Controller backend...")
-    train_controller = TC_Backend(train_id="T1")
-    print(f"  ✓ Train Controller created")
-    print(f"    Train ID: {train_controller.state.train_id}")
-    print(f"    Kp: {train_controller.state.kp}, Ki: {train_controller.state.ki}")
-    print(f"    Initial mode: {'AUTO' if train_controller.state.auto_mode else 'MANUAL'}")
+    # Dictionary to store train controllers by train_id
+    train_controllers = {}
     
-    # Attach Train Controller to Train Model
-    print("\n[2/4] Attaching Train Controller to Train Model...")
-    train.attach_controller(train_controller)
-    print(f"  ✓ Train Controller attached")
-    
-    # Workaround: Register clock listener
-    print("\n[3/4] Setting up automatic integration (workaround)...")
-    
-    # Track last tick time for accurate dt calculation
-    train_controller_last_tick = [None]  # Use list to allow modification in closure
-    
-    def train_controller_clock_listener(current_time):
+    def create_train_with_controller(train_id: int, network: TrackNetwork, start_block_id: int) -> None:
         """
-        Workaround: Manually call controller integration every clock tick.
+        Enhanced create_train that also creates and attaches a Train Controller
+        """
+        # Create train using existing function
+        create_train(train_id, network, start_block_id)
         
-        In ideal solution, Train.tick() would call step_controller() automatically.
-        Since Train Model hasn't made that change yet, we register this listener
-        with the global clock to call step_controller() manually.
-        """
-        try:
-            # Calculate dt since last tick
-            if train_controller_last_tick[0] is None:
-                train_controller_last_tick[0] = current_time
-                return
+        line_name = network.line_name
+        train_id_str = int(train_id)
+        
+        # Get the backend from trains registry
+        train_data = trains[(line_name, train_id_str)]
+        backend = train_data["backend"]
+        train_obj = train_data["train"]
+        
+        print(f"\n[Creating Train Controller for Train {train_id_str}]")
+        
+        # Create Train Controller Backend
+        train_controller = TC_Backend(train_id=train_id_str)
+        print(f"  ✓ Train Controller backend created")
+        print(f"    Kp: {train_controller.kp}, Ki: {train_controller.ki}")
+        print(f"    Mode: {'AUTO' if train_controller.automatic_mode else 'MANUAL'}")
+        
+        # Create integration between Train Controller and Train Model
+        # We need to modify the Train's _auto_tick to call the controller
+        
+        # Store original _auto_tick
+        original_auto_tick = train_obj._auto_tick
+        
+        # Create new _auto_tick that includes controller
+        def enhanced_auto_tick(current_time):
+            """Enhanced tick that integrates Train Controller"""
+            # First run the original train model tick
+            original_auto_tick(current_time)
             
-            dt_s = (current_time - train_controller_last_tick[0]).total_seconds()
-            train_controller_last_tick[0] = current_time
+            # Now update Train Controller with current state
+            train_controller.update_from_train_model(
+                current_speed_mph=backend.velocity * backend.MPS_TO_MPH,
+                engine_fail=backend.engine_failure,
+                brake_fail=backend.brake_failure,
+                signal_fail=backend.signal_pickup_failure
+            )
             
-            # Call the controller integration (same as Train.tick() would)
-            if dt_s > 0.0:
-                train.step_controller(dt_s)
-                
-        except Exception as e:
-            import traceback
-            print(f"\n[ERROR] Train Controller integration failed:")
-            print(f"  {e}")
-            traceback.print_exc()
+            # Update from Track Controller (commanded speed and authority)
+            # Convert from m/s to MPH for controller
+            train_controller.update_from_track_controller(
+                commanded_speed_mph=backend.commanded_speed * backend.MPS_TO_MPH,
+                authority_ft=backend.authority_m * 3.28084,  # meters to feet
+                speed_limit_mph=backend.MAX_SPEED * backend.MPS_TO_MPH
+            )
+            
+            # Calculate power using PI controller
+            train_controller.calculate_power()
+            
+            # Apply controller outputs to train model
+            backend.power_kw = train_controller.power_kw
+            backend.service_brake = train_controller.service_brake
+            backend.emergency_brake = train_controller.emergency_brake
+            backend.left_doors = train_controller.left_doors_open
+            backend.right_doors = train_controller.right_doors_open
+            backend.cabin_lights = train_controller.interior_lights_on
+            backend.headlights = train_controller.headlights_on
+            backend.temperature_setpoint = (train_controller.cabin_temp_f - 32) * 5/9  # F to C
+        
+        # Replace the _auto_tick with our enhanced version
+        train_obj._auto_tick = enhanced_auto_tick
+        
+        print(f"  ✓ Train Controller integrated with Train Model tick")
+        
+        # Create Train Controller UI using the TrainControllerUI class from TrainControllerFrontend
+        train_controller_ui = TrainControllerWindow()
+        train_controller_ui.backend = train_controller  # Replace backend with our integrated one
+        train_controller_ui.setWindowTitle(f"Train Controller - Train {train_id_str} ({line_name})")
+        train_controller_ui.resize(1200, 750)
+        train_controller_ui.show()
+        
+        print(f"  ✓ Train Controller UI created and shown")
+        
+        # Store controller reference
+        train_controllers[(line_name, train_id_str)] = {
+            "backend": train_controller,
+            "ui": train_controller_ui
+        }
+        
+        print(f"[Train Controller for Train {train_id_str} ready!]")
+        print(f"  - Automatic mode: {train_controller.automatic_mode}")
+        print(f"  - Safety systems active")
+        print(f"  - UI displayed")
+        print()
     
-    # Register with global clock
-    clock.register_listener(train_controller_clock_listener)
-    print(f"  ✓ Clock listener registered")
-    print(f"  ✓ Controller will run every clock tick")
-    
-    # Create Train Controller UI
-    print("\n[4/4] Creating Train Controller UI...")
-    from trainControllerSW.TrainControllerFrontend import TrainControllerFrontend
-    train_controller_frontend = TrainControllerFrontend(train_id="T1", train_model=None)
-    train_controller_frontend.ctrl = train_controller
-    
-    train_controller_ui = TrainControllerUI(train_controller_frontend)
-    train_controller_ui.setWindowTitle("Train Controller - T1 (Green Line)")
-    train_controller_ui.resize(1200, 750)
-    train_controller_ui.show()
-    '''
+    print("Train Controller integration ready!")
+    print("Use create_train_with_controller() to create trains with controllers")
+    print("="*60)
+    print()
 
-    create_train(99, network1, 1)
-    create_train(98, network1, 3)
+    create_train_with_controller(99, network1, 1)
+    create_train_with_controller(98, network1, 3)
+
 
     app.exec()
 

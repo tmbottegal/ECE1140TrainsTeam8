@@ -1,54 +1,55 @@
-# ============================================================
-# CTC Backend (Integration-Ready Version)
-# ------------------------------------------------------------
-#    Uses the CTC’s global clock to drive time manually (no threads)
-#    Keeps suggested speed/authority alive every tick
-#   Fixes unit mismatches (imperial → metric)
-#    Fixes references to self._lines and missing block update methods
-#    Ready for integration with TrackControllerBackend + TrackModel
-# ============================================================
+"""CTC Backend — Centralized Traffic Control system.
+
+This module unifies:
+    • TrackModel (physical simulation)
+    • Software TrackController (wayside logic)
+    • Hardware TrackController (PLC-based wayside logic)
+    • Global simulation clock
+    • Schedule management
+    • UI block mirror construction
+
+The CTC drives all modules in a synchronous tick-based simulation.
+It computes safe speed/authority, dispatches trains, manages dwell,
+updates throughput, and processes wayside feedback.
+
+This file is formatted per Google Python Style Guide.
+"""
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+
 import os
 import sys
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+import csv
+from datetime import datetime, timedelta
 
+# Extend import path so CTC can load sibling packages
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------
 BLOCK_LEN_M = 50.0
-BLOCK_TRAVEL_TIME_S = 7.0    # seconds to traverse one block
-LINE_SPEED_LIMIT_MPS = BLOCK_LEN_M / BLOCK_TRAVEL_TIME_S  # ≈7.14 m/s
+BLOCK_TRAVEL_TIME_S = 7.0  # seconds to traverse one block
+LINE_SPEED_LIMIT_MPS = BLOCK_LEN_M / BLOCK_TRAVEL_TIME_S  # ≈ 7.14 m/s
 
-
-# The CTC owns the global simulation clock; every tick updates all modules.
+# ------------------------------------------------------------
+# Core dependencies
+# ------------------------------------------------------------
 from universal.global_clock import clock
 
-# The Track Model simulates the physical railway (blocks, trains, etc.)
-from trackModel.track_model_backend import TrackNetwork
-from trackModel.track_model_backend import TrackSwitch
+# Track Model
+from trackModel.track_model_backend import TrackNetwork, TrackSwitch
 
+# Train
 from trainModel.train_model_backend import Train
 
-# The Track Controller governs signals, switches, crossings, etc.
+# Track Controllers
 from trackControllerSW.track_controller_backend import TrackControllerBackend
-
-from trackControllerHW.track_controller_hw_backend import HardwareTrackControllerBackend
-
-
-# ------------------------------------------------------------
-# LINE DATA (UI definitions)
-# ------------------------------------------------------------
-
-
-#SW_RANGES = list(range(1, 63)) + list(range(122, 151))
-#HW_RANGES = list(range(63, 122))
-
-#def controller_for_block(self, block_id: int):
- #   if block_id in self.sw_ranges:
-   #     return self.track_controller
-  #  return self.track_controller_hw
-
+from trackControllerHW.track_controller_hw_backend import (
+    HardwareTrackControllerBackend,
+)
 
 
 # ------------------------------------------------------------
@@ -66,59 +67,78 @@ class Block:
     light: str
     crossing: bool
     speed_limit: float
-    length_m: float      # NEW: real block length pulled from TrackModel
-    speed_limit_mps: float  # NEW: real speed limit (m/s)
+    length_m: float     
+    speed_limit_mps: float  
 
 
     # --- helper methods for UI updates ---
     def set_occupancy(self, occupied: bool):
+        """Set the occupancy status for this block.
+
+        Args:
+            is_occupied: True if the block is occupied by a train, False otherwise.
+        """
         self.status = "occupied" if occupied else "unoccupied"
 
     def set_signal_state(self, state: str):
+        """Set the signal (light) indication for this block.
+
+        Args:
+            signal_state: The signal value (e.g., 'RED', 'GREEN').
+        """
         self.light = state
 
     def set_switch_position(self, position: str):
+        """Set the switch position text for this block.
+
+        Args:
+            switch_position: The textual switch position (e.g., 'STRAIGHT', 'DIVERGING').
+        """
         self.switch = position
 
     def set_crossing_status(self, active: bool):
+        """Set whether the level crossing is active.
+
+        Args:
+            is_active: True if the crossing is activated, False otherwise.
+        """
         self.crossing = bool(active)
 
-# ------------------------------------------------------------
-# Schedule Manager (Iteration 4 Foundation)
-# ------------------------------------------------------------
+
 class ScheduleManager:
-    """
-    Stores train schedules uploaded by the dispatcher.
-    Provides:
-        - schedule storage
-        - adding entries manually
-        - loading from CSV (empty placeholder for now)
-        - retrieving schedule for UI
-    NOTE: Does NOT handle routing, dispatching, or authority yet.
-          This is ONLY the storage layer.
+    """Manages dispatcher-uploaded train schedules.
+
+    This class stores raw schedule rows for UI display and also manages
+    expanded multi-stop route data used by the CTC for dispatching.
+    It does not compute routing, authority, or train movement — it is
+    purely a storage and parsing layer.
     """
 
     def __init__(self):
-        # List of schedule entries
-        # Each entry will be a dict:
-        # {
-        #   "train_id": "T1",
-        #   "destination": "Edgebrook",
-        #   "arrival_time": "14:35",
-        #   "line": "Green Line"
-        # }
+        """Initialize empty schedule and routing structures.
+
+        Attributes:
+            entries: List of flat schedule rows for UI display. Each entry is a
+                dict with keys: train_id, destination, arrival_time, line.
+            routes: Mapping of train_id → list of route-leg dictionaries.
+            current_leg: Mapping of train_id → index of the currently active leg.
+        """
         self.entries = []
         self.routes = {}          # train_id → list of legs
         self.current_leg = {}     # train_id → current leg index
 
 
-    # --------------------------------------------------------
-    # Add a single schedule entry (called from UI later)
-    # --------------------------------------------------------
     def add_schedule_entry(self, train_id: str, destination: str, arrival_time: str, line: str = "Green Line"):
-        """
-        Add one schedule row. No routing or dispatching yet.
-        Pure storage.
+        """Add a single schedule row for UI display.
+
+        This does not compute routing or dispatch logic; it simply stores
+        the data the dispatcher entered.
+
+        Args:
+            train_id: Identifier for the train (e.g., "T1").
+            destination: The destination station name.
+            arrival_time: The scheduled arrival time as a string (e.g., "14:35").
+            line: Name of the line this entry applies to.
         """
         entry = {
             "train_id": train_id,
@@ -128,13 +148,19 @@ class ScheduleManager:
         }
         self.entries.append(entry)
 
-    # --------------------------------------------------------
-    # Load schedule from CSV (placeholder for now)
-    # --------------------------------------------------------
+    
     def load_from_csv(self, filepath: str):
-        """
-        Accept a CSV file path and load schedule entries.
-        This is a placeholder — UI wiring will be done later.
+        """Load a basic 3-column CSV schedule file.
+
+        This method reads dispatcher-uploaded CSV files containing individual
+        schedule rows (train_id, destination, arrival_time). It does not handle
+        multi-stop route CSVs.
+
+        Args:
+            filepath: Path to the CSV file on disk.
+
+        Raises:
+            Prints an error message if the file cannot be read.
         """
         try:
             import csv
@@ -151,15 +177,29 @@ class ScheduleManager:
         except Exception as e:
             print(f"[Schedule] Failed to load CSV: {e}")
 
+
     def load_route_csv(self, filepath: str, ctc_backend):
-        """
-        Load a route CSV with multiple stops and schedule
-        ALL legs of the trip based on arrival times.
+        """Load a multi-stop route CSV and schedule all legs.
+
+        This method processes a special CSV format used for full route
+        schedules (e.g., Route A/B/C), computes dispatch times for each leg,
+        and stores them for later train dispatching by the CTC.
+
+        Args:
+            filepath: Path to the route CSV file.
+            ctc_backend: The TrackState instance used to resolve blocks,
+                compute travel times, compute suggestions, and schedule dispatches.
+
+        Behavior:
+            - Reads station names and scheduled arrival times.
+            - Converts arrival times into simulation timestamps.
+            - Computes travel and departure times for each stop-to-stop leg.
+            - Schedules the first dispatch immediately through the CTC.
+            - Stores remaining legs in self.routes for automatic movement.
+            - Adds UI-visible entries to self.entries.
         """
 
-        import csv
-        from datetime import datetime, timedelta
-
+        
         print(f"[Schedule] Loading route schedule: {filepath}")
 
         # ----- Read CSV -----
@@ -266,6 +306,15 @@ class ScheduleManager:
                     "arrival_seconds": arrival_seconds
                 })
 
+                # Add an entry for UI display
+                self.entries.append({
+                    "train_id": train_id,
+                    "destination": dest_station,
+                    "arrival_time": arrival_dt.strftime("%I:%M %p"),
+                    "line": ctc_backend.line_name
+                })
+
+
                 # first leg already dispatched above, so initialize index = 0
                 self.current_leg[train_id] = 0
 
@@ -273,29 +322,60 @@ class ScheduleManager:
 
         print(f"[Schedule] Loaded {num_stops - 1} legs for {train_id}")
 
-    # --------------------------------------------------------
-    # Retrieve entries for UI table
-    # --------------------------------------------------------
+   
     def get_schedule(self):
-        """Return list of schedule entries for UI to display."""
+        """Return schedule entries for UI display.
+
+        Returns:
+            A shallow copy of all stored schedule rows.
+        """
         return list(self.entries)
 
 # ------------------------------------------------------------
 # TrackState — the CTC backend interface
 # ------------------------------------------------------------
 class TrackState:
-    """
-    CTC’s backend interface that unifies:
-        - TrackModel (physical simulation)
-        - TrackControllerBackend (wayside control)
-    CTC manually drives simulation time each tick.
+    """Centralized Traffic Control (CTC) backend state manager.
+
+    This class unifies three major subsystems:
+
+        • TrackModel — physical simulation (blocks, movement, stations)
+        • Software TrackController — PLC-like logic for switches & signals
+        • Hardware TrackController — hardware-based controller simulation
+
+    TrackState drives the entire environment using the global simulation
+    clock. It computes suggestions (speed/authority), dispatches trains,
+    pushes block-wide commands to controllers, tracks dwell time, and
+    maintains a UI-friendly mirror of block state.
+
+    One TrackState instance corresponds to exactly one transit line
+    (e.g., "Green Line" or "Red Line").
     """
 
     def __init__(self, line_name: str = "Green Line",  network: TrackNetwork = None):
+        """Initialize full CTC backend state for a single transit line.
+
+    Args:
+        line_name: Human-readable line name ("Green Line", "Red Line").
+        network: Optional pre-built TrackNetwork. If None, the track
+            layout CSV for the line is loaded automatically.
+
+    Behavior:
+        - Loads the TrackModel (physical layout and segments).
+        - Determines which blocks belong to software vs hardware controllers.
+        - Initializes both SW and HW TrackController backends and links them
+          back to this CTC instance.
+        - Registers TrackModel as a global clock listener.
+        - Creates internal data structures for:
+            * train destinations
+            * per-train suggestions (speed, authority)
+            * dwell timing and station arrival detection
+            * UI block mirrors for the dispatcher interface
+            * schedule handling via ScheduleManager
+        - Builds the initial block table for the UI via set_line().
+    """
         self.line_name = line_name
         
-
-
         # Create and load the Track Model
         if network is not None:
             self.track_model = network
@@ -314,9 +394,7 @@ class TrackState:
                 self.section_map = self._load_section_letters()
 
                 print(f"[CTC Backend] Loaded track layout from {layout_path}")
-                # --------------------------------------------------------
-                # Determine SW / HW block ranges based on line
-                # --------------------------------------------------------
+               
                 all_blocks = sorted(self.track_model.segments.keys())
 
                 if self.line_name == "Green Line":
@@ -352,15 +430,8 @@ class TrackState:
         self.passenger_throughput_hour = 0
         self._last_throughput_reset = clock.get_time()
 
-
-        
-
         #Register Track Model as a clock listener (optional redundancy)
         clock.register_listener(self.track_model.set_time)
-
-        
-
-        
 
         #CTC operation mode
         self.mode = "manual"
@@ -387,10 +458,17 @@ class TrackState:
 
         print(f"[CTC Backend] Initialized for {self.line_name}")
 
-    # --------------------------------------------------------
-    # Mode control
-    # --------------------------------------------------------
     def set_mode(self, mode: str):
+        """Set CTC operation mode.
+
+    Args:
+        mode: Either "manual" (CTC drives all logic) or "auto"
+            (future extension for autonomous dispatch).
+
+    Raises:
+        ValueError: If mode is not one of {"manual", "auto"}.
+    """
+
         mode = mode.lower()
         if mode not in ("manual", "auto"):
             raise ValueError(f"Invalid mode '{mode}'")
@@ -398,9 +476,29 @@ class TrackState:
         print(f"[CTC Backend] Mode set to {mode.upper()}")
    
     def compute_suggestions(self, start_block: int, dest_block: int):
-        """
-        Compute suggested speed (m/s) and total authority (m) using the REAL graph path,
-        not block-number ranges.
+        """Compute safe suggested speed and authority between two blocks.
+
+        This method uses the actual graph connectivity of the TrackModel,
+        not simplistic block ranges. The returned suggestion is conservative
+        and based on:
+
+            • Real block lengths
+            • TrackModel speed limits
+            • Beacon timing (if present)
+            • Lowest safe speed along the chosen path
+
+        Args:
+            start_block: Block where the train currently resides.
+            dest_block: Block that the train is authorized to reach.
+
+        Returns:
+            Tuple (speed_mps, authority_m):
+                speed_mps: Suggested speed in meters/second.
+                authority_m: Total movement authority in meters.
+
+        Notes:
+            Falls back to default speed and 50 m authority if no valid path
+            exists or blocks are missing.
         """
 
         tm = self.track_model.segments
@@ -460,17 +558,39 @@ class TrackState:
         return suggested_speed_mps, total_authority_m
 
     def controller_for_block(self, block_id: int):
+        """Return which controller (SW or HW) governs the given block.
+
+        Args:
+            block_id: Numeric block identifier.
+
+        Returns:
+            TrackControllerBackend or HardwareTrackControllerBackend,
+            depending on whether the block belongs to software-controlled
+            or hardware-controlled territory.
+        """
+
         if block_id in self.sw_ranges:
             return self.track_controller
         return self.track_controller_hw
 
     def compute_travel_time(self, start_block: int, dest_block: int) -> float:
-        """
-        Returns total travel time in seconds using:
-        - real track lengths
-        - safe speed from compute_suggestions()
-        - dwell time (30s per station block reached, including destination)
-        """
+       
+        """Estimate total travel time between two blocks.
+
+            Travel time is computed using:
+                • Real movement authority from compute_suggestions()
+                • Safe speed along the entire path
+                • Dwell time at station blocks (30 seconds each)
+                • Actual connected path through the TrackModel graph
+
+            Args:
+                start_block: Starting block number.
+                dest_block: Destination block number.
+
+            Returns:
+                Total travel time in seconds. Returns infinity if speed is zero.
+            """
+
         # Get speed + movement authority
         speed_mps, authority_m = self.compute_suggestions(start_block, dest_block)
 
@@ -508,13 +628,26 @@ class TrackState:
         # -----------------------------
         return moving_time_s + dwell_time_s
 
-
-
     def find_path(self, start_block: int, dest_block: int) -> List[int]:
-        """Return the actual connected block path using the track model graph."""
+        """Return a valid block-to-block path using BFS on the track graph.
+
+    This pathfinder consults the TrackModel’s directional connections
+    (next, previous, and diverging segments). It resolves special cases:
+
+        • Block 0 is treated as the Yard and remapped automatically.
+        • Avoids re-introducing block 0 into the graph.
+        • Handles switches by adding diverging paths to the BFS queue.
+
+    Args:
+        start_block: Block where the train begins.
+        dest_block: Block the train is trying to reach.
+
+    Returns:
+        A list of block IDs forming a valid path, or an empty list if
+        no route exists.
+    """
         from collections import deque
-        # 🔥 Fix TrackModel bug: block 0 is actually Yard (63)
-        # 🔥 Dynamically find the Yard block for this line
+        
         yard_block = None
         for b, seg in self.track_model.segments.items():
             if hasattr(seg, "station_name") and seg.station_name and seg.station_name.lower() == "yard":
@@ -576,9 +709,22 @@ class TrackState:
 
     def schedule_manual_dispatch(self, train_id, start_block, dest_block,
                                 departure_seconds, speed_mph, auth_yd):
-        """
-        Store a scheduled manual dispatch to execute later when the time comes.
-        """
+        """Queue a manual train dispatch for execution at a future simulation time.
+
+    This method does not spawn a train immediately. Instead, it stores all
+    parameters required for dispatch and waits until the global simulation
+    clock reaches `departure_seconds`. At that moment, the dispatch is
+    executed inside tick_all_modules().
+
+    Args:
+        train_id: Unique train identifier to be dispatched.
+        start_block: Block ID where the train will spawn.
+        dest_block: Block ID the train is initially authorized to travel toward.
+        departure_seconds: Simulation time (seconds since midnight) when the
+            dispatch should occur.
+        speed_mph: Initial suggested speed in miles per hour.
+        auth_yd: Initial suggested authority in yards.
+    """
         entry = {
             "train_id": train_id,
             "start_block": start_block,
@@ -593,7 +739,16 @@ class TrackState:
         print(f"[CTC] Scheduled dispatch added → {train_id} at {departure_seconds}s")
 
     def _load_section_letters(self):
-        """Load section letters (A, B, C…) from the CSV file's 'name' column."""
+        """Load section letters (A, B, C, ...) from the track layout CSV.
+
+        The CSV’s `name` column encodes a block's section using prefixes such as
+        "A1", "B4", "C12". This method extracts the alphabetical portion and maps
+        it to each block ID, allowing the UI to display section letters.
+
+        Returns:
+            A dict mapping block_id (int) → section letter(s) (str).
+        """
+
         section_map = {}
 
         # Path to the same CSV TrackNetwork loads
@@ -621,47 +776,41 @@ class TrackState:
 
         return section_map
 
-    # --------------------------------------------------------
-    # Line + block table setup for UI
-    # --------------------------------------------------------
     def set_line(self, name: str):
-        """
-        Build the UI block table *directly from the TrackNetwork*.
-        No more LINE_DATA / tuples.
-        """
+        """Build or rebuild the UI-facing block table for the selected line.
+
+    This constructs a list of Block objects that mirrors the TrackModel
+    segments, enriching them with UI-friendly data such as:
+
+        • Section letter
+        • Station name and platform side
+        • Switch or crossing indication
+        • Speed limits (converted for UI display)
+        • Occupancy and status fields
+
+    The result is stored in self._lines[name] and indexed for fast lookup.
+
+    Args:
+        name: Name of the transit line being activated.
+    """
         self.line_name = name
         blocks: List[Block] = []
 
         for block_id, segment in self.track_model.segments.items():
-
-            # SECTION LETTER -----------------------------------------------------
-            # Extract leading letters from the CSV 'name' convention:  A1, B4, C12...
-            # TrackNetwork does not store the block name directly -> infer section:
-            # We assume the "name" column prefix was SectionLetter(s)+block_id.
-            # If block_id = 12 and CSV name was "C12", section = "C".
-            # We recover this by checking TrackModel's ordering or fallback.
-            #section = "".join([c for c in str(segment.__class__.__name__) if c.isalpha()])[:1]
+           
             section = self.section_map.get(block_id, "")
 
-            # If you later store full block names in TrackNetwork, update here.
-
-            # STATION INFO -------------------------------------------------------
             station = getattr(segment, "station_name", "")
             station_side = getattr(segment, "station_side", "")
 
-            # SWITCH INFO --------------------------------------------------------
             switch_text = "Switch" if segment.__class__.__name__ == "TrackSwitch" else ""
 
-            # SIGNAL -------------------------------------------------------------
             #signal_state = getattr(segment, "signal_state", "")
             
-            # CROSSING -----------------------------------------------------------
             crossing = segment.__class__.__name__ == "LevelCrossing"
 
-            # SPEED LIMIT DISPLAY (mph) -----------------------------------------
             speed_limit_mph = segment.speed_limit * 2.237  # convert m/s → mph
 
-            # BUILD BLOCK --------------------------------------------------------
             blocks.append(
                 Block(
                     line=name,
@@ -673,15 +822,14 @@ class TrackState:
                     switch=switch_text,
                     light="",
                     crossing=crossing,
-                    speed_limit=speed_limit_mph,    # UI shows mph
-                    length_m=segment.length,         # backend real values
+                    speed_limit=speed_limit_mph,    
+                    length_m=segment.length,         
                     speed_limit_mps=segment.speed_limit,
                 )
             )
 
-        # Sort based on numeric block order for UI
         blocks.sort(key=lambda b: b.block_id)
-        # ⭐ Ensure Yard (block 0) exists in UI list
+       
         if 0 not in [b.block_id for b in blocks]:
             blocks.insert(0, Block(
                 line=name, section="", block_id=0, status="unoccupied",
@@ -693,44 +841,52 @@ class TrackState:
         self._rebuild_index()
 
     def _rebuild_index(self):
-        """Rebuilds quick block lookup by section+ID."""
+        """Rebuild the lookup table mapping section+block_id → Block.
+
+        This supports fast UI interaction by allowing blocks to be retrieved
+        through composite keys like "A12" or "C7".
+        """    
+
         self._by_key.clear()
         for b in self._lines[self.line_name]:
             self._by_key[f"{b.section}{b.block_id}"] = b
 
     def get_blocks(self) -> List[Block]:
+        """Return the full list of UI block objects for the active line.
+
+        Returns:
+            A list of Block instances corresponding to one line’s track layout.
+        """
+
         return self._lines.get(self.line_name, [])
 
-    # --------------------------------------------------------
-    # Train dispatching
-    # --------------------------------------------------------
     def dispatch_train(self, train_id: int, start_block: int, dest_block: int,
                     suggested_speed_mph: float, suggested_auth_yd: float):
-        """
-        Dispatcher adds a train manually to TrackModel, with an initial
-        suggested speed/authority sent to Track Controller.
-        """
+        """Spawn a train into the TrackModel and send initial suggestions.
+
+    This method is called when the dispatcher manually deploys a train.
+    It creates a Train object, connects it to the TrackModel, sends the
+    initial speed/authority to both SW and HW controllers, and records the
+    train’s destination for later authority logic.
+
+    Args:
+        train_id: Unique numeric identifier for the train.
+        start_block: Block ID where the train should spawn.
+        dest_block: Destination block that determines authority pathing.
+        suggested_speed_mph: Initial suggested speed (mph) from UI or schedule.
+        suggested_auth_yd: Initial suggested authority (yards).
+    """
         try:
-            # Convert to metric for simulation
+          
             speed_mps = suggested_speed_mph * 0.44704
             auth_m = suggested_auth_yd * 0.9144
 
-            if getattr(self, "on_train_created", None):
-                self.on_train_created(train_id, self.line_name, start_block)
-            else:
-                new_train = Train(train_id)
-                self.track_model.add_train(new_train)
-                start_block = int(start_block)
-                self.track_model.connect_train(train_id, start_block, displacement=0.0)
-                #self.track_model.connect_train(train_id, start_block, displacement=0.0, direction="FORWARD")
+            new_train = Train(train_id)
+            self.track_model.add_train(new_train)
+            start_block = int(start_block)
+            self.track_model.connect_train(train_id, start_block, displacement=0.0)
 
-
-            # ⭐ STORE DESTINATION FOR AUTHORITY LOGIC
             self._train_destinations[train_id] = dest_block
-
-            # Send to Track Controller (in metric!)
-            #self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
-            #self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
 
             #controller = self.controller_for_block(start_block, self.track_controller, self.track_controller_hw)
             #controller = self.controller_for_block(start_block)
@@ -738,24 +894,35 @@ class TrackState:
             self.track_controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
             self.track_controller_hw.receive_ctc_suggestion(start_block, speed_mps, auth_m)
 
-
-            #controller.receive_ctc_suggestion(start_block, speed_mps, auth_m)
-
-
             # Save for per-tick resend
             self._train_suggestions[train_id] = (speed_mps, auth_m)
             self._train_progress[train_id] = 0.0
 
-            print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed_mph} mph, {suggested_auth_yd} yd")
+            # print(f"[CTC] Dispatched {train_id} → Block {start_block}: {suggested_speed_mph} mph, {suggested_auth_yd} yd")
+
+            if getattr(self, "on_train_created", None):
+                self.on_train_created(train_id, self.line_name, start_block)
 
         except Exception as e:
             print(f"[CTC] Error dispatching train: {e}")
 
-
-    # --------------------------------------------------------
-    # Maintenance control
-    # --------------------------------------------------------
     def set_block_closed(self, block_id: int, closed: bool):
+        """Toggle maintenance mode for a single block.
+
+    When a block is closed:
+        • The TrackModel flags it as unusable.
+        • UI status is updated to "closed".
+        • Trains approaching the block receive zero speed/authority.
+
+    When a block is reopened:
+        • TrackModel clears the closed flag.
+        • UI status returns to "unoccupied".
+        • Any train waiting before the block receives new safe suggestions.
+
+    Args:
+        block_id: Block number to open/close.
+        closed: True to close the block; False to reopen it.
+    """
         try:
             if closed:
                 self.track_model.close_block(block_id)
@@ -766,7 +933,7 @@ class TrackState:
             for b in self._lines[self.line_name]:
                 if b.block_id == block_id:
                     b.status = "closed" if closed else "unoccupied"
-            print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
+            #print(f"[CTC] Block {block_id} {'closed' if closed else 'opened'}.")
         except Exception as e:
             print(f"[CTC] Maintenance toggle failed: {e}")
             # NEW: When block is reopened, recalc pending train suggestions
@@ -802,11 +969,18 @@ class TrackState:
 
                     print(f"[CTC] Block {block_id} reopened — resumed movement for train {train_id}")
 
-
-    # --------------------------------------------------------
-    # Status accessors for UI
-    # --------------------------------------------------------
     def get_network_status(self) -> Dict:
+        """Return combined system status for UI or debugging.
+
+    Returns:
+        A dictionary containing:
+            - "track_model": Current physical state snapshot from TrackModel.
+            - "track_controller": Software controller state (signals, switches, etc.)
+
+    Notes:
+        Hardware controller status may be added later. If any subsystem
+        fails during status generation, an empty dict is returned.
+    """
         try:
             return {
                 "track_model": self.track_model.get_network_status(),
@@ -818,7 +992,18 @@ class TrackState:
             return {}
 
     def get_trains(self) -> List[Dict]:
-        """Returns all active trains with current block + command data."""
+        """Return active train states, including block and CTC suggestions.
+
+    For each train in the TrackModel, this returns:
+        - train_id
+        - current block ID
+        - suggested speed (m/s)
+        - suggested authority (m)
+        - line name
+
+    Returns:
+        A list of dictionaries, one per train.
+    """
         trains_data = []
 
         for train_id, train in self.track_model.trains.items():
@@ -837,10 +1022,21 @@ class TrackState:
 
         return trains_data
 
-    # --------------------------------------------------------
-    # Wayside status callbacks (Track Controller → CTC)
-    # --------------------------------------------------------
     def receive_wayside_status(self, line_name, status_updates, source=None):
+        """Process periodic status updates from SW or HW TrackControllers.
+
+    The controllers send block occupancy, signal states, switch positions,
+    and crossing activations. TrackState filters the updates so that:
+
+        - SW reports are ignored for HW-only territory.
+        - HW reports are ignored for SW-only territory.
+
+    Args:
+        line_name: Name of line sending the update (should match this TrackState).
+        status_updates: List of PLC/wayside status objects.
+        source: Optional indicator ("SW" or "HW") specifying which controller
+            generated the update.
+    """
         for update in status_updates:
             bid = update.block_id
 
@@ -860,29 +1056,64 @@ class TrackState:
             if update.crossing_status is not None:
                 self.update_crossing_status(line_name, bid, update.crossing_status)
 
-    # --------------------------------------------------------
-    # Throughput accessor for UI
-    # --------------------------------------------------------
     def get_throughput_per_hour(self):
+        """Return hourly passenger throughput for UI display.
+
+    Throughput is computed from passengers boarded (or exited) at stations
+    and updated internally each tick.
+
+    Returns:
+        Integer count of passengers processed in the last hour.
+    """
         return self.passenger_throughput_hour
-
-
+  
     def update_block_occupancy(self, line_name, block_id, occupied):
-        if line_name in self._lines:
-            for b in self._lines[line_name]:
-                if b.block_id == block_id:
-                    b.set_occupancy(occupied)
-                    print(f"[CTC] {line_name} Block {block_id} occupancy → {occupied}")
-                    return
+        """Apply occupancy changes reported by wayside controllers.
+
+        Updates the TrackModel block state as well as the UI-facing mirrored
+        Block object. Occupancy updates for other lines are ignored because
+        a TrackState instance manages exactly one line.
+
+        Args:
+            line_name: Name of line sending the update.
+            block_id: Block whose occupancy has changed.
+            occupied: Boolean indicating whether the block is occupied.
+        """
+        if line_name != self.line_name:
+            return
+
+        try:
+            block = self.track_model.get_block(block_id)
+        except Exception:
+            return
+
+        block.occupied = occupied
+
+        if block_id in self._by_key:
+            self._by_key[block_id].occupied = occupied
+
+        # Save last occupancy (for dwell timing etc.)
+        self._last_block_occupancy[block_id] = occupied
 
     def update_signal_state(self, line_name, block_id, signal_state):
-        print(f"[CTC DEBUG] GOT SIGNAL UPDATE: block={block_id}, state={signal_state}")
+        """Apply signal state updates for switch blocks.
 
-        # Convert enum → string
+            Args:
+                line_name: Name of the line sending the update.
+                block_id: Block ID whose signal state changed.
+                signal_state: Enum or string representing current signal state.
+
+            Notes:
+                - Non-switch blocks ignore signal updates.
+                - "N/A" or missing states default to RED.
+                - TrackState does not push signal changes to the UI here; this is
+                reserved for switch logic handled in TrackController.
+            """
+        
         if hasattr(signal_state, "name"):
             signal_state = signal_state.name
 
-        # TrackController sends "N/A" when no PLC logic exists
+        
         if not signal_state or signal_state == "N/A":
             signal_state = "RED"   # default to RED
 
@@ -891,18 +1122,28 @@ class TrackState:
         if not isinstance(tm_seg, TrackSwitch):
             return  # ignore signal update for non-switch blocks
 
-
-
-
     def update_switch_position(self, line_name, block_id, position):
-        if line_name in self._lines:
+        """Update the UI-facing switch position for the specified block.
+
+    Args:
+        line_name: Name of the line sending updates.
+        block_id: Block containing a switch.
+        position: String or numeric switch position ("0", "1", etc.).
+    """
+        if line_name == self.line_name:
+
             for b in self._lines[line_name]:
                 if b.block_id == block_id:
                     b.set_switch_position(position)
-                    print(f"[CTC] {line_name} Switch {block_id} position → {position}")
                     return
 
     def _update_throughput(self):
+        """Recalculate passenger throughput from station-level counts.
+
+    The total passengers boarded (or exited) across all station segments
+    is summed once per tick. This value is presented as the hourly passenger
+    throughput metric in the UI.
+    """
         total_passengers = 0
 
         # count boardings OR exits at all stations
@@ -916,15 +1157,35 @@ class TrackState:
         self.passenger_throughput_hour = total_passengers
 
     def update_crossing_status(self, line_name, block_id, status):
-        if line_name in self._lines:
+        """Update UI mirror of level crossing activation.
+
+        Args:
+            line_name: Line reporting the status change.
+            block_id: Block ID of the crossing.
+            status: Boolean indicating whether the crossing is active.
+        """
+        if line_name == self.line_name:
+
             for b in self._lines[line_name]:
                 if b.block_id == block_id:
                     b.set_crossing_status(status)
-                    print(f"[CTC] {line_name} Crossing {block_id} → {status}")
                     return
 
     def station_to_block(self, station_name: str):
-        # Normalize common typos and variations
+        """Resolve a station name into a corresponding block ID.
+
+    Performs:
+        - Normalization of punctuation/spaces.
+        - Alias mapping for user typos and alternative spellings.
+        - Dynamic lookup of the Yard block.
+        - Search of all TrackModel segments for a match.
+
+    Args:
+        station_name: Human-readable station name entered by UI or CSV.
+
+    Returns:
+        The integer block ID where the station exists, or None if not found.
+    """
         normalized = station_name.lower().replace(".", "").replace(" ", "")
 
         ALIASES = {
@@ -939,7 +1200,6 @@ class TrackState:
             "inglewood": "Inglewood"
         }
 
-
         # Replace with canonical map spelling if needed
         if normalized in ALIASES:
             station_name = ALIASES[normalized]
@@ -949,11 +1209,8 @@ class TrackState:
             for block, seg in self.track_model.segments.items():
                 if hasattr(seg, "station_name") and seg.station_name and seg.station_name.lower() == "yard":
                     return block
-            # no yard found
             return None
 
-
-        # Search all station segments in the track model
         for block, seg in self.track_model.segments.items():
             if hasattr(seg, "station_name"):
                 if seg.station_name.lower().replace(" ", "") == station_name.lower().replace(" ", ""):
@@ -967,18 +1224,25 @@ class TrackState:
       # --------------------------------------------------------
     
     def push_full_block_suggestions(self):
-        """
-        For EVERY block in the line, send suggested speed/authority.
-        Blocks not in the path get (0,0).
-        The block containing a train gets its current suggestions.
-        """
+        """Broadcast suggested speed/authority to every block in the line.
+
+    Behavior:
+        - Blocks not containing a train receive (0, 0).
+        - Each train’s current block receives its current suggestion.
+        - Both SW and HW TrackControllers receive commands for all blocks.
+
+    Purpose:
+        Ensures all wayside controllers always maintain a complete,
+        synchronized view of CTC authority and speed commands.
+    """
+
         line_blocks = sorted(self.track_model.segments.keys())
 
-        # Build a per-block table initialized to zero
+        
         speed_map = {bid: 0.0 for bid in line_blocks}
         auth_map  = {bid: 0.0 for bid in line_blocks}
 
-        # For each train, fill in its CURRENT block values
+        
         for train_id, (speed, auth) in self._train_suggestions.items():
             train = self.track_model.trains.get(train_id)
             if not train or not train.current_segment:
@@ -987,22 +1251,50 @@ class TrackState:
             speed_map[block] = speed
             auth_map[block] = auth
 
-        # SEND ALL BLOCKS TO BOTH CONTROLLERS
+        
         for bid in line_blocks:
             self.track_controller.receive_ctc_suggestion(bid, speed_map[bid], auth_map[bid])
             self.track_controller_hw.receive_ctc_suggestion(bid, speed_map[bid], auth_map[bid])
 
-    # Manual tick: CTC drives time for all subsystems
-    # --------------------------------------------------------
     def tick_all_modules(self):
-        """
-        Advances simulation by one global clock tick.
-        CTC manually synchronizes Track Model + Track Controller.
-        """
+        """Advance the entire CTC system by one simulation tick.
 
-        # ----------------------------------------------------------
-        # 0. CHECK SCHEDULED DISPATCHES *BEFORE* CLOCK TICKS
-        # ----------------------------------------------------------
+        The global clock is manually advanced by the CTC, and this method
+        synchronizes all major subsystems in the correct order:
+
+        1. Process scheduled dispatches:
+            - Trains whose departure time has arrived are spawned.
+
+        2. Advance the global simulation clock:
+            - Compute delta time since last tick.
+
+        3. Update TrackModel:
+            - Movement, block transitions, dwell timers, physics updates.
+
+        4. Update wayside controllers:
+            - SW controller: polls TrackModel and pushes status to CTC.
+            - HW controller: same behavior with hardware logic.
+
+        5. Sync UI block occupancy:
+            - TrackModel → UI mirror.
+
+        6. Update passenger throughput.
+
+        7. Manual mode train control:
+            - Apply dwell logic at station arrivals.
+            - Detect end-of-leg for scheduled routes.
+            - Compute fresh suggestions after dwell.
+            - Stop trains approaching closed blocks.
+            - Reduce authority every tick based on movement.
+            - Send updated suggestions to controllers.
+            - Push full-block suggestions for system-wide consistency.
+
+        Notes:
+            This loop is the heartbeat of the entire CTC simulation.
+            Every subsystem depends on this method being called once per
+            frame/tick in the UI.
+        """
+            
         current_seconds = clock.get_seconds_since_midnight()
 
         to_dispatch = []
@@ -1010,7 +1302,6 @@ class TrackState:
             if current_seconds >= entry["departure_seconds"]:
                 to_dispatch.append(entry)
 
-        # Perform dispatches at exact simulation time
         for entry in to_dispatch:
             print(f"[CTC] Executing scheduled dispatch → {entry['train_id']}")
             self.dispatch_train(
@@ -1022,9 +1313,7 @@ class TrackState:
             )
             self._pending_dispatches.remove(entry)
 
-        # ----------------------------------------------------------
-        # 1. NOW tick the clock
-        # ----------------------------------------------------------
+       
         if not hasattr(self, "_last_time"):
             self._last_time = clock.get_time()
 
@@ -1033,20 +1322,13 @@ class TrackState:
         self._last_time = current_time
 
         delta_s = (current_time - prev_time).total_seconds()
-        # print(f"DEBUG: delta_s = {delta_s}")
-
-        # ----------------------------------------------------------
-        # 2. Update Track Model
-        # ----------------------------------------------------------
+       
         try:
             self.track_model.set_time(current_time)
         except Exception as e:
             print(f"[CTC] Track Model set_time error: {e}")
 
-        # ----------------------------------------------------------
-        # 3. Update Track Controller
-        # ----------------------------------------------------------
-        # SW Track Controller has no tick() method — manually poll it
+      
         try:
             self.track_controller._poll_track_model()
             self.track_controller._send_status_to_ctc()
@@ -1059,9 +1341,7 @@ class TrackState:
         except Exception as e:
             print("[CTC] HW Controller manual poll error:", e)
 
-        # ----------------------------------------------------------
-        # 4. Sync occupancy
-        # ----------------------------------------------------------
+       
         try:
             blocks = self._lines[self.line_name]
             for ui_block in blocks:
@@ -1081,9 +1361,7 @@ class TrackState:
         if self.mode == "manual":
             for train_id, (speed_mps, auth_m) in list(self._train_suggestions.items()):
 
-                # -------------------------
-                # REQUIRED: get train + segment
-                # -------------------------
+               
                 train = self.track_model.trains.get(train_id)
                 if not train or not train.current_segment:
                     continue
@@ -1092,25 +1370,18 @@ class TrackState:
                 block = seg.block_id
                 current_seconds = clock.get_seconds_since_midnight()
 
-                # Track last block for station arrival detection
                 if train_id not in self._last_block:
                     self._last_block[train_id] = block
 
-                # -------------------------------
-                # 1. IF TRAIN IS CURRENTLY DWELLING
-                # -------------------------------
+                
                 if train_id in self._dwell_end:
                     if current_seconds < self._dwell_end[train_id]:
-                        #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                        #controller = self.controller_for_block(block)
-
+                        
                         #self.track_controller.receive_ctc_suggestion(block, speed_mps, auth_m)
                         #self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, auth_m)
                         self.track_controller.receive_ctc_suggestion(block, 0.0, 0.0)
                         self.track_controller_hw.receive_ctc_suggestion(block, 0.0, 0.0)
 
-
-                        #controller.receive_ctc_suggestion(block, 0.0, 0.0)
                         self._train_suggestions[train_id] = (0.0, 0.0)
                         print(f"[DWELL] Train {train_id} dwelling at station block {block} "
                             f"for {int(self._dwell_end[train_id] - current_seconds)} more seconds")
@@ -1118,29 +1389,22 @@ class TrackState:
                     else:
                         print(f"[DWELL] Train {train_id} completed dwell at block {block}")
                         del self._dwell_end[train_id]
-                        # -------------------------------------------------------
-                        # CHECK IF TRAIN HAS FINISHED A SCHEDULED LEG
-                        # -------------------------------------------------------
+                       
                         if train_id in self.schedule.current_leg:
 
                             leg_index = self.schedule.current_leg[train_id]
                             if train_id in self.schedule.routes and leg_index < len(self.schedule.routes[train_id]):
 
                                 current_leg = self.schedule.routes[train_id][leg_index]
-
-                                # Did the train reach the destination block of this leg?
+                               
                                 if block == current_leg["to_block"]:
                                     print(f"[SCHEDULE] Train {train_id} finished leg {leg_index}")
-
-                                    # Move to the next leg
                                     next_index = leg_index + 1
                                     self.schedule.current_leg[train_id] = next_index
-
-                                    # If more legs remain → dispatch next immediately (Option A)
+                                   
                                     if next_index < len(self.schedule.routes[train_id]):
                                         next_leg = self.schedule.routes[train_id][next_index]
 
-                                        # Compute fresh suggestions for next leg
                                         spd, auth = self.compute_suggestions(
                                             next_leg["from_block"],
                                             next_leg["to_block"]
@@ -1148,14 +1412,13 @@ class TrackState:
                                         spd_mph = spd * 2.23693629
                                         auth_yd = auth / 0.9144
 
-                                        # Immediate dispatch (Option A)
                                         now_sec = clock.get_seconds_since_midnight()
 
                                         self.schedule_manual_dispatch(
                                             train_id,
                                             next_leg["from_block"],
                                             next_leg["to_block"],
-                                            now_sec,      # depart NOW
+                                            now_sec,      
                                             spd_mph,
                                             auth_yd
                                         )
@@ -1168,18 +1431,14 @@ class TrackState:
                                         print(f"[CTC] THROUGHPUT UPDATE → {self.train_throughput} trips completed")
 
 
-                        # Recompute speed/authority now that dwell is done
+                       
                         dest_block = self._train_destinations.get(train_id)
                         if dest_block is not None:
                             new_speed, new_auth = self.compute_suggestions(block, dest_block)
                             speed_mps, auth_m = new_speed, new_auth
                             print(f"[DWELL] Recomputed post-dwell suggestions → {speed_mps:.2f} m/s, {auth_m:.1f} m")
 
-                        # fall through
-
-                # -------------------------------
-                # 2. DETECT ARRIVAL INTO A STATION
-                # -------------------------------
+                        
                 is_station = bool(getattr(seg, "station_name", ""))
 
                 if is_station and self._last_block[train_id] != block:
@@ -1187,10 +1446,7 @@ class TrackState:
                     self._dwell_end[train_id] = current_seconds + dwell_time
                     print(f"[DWELL] Train {train_id} ARRIVED at station block {block}, starting {dwell_time}s dwell.")
 
-                    #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                    #controller = self.controller_for_block(block)
-
-                    #controller.receive_ctc_suggestion(block, 0.0, 0.0)
+                    
                     self.track_controller.receive_ctc_suggestion(block, 0.0, 0.0)
                     self.track_controller_hw.receive_ctc_suggestion(block, 0.0, 0.0)
 
@@ -1199,29 +1455,20 @@ class TrackState:
                     self._last_block[train_id] = block
                     continue
 
-                # -------------------------------
-                # 3. BLOCK CLOSED? STOP TRAIN
-                # -------------------------------
+               
                 next_seg = train.current_segment.get_next_segment()
                 if next_seg and next_seg.closed:
                     new_speed = 0.0
                     new_auth = 0.0
 
-                    #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                    #controller = self.controller_for_block(block)
-
                     #controller.receive_ctc_suggestion(block, new_speed, new_auth)
                     self.track_controller.receive_ctc_suggestion(block, new_speed, new_auth)
                     self.track_controller_hw.receive_ctc_suggestion(block, new_speed, new_auth)
 
-
                     self._train_suggestions[train_id] = (new_speed, new_auth)
                     print(f"[CTC] Train {train_id} STOPPED — Block {next_seg.block_id} is CLOSED")
                     continue
-
-                # -------------------------------
-                # 4. NORMAL MOVEMENT
-                # -------------------------------
+               
                 distance_per_tick = speed_mps * delta_s
                 new_auth = max(0.0, auth_m - distance_per_tick)
 
@@ -1229,19 +1476,13 @@ class TrackState:
                     new_auth = 0.0
                     speed_mps = 0.0
 
-                #controller = controller_for_block(block, self.track_controller, self.track_controller_hw)
-                #controller = self.controller_for_block(block)
 
                 #controller.receive_ctc_suggestion(block, speed_mps, new_auth)
                 self.track_controller.receive_ctc_suggestion(block, speed_mps, new_auth)
                 self.track_controller_hw.receive_ctc_suggestion(block, speed_mps, new_auth)
 
-
                 self._train_suggestions[train_id] = (speed_mps, new_auth)
-
-                # -------------------------------
-                # 5. UPDATE last_block FOR NEXT TICK
-                # -------------------------------
+              
                 self._last_block[train_id] = block
 
                 print("DEBUG TRAIN:", train_id, "seg=", train.current_segment)
@@ -1250,13 +1491,7 @@ class TrackState:
                 
                 self.push_full_block_suggestions()
 
-
-
-    # --------------------------------------------------------
-    # Reset utilities
-    # --------------------------------------------------------
-
     def reset_all(self):
+        
         self.track_model.clear_trains()
-       # self.track_model.load_track_layout(os.path.join(os.path.dirname(__file__), "..", "trackModel", "green_line.csv"))
         print(f"[CTC Backend] Reset all track and train data for {self.line_name}")

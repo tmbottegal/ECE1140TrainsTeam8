@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uni
 # CTC import
 from CTC.CTC_backend import TrackState,Block 
 from CTC.CTC_ui import CTCWindow 
+from CTC.track_controller_hw_server import HardwareTrackControllerServer # comment if doesnt work
 
 # Wayside Controller SW import
 from trackControllerSW.track_controller_backend import TrackControllerBackend
@@ -176,6 +177,9 @@ if __name__ == "__main__":
         "Red Line": ctc_red
     }
 
+    hw_server = HardwareTrackControllerServer(backend_by_line, host="0.0.0.0", port=6000) # comment if doesnt work
+    hw_server.start() # comment if doesnt work
+    
     ctc_ui = CTCWindow(backend_by_line)
     ctc_ui.show()
 

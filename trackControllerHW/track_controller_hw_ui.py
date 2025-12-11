@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, os, logging
-from typing import Dict
+from typing import Dict, List
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
@@ -14,18 +14,22 @@ try:
         HardwareTrackControllerBackend,
         TrackModelAdapter,
         SignalState,
+        HW_CONTROLLED_BLOCK_MAP,
+        HW_VIEW_ONLY_BLOCK_MAP,
     )
 except ModuleNotFoundError:
     from trackControllerHW.track_controller_hw_backend import (
         HardwareTrackControllerBackend,
         TrackModelAdapter,
         SignalState,
+        HW_CONTROLLED_BLOCK_MAP,
+        HW_VIEW_ONLY_BLOCK_MAP,
     )
 
 from universal.global_clock import clock as global_clock
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QBrush
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog,
@@ -34,7 +38,7 @@ from PyQt6.QtWidgets import (
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)  # Changed from DEBUG to WARNING to reduce spam
+logger.setLevel(logging.WARNING)
 if not logger.handlers:
     h = logging.StreamHandler(sys.stdout)
     h.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
@@ -87,7 +91,7 @@ class TrackControllerHWUI(QWidget):
         """Debounced refresh request - coalesces multiple rapid calls into one refresh."""
         if not self._refresh_pending:
             self._refresh_pending = True
-            self._refresh_timer.start(50)  # 50ms debounce
+            self._refresh_timer.start(50)
 
     def _do_deferred_refresh(self) -> None:
         """Execute the deferred refresh."""
@@ -216,23 +220,23 @@ class TrackControllerHWUI(QWidget):
         self.tabs = QTabWidget()
         content_layout.addWidget(self.tabs)
 
-        # Blocks table
+        # Blocks table - REMOVED Signal column (now 6 columns instead of 7)
         self.tbl_blocks = QTableWidget()
-        self.tbl_blocks.setColumnCount(7)
+        self.tbl_blocks.setColumnCount(6)
         self.tbl_blocks.setHorizontalHeaderLabels([
             "Block", "Occupancy", "Suggested Speed (mph)", "Suggested Authority (yd)",
-            "Commanded Speed (mph)", "Commanded Authority (yd)", "Signal",
+            "Commanded Speed (mph)", "Commanded Authority (yd)",
         ])
         self.tbl_blocks.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tbl_blocks.verticalHeader().setVisible(False)
         self.tbl_blocks.setAlternatingRowColors(False)
         self.tabs.addTab(self.tbl_blocks, "Blocks")
 
-        # Switches table
+        # Switches table - Changed column headers
         self.tbl_switch = QTableWidget()
         self.tbl_switch.setColumnCount(5)
         self.tbl_switch.setHorizontalHeaderLabels([
-            "Block", "Position", "Entry Signal", "Straight Signal", "Diverging Signal",
+            "Block", "Position", "Previous Signal", "Straight Signal", "Diverging Signal",
         ])
         self.tbl_switch.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tbl_switch.verticalHeader().setVisible(False)
@@ -287,9 +291,17 @@ class TrackControllerHWUI(QWidget):
                     try:
                         controller.set_time(current_time)
                     except Exception:
-                        pass  # Silently ignore - clock sync is non-critical
+                        pass
         except Exception:
             logger.exception("Failed to update clock display (HW)")
+
+    def _get_view_only_blocks(self) -> List[int]:
+        """Get the list of view-only blocks for current line."""
+        return HW_VIEW_ONLY_BLOCK_MAP.get(self.backend.line_name, [])
+
+    def _get_controlled_blocks(self) -> List[int]:
+        """Get the list of controlled blocks for current line."""
+        return list(HW_CONTROLLED_BLOCK_MAP.get(self.backend.line_name, []))
 
     # -------------- Actions --------------
     def _on_line_changed(self, name: str) -> None:
@@ -322,17 +334,15 @@ class TrackControllerHWUI(QWidget):
             self.current_plc_path = path
             self.plc_edit.setText(path)
             
-            # Pause heartbeat during PLC upload to prevent UI thrashing
             self._hb_timer.stop()
-            QApplication.processEvents()  # Let UI breathe
+            QApplication.processEvents()
             
             self.backend.upload_plc(path)
             
-            # Resume heartbeat after a short delay
             QTimer.singleShot(500, lambda: self._hb_timer.start(1000))
             self.refresh_all()
         except Exception as exc:
-            self._hb_timer.start(1000)  # Ensure timer restarts on error
+            self._hb_timer.start(1000)
             QMessageBox.warning(self, "PLC Upload Failed", str(exc))
 
     def _on_switch_click(self, row: int, col: int) -> None:
@@ -345,7 +355,7 @@ class TrackControllerHWUI(QWidget):
                 return
             sid = int(sid_item.text())
             current = (pos_item.text() or "Straight").strip().lower()
-            next_pos = "Diverging" if current in ("straight", "normal") else "Straight"
+            next_pos = "Diverging" if current == "straight" else "Straight"
             self.backend.safe_set_switch(sid, next_pos)
         except Exception as exc:
             QMessageBox.warning(self, "Switch Change Failed", str(exc))
@@ -386,6 +396,10 @@ class TrackControllerHWUI(QWidget):
     # -------------- Refresh --------------
     def refresh_all(self) -> None:
         try:
+            # Sync with track model to get latest signals
+            if hasattr(self.backend, "sync_from_track_model"):
+                self.backend.sync_from_track_model()
+            
             self._refresh_blocks()
             self._refresh_switches()
             self._refresh_crossings()
@@ -405,35 +419,60 @@ class TrackControllerHWUI(QWidget):
             ids = list(line_defaults.get(self.backend.line_name, []))
 
         data = self.backend.blocks
+        view_only_blocks = self._get_view_only_blocks()
+        
         self.tbl_blocks.blockSignals(True)
         try:
             self.tbl_blocks.setRowCount(len(ids))
             for r, b in enumerate(ids):
+                is_view_only = b in view_only_blocks
+                
+                # Block number
                 self._set_item(self.tbl_blocks, r, 0, str(b), editable=False)
+                
+                # Grey out view-only blocks
+                if is_view_only:
+                    for col in range(6):
+                        if item := self.tbl_blocks.item(r, col):
+                            item.setBackground(QColor("#e5e7eb"))  # Grey background
+                            item.setForeground(QColor("#6b7280"))  # Grey text
 
                 # Occupancy
                 occ = data.get(b, {}).get("occupied", "N/A")
                 occ_text = "N/A" if occ == "N/A" else ("OCCUPIED" if occ else "UNOCCUPIED")
                 self._set_item(self.tbl_blocks, r, 1, occ_text, editable=False)
                 if item := self.tbl_blocks.item(r, 1):
-                    color = "#22c55e" if occ_text == "OCCUPIED" else "#ef4444" if occ_text == "UNOCCUPIED" else "#ffffff"
-                    item.setBackground(QColor(color))
-                    item.setForeground(QColor("#000000"))
+                    if is_view_only:
+                        item.setBackground(QColor("#e5e7eb"))
+                        item.setForeground(QColor("#6b7280"))
+                    else:
+                        color = "#22c55e" if occ_text == "OCCUPIED" else "#ef4444" if occ_text == "UNOCCUPIED" else "#ffffff"
+                        item.setBackground(QColor(color))
+                        item.setForeground(QColor("#000000"))
 
-                # Suggested
-                self._set_item(self.tbl_blocks, r, 2, str(data.get(b, {}).get("suggested_speed", "N/A")), editable=False)
-                self._set_item(self.tbl_blocks, r, 3, str(data.get(b, {}).get("suggested_auth", "N/A")), editable=False)
+                # Suggested Speed - show N/A if not set
+                sug_spd = data.get(b, {}).get("suggested_speed", "N/A")
+                self._set_item(self.tbl_blocks, r, 2, str(sug_spd), editable=False)
+                
+                # Suggested Authority - show N/A if not set
+                sug_auth = data.get(b, {}).get("suggested_auth", "N/A")
+                self._set_item(self.tbl_blocks, r, 3, str(sug_auth), editable=False)
 
-                # Commanded
-                self._set_item(self.tbl_blocks, r, 4, str(data.get(b, {}).get("commanded_speed", "N/A")), editable=self.maintenance_enabled)
-                self._set_item(self.tbl_blocks, r, 5, str(data.get(b, {}).get("commanded_auth", "N/A")), editable=self.maintenance_enabled)
+                # Commanded Speed - show N/A if not set, only editable if controlled
+                cmd_spd = data.get(b, {}).get("commanded_speed", "N/A")
+                can_edit = self.maintenance_enabled and not is_view_only
+                self._set_item(self.tbl_blocks, r, 4, str(cmd_spd), editable=can_edit)
+                
+                # Commanded Authority - show N/A if not set, only editable if controlled
+                cmd_auth = data.get(b, {}).get("commanded_auth", "N/A")
+                self._set_item(self.tbl_blocks, r, 5, str(cmd_auth), editable=can_edit)
 
-                # Signal
-                sig = data.get(b, {}).get("signal", "N/A")
-                sig_text = sig.name.title() if isinstance(sig, SignalState) else (sig if isinstance(sig, str) else "N/A")
-                self._set_item(self.tbl_blocks, r, 6, sig_text, editable=self.maintenance_enabled)
-                if item := self.tbl_blocks.item(r, 6):
-                    self._color_signal_item(item, sig_text)
+                # Apply grey styling to view-only blocks
+                if is_view_only:
+                    for col in range(6):
+                        if item := self.tbl_blocks.item(r, col):
+                            item.setBackground(QColor("#e5e7eb"))
+                            item.setForeground(QColor("#6b7280"))
 
             self.tbl_blocks.resizeRowsToContents()
         finally:
@@ -468,7 +507,6 @@ class TrackControllerHWUI(QWidget):
     def _refresh_switches(self) -> None:
         switches = self.backend.switches
         switch_map = self.backend.switch_map
-        blocks_data = self.backend.blocks
 
         if not switch_map and not switches and self.backend.line_name == "Blue Line":
             switch_map[5] = (5, 6, 11)
@@ -483,29 +521,56 @@ class TrackControllerHWUI(QWidget):
                     self._set_item(self.tbl_switch, 0, c, "", editable=False)
             else:
                 for r, sid in enumerate(switch_ids):
-                    blocks_tuple = switch_map.get(sid, ())
-                    entry = blocks_tuple[0] if len(blocks_tuple) >= 1 else None
-                    straight = blocks_tuple[1] if len(blocks_tuple) >= 2 else None
-                    diverging = blocks_tuple[2] if len(blocks_tuple) >= 3 else None
-
+                    # Block ID
                     self._set_item(self.tbl_switch, r, 0, str(sid), editable=False)
-                    self._set_item(self.tbl_switch, r, 1, str(switches.get(sid, "N/A")), editable=self.maintenance_enabled)
+                    
+                    # Position - use "Straight" / "Diverging"
+                    pos = switches.get(sid, "N/A")
+                    if pos == "Normal":
+                        pos = "Straight"
+                    elif pos == "Alternate":
+                        pos = "Diverging"
+                    self._set_item(self.tbl_switch, r, 1, str(pos), editable=self.maintenance_enabled)
 
-                    def get_signal(block_id):
-                        if block_id is None:
-                            return "N/A"
-                        sig = blocks_data.get(block_id, {}).get("signal", "N/A")
-                        return sig.name.title() if isinstance(sig, SignalState) else (sig if isinstance(sig, str) else "N/A")
-
-                    for col, blk in [(2, entry), (3, straight), (4, diverging)]:
-                        txt = get_signal(blk)
-                        self._set_item(self.tbl_switch, r, col, txt, editable=False)
-                        if item := self.tbl_switch.item(r, col):
-                            self._color_signal_item(item, txt)
+                    # Get switch signals from backend (synced with track model)
+                    prev_sig = self._get_switch_signal(sid, 0)    # Previous (side 0)
+                    straight_sig = self._get_switch_signal(sid, 1) # Straight (side 1)
+                    diverging_sig = self._get_switch_signal(sid, 2) # Diverging (side 2)
+                    
+                    # Previous Signal (col 2)
+                    self._set_item(self.tbl_switch, r, 2, prev_sig, editable=False)
+                    if item := self.tbl_switch.item(r, 2):
+                        self._color_signal_item(item, prev_sig)
+                    
+                    # Straight Signal (col 3)
+                    self._set_item(self.tbl_switch, r, 3, straight_sig, editable=False)
+                    if item := self.tbl_switch.item(r, 3):
+                        self._color_signal_item(item, straight_sig)
+                    
+                    # Diverging Signal (col 4)
+                    self._set_item(self.tbl_switch, r, 4, diverging_sig, editable=False)
+                    if item := self.tbl_switch.item(r, 4):
+                        self._color_signal_item(item, diverging_sig)
 
             self.tbl_switch.resizeRowsToContents()
         finally:
             self.tbl_switch.blockSignals(False)
+
+    def _get_block_signal(self, blocks_data: Dict, block_id: int | None) -> str:
+        """Get signal state for a block, defaulting to RED."""
+        if block_id is None:
+            return "Red"
+        sig = blocks_data.get(block_id, {}).get("signal", SignalState.RED)
+        if isinstance(sig, SignalState):
+            return sig.name.title()
+        elif hasattr(sig, 'name'):
+            return sig.name.title()
+        elif isinstance(sig, str) and sig != "N/A":
+            # Handle "SignalState.RED" format
+            if "." in sig:
+                return sig.split(".")[-1].title()
+            return sig.title()
+        return "Red"  # Default to RED
 
     def _refresh_diagnostics(self) -> None:
         if not hasattr(self.backend, "get_failure_report"):
@@ -539,6 +604,21 @@ class TrackControllerHWUI(QWidget):
         self.tabs.setTabText(self.diag_tab_index, f"Diagnostics ({pending})" if pending > 0 else "Diagnostics")
 
     # -------------- Helpers --------------
+    def _get_switch_signal(self, switch_id: int, signal_side: int) -> str:
+
+        if hasattr(self.backend, "get_switch_signal"):
+            sig = self.backend.get_switch_signal(switch_id, signal_side)
+            if isinstance(sig, SignalState):
+                return sig.name.title()  # "RED" -> "Red"
+            elif hasattr(sig, 'name'):
+                return sig.name.title()
+            elif isinstance(sig, str):
+                # Handle string like "SignalState.RED" or just "RED"
+                if '.' in sig:
+                    return sig.split('.')[-1].title()
+                return sig.title()
+        return "Red"  # Default to RED
+
     def _apply_edit_triggers(self) -> None:
         trig = (QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed | 
                 QAbstractItemView.EditTrigger.SelectedClicked) if self.maintenance_enabled else QAbstractItemView.EditTrigger.NoEditTriggers
@@ -555,7 +635,11 @@ class TrackControllerHWUI(QWidget):
 
     def _color_signal_item(self, item: QTableWidgetItem, sig_text: str) -> None:
         colors = {"RED": "#ef4444", "YELLOW": "#eab308", "GREEN": "#22c55e"}
-        bg = colors.get((sig_text or "").upper(), "#ffffff")
+        # Extract just the color name if it contains "SignalState." or similar
+        clean_text = (sig_text or "RED").upper()
+        if "." in clean_text:
+            clean_text = clean_text.split(".")[-1]
+        bg = colors.get(clean_text, "#ef4444")  # Default to RED
         item.setBackground(QColor(bg))
         item.setForeground(QColor("#000000"))
 
@@ -569,6 +653,10 @@ class TrackControllerHWUI(QWidget):
             if not block_item:
                 return
             b = int(block_item.text())
+            
+            # Check if this is a view-only block
+            if b in self._get_view_only_blocks():
+                return
 
             if col == 4:  # Commanded Speed
                 if item := self.tbl_blocks.item(row, col):
@@ -584,18 +672,6 @@ class TrackControllerHWUI(QWidget):
                     self.backend.set_commanded_authority(b, auth)
                     logger.info(f"Set commanded authority for block {b} to {auth}")
 
-            elif col == 6:  # Signal
-                if item := self.tbl_blocks.item(row, col):
-                    sig_text = (item.text() or "N/A").strip().upper()
-                    if sig_text in ("RED", "YELLOW", "GREEN"):
-                        item.setText(sig_text)
-                        self.backend.set_signal(b, sig_text)
-                        logger.info(f"Set signal for block {b} to {sig_text}")
-                    else:
-                        logger.warning(f"Invalid signal value: {sig_text}. Must be RED, YELLOW, or GREEN")
-                        old_sig = self.backend.blocks.get(b, {}).get("signal", "N/A")
-                        old_text = old_sig.name.upper() if isinstance(old_sig, SignalState) else (old_sig.upper() if isinstance(old_sig, str) else "N/A")
-                        item.setText(old_text)
         except Exception:
             logger.exception("Cell edit failed")
         finally:

@@ -99,8 +99,6 @@ class WaysideStatusUpdate:
     signal_state: SignalState | str
     switch_position: Optional[str]
     crossing_status: Optional[str]
-
-
 @dataclass
 class FailureSnapshot:
     kind: str
@@ -108,8 +106,6 @@ class FailureSnapshot:
     time: datetime
     details: str
     cleared: bool = False
-
-
 @dataclass
 class ActuatorCommandCheck:
     block_id: int
@@ -117,20 +113,8 @@ class ActuatorCommandCheck:
     expected: Any
     issued_at: datetime
     cleared: bool = False
-
-
 # -------------------- Main Backend --------------------
 class HardwareTrackControllerBackend:
-    """
-    Unified backend for hardware track controller:
-    - Block/switch/crossing state management
-    - Speed/authority (suggested & commanded)
-    - Maintenance mode protections
-    - Live polling & guard-block polling
-    - PLC upload (static or dynamic)
-    - Safety/fault inference
-    - CTC + track-model integration
-    """
     
     def __init__(self, track_model: TrackModelAdapter, line_name: str = "Blue Line") -> None:
         self.track_model = track_model
@@ -142,6 +126,7 @@ class HardwareTrackControllerBackend:
         self.switch_map: Dict[int, Tuple[int, ...]] = {}
         self.crossings: Dict[int, str] = {}
         self.crossing_blocks: Dict[int, int] = {}
+        self._switch_signals: Dict[Tuple[int, int], SignalState] = {}  # (switch_id, side) -> signal
         self._init_default_infrastructure()
 
         # Caches
@@ -206,12 +191,20 @@ class HardwareTrackControllerBackend:
 
     def _init_default_infrastructure(self) -> None:
         if self.line_name == "Green Line":
-            self.switch_map = {76: (76, 77, 101), 85: (85, 86, 100)}
+            # Switch 77: entry=77, straight=78, diverging=101
+            # Switch 85: entry=85, straight=86, diverging=100
+            self.switch_map = {77: (77, 78, 101), 85: (85, 86, 100)}
         elif self.line_name == "Red Line":
             self.switch_map = {38: (38, 39, 71), 43: (43, 44, 67), 52: (52, 53, 66)}
 
         for sid in self.switch_map:
             self.switches.setdefault(sid, "Straight")
+        
+        # Initialize switch signals (prev=0, straight=1, diverging=2)
+        for sid in self.switch_map:
+            self._switch_signals[(sid, 0)] = SignalState.RED  # Previous
+            self._switch_signals[(sid, 1)] = SignalState.RED  # Straight
+            self._switch_signals[(sid, 2)] = SignalState.RED  # Diverging
 
         if self.line_name == "Green Line":
             self.crossing_blocks.setdefault(1, 108)
@@ -315,10 +308,59 @@ class HardwareTrackControllerBackend:
                 if sig != "N/A" and self._known_signal.get(b) != sig:
                     self._known_signal[b] = sig
                     changed = True
+                
+                # Sync switch signals if this is a switch block
+                if b in self.switch_map:
+                    # Read prev_sig, str_sig, div_sig from track model
+                    for attr, side in [("prev_sig", 0), ("str_sig", 1), ("div_sig", 2)]:
+                        if hasattr(seg, attr):
+                            sig_val = getattr(seg, attr)
+                            if sig_val is not None:
+                                # Convert to SignalState if needed
+                                if isinstance(sig_val, SignalState):
+                                    self._switch_signals[(b, side)] = sig_val
+                                elif hasattr(sig_val, 'name'):
+                                    self._switch_signals[(b, side)] = sig_val
+                                elif isinstance(sig_val, str):
+                                    try:
+                                        self._switch_signals[(b, side)] = SignalState[sig_val.upper()]
+                                    except (KeyError, AttributeError):
+                                        pass
+                                changed = True
 
         if changed:
             self._notify_listeners()
             self._send_status_to_ctc()
+    
+    def sync_from_track_model(self) -> None:
+        """Force sync all data from track model including switch signals."""
+        segments = getattr(self.track_model, "segments", {})
+        if not isinstance(segments, dict):
+            return
+        
+        for b in self._line_blocks:
+            if seg := segments.get(b):
+                # Sync occupancy
+                self._known_occupancy[b] = bool(getattr(seg, "occupied", False))
+                
+                # Sync block signal
+                if hasattr(seg, "signal_state") and seg.signal_state:
+                    self._known_signal[b] = seg.signal_state
+                
+                # Sync switch signals
+                if b in self.switch_map:
+                    for attr, side in [("prev_sig", 0), ("str_sig", 1), ("div_sig", 2)]:
+                        if hasattr(seg, attr):
+                            sig_val = getattr(seg, attr)
+                            if isinstance(sig_val, SignalState):
+                                self._switch_signals[(b, side)] = sig_val
+                            elif sig_val is not None:
+                                try:
+                                    self._switch_signals[(b, side)] = SignalState[str(sig_val).upper()]
+                                except (KeyError, AttributeError):
+                                    pass
+        
+        self._notify_listeners()
 
     def _on_occupancy_change(self, block_id: int, occupied: bool) -> None:
         previous = self._known_occupancy.get(block_id, False)
@@ -567,10 +609,15 @@ class HardwareTrackControllerBackend:
 
     def _apply_switch_from_plc(self, switch_id: int, position: str) -> None:
         self._check_switch_clear_for_move(switch_id)
+        # Normalize position naming
+        if position == "Normal":
+            position = "Straight"
+        elif position == "Alternate":
+            position = "Diverging"
         self.switches[switch_id] = position
         try:
             if hasattr(self.track_model, "set_switch_position"):
-                self.track_model.set_switch_position(switch_id, 0 if position == "Normal" else 1)
+                self.track_model.set_switch_position(switch_id, 0 if position == "Straight" else 1)
         except Exception:
             logger.exception("Failed to set switch from PLC")
         # Don't notify during batch
@@ -596,8 +643,7 @@ class HardwareTrackControllerBackend:
             self._notify_listeners()
             self._send_status_to_ctc()
 
-    def set_signal(self, block: int, color: str | SignalState) -> None:
-        segments = getattr(self.track_model, "segments", {})
+    def set_signal(self, block: int, color: str | SignalState, signal_side: int = 0) -> None:
 
         if isinstance(color, SignalState):
             state = color
@@ -607,15 +653,21 @@ class HardwareTrackControllerBackend:
                 return
             state = SignalState[key]
 
-        if seg := segments.get(block):
-            if hasattr(seg, "set_signal_state"):
-                try:
-                    seg.set_signal_state(state)
-                except Exception:
-                    logger.exception("Failed to set signal in track model")
+        # Store in appropriate dict
+        if block in self.switch_map:
+            self._switch_signals[(block, signal_side)] = state
+        else:
+            self._known_signal[block] = state
 
-        self._known_signal[block] = state
-        self._schedule_actuator_verification(block, "signal", state)
+        # Send to track model using the correct API
+        try:
+            if hasattr(self.track_model, "set_signal_state"):
+                self.track_model.set_signal_state(block, signal_side, state)
+                logger.debug("Sent to Track Model: Block %d signal (side %d) -> %s", block, signal_side, state.name)
+        except Exception:
+            logger.exception("Failed to set signal %d (side %d) in track model", block, signal_side)
+
+        self._schedule_actuator_verification(block, f"signal_{signal_side}", state)
         if not self._batch_updates:
             self._notify_listeners()
             self._send_status_to_ctc()
@@ -774,49 +826,85 @@ class HardwareTrackControllerBackend:
         current_occ = [False] * max_idx
         prev_occ = [False] * max_idx
         stop_flags = [False] * max_idx
-        signal_codes = [0] * max_idx
+        # PLC expects boolean signals: True=GREEN, False=RED
+        signal_bools = [False] * max_idx
 
         for b in blocks:
             if b < max_idx:
                 current_occ[b] = self._known_occupancy.get(b, False)
                 prev_occ[b] = self._plc_prev_occupancy.get(b, False)
-                sig = self._known_signal.get(b)
-                signal_codes[b] = 2 if sig == SignalState.GREEN else (1 if sig == SignalState.YELLOW else 0)
+                sig = self._known_signal.get(b, SignalState.RED)
+                signal_bools[b] = (sig == SignalState.GREEN)
 
         switch_ids = sorted(self.switches.keys())
-        switch_positions = [0 if self.switches.get(sid, "Normal") == "Normal" else 1 for sid in switch_ids]
+        # PLC expects boolean: False=Straight, True=Diverging
+        switch_positions = [self.switches.get(sid, "Straight") == "Diverging" for sid in switch_ids]
 
         crossing_ids = sorted(self.crossing_blocks.keys())
         crossing_states = [self.crossings.get(cid, "Inactive") == "Active" for cid in crossing_ids]
 
         try:
             out_switches, out_signals, out_crossings, out_stops = plc.plc_logic(
-                current_occ, switch_positions, signal_codes, crossing_states, prev_occ, stop_flags
+                current_occ, switch_positions, signal_bools, crossing_states, prev_occ, stop_flags
             )
         except Exception:
             logger.exception("PLC plc_logic() raised an exception")
             return
 
-        # Apply outputs
+        # Apply switch outputs
         for idx, sid in enumerate(switch_ids):
             if idx < len(out_switches):
-                desired = "Normal" if int(out_switches[idx]) == 0 else "Alternate"
+                # PLC returns boolean: False=Straight, True=Diverging
+                desired = "Diverging" if bool(out_switches[idx]) else "Straight"
                 if self.switches.get(sid) != desired:
                     try:
                         self._apply_switch_from_plc(sid, desired)
                     except Exception:
                         logger.exception("Failed to apply PLC switch %s", sid)
 
+        # Apply block signals (non-switch blocks)
         for b in blocks:
-            if b < len(out_signals):
-                code = int(out_signals[b])
-                state = SignalState.GREEN if code >= 2 else (SignalState.YELLOW if code == 1 else SignalState.RED)
+            if b not in self.switch_map and b < len(out_signals):
+                # PLC returns boolean: True=GREEN, False=RED
+                state = SignalState.GREEN if bool(out_signals[b]) else SignalState.RED
                 if self._known_signal.get(b) != state:
                     try:
-                        self.set_signal(b, state)
+                        self.set_signal(b, state, signal_side=0)
                     except Exception:
                         logger.exception("Failed to apply PLC signal for block %s", b)
 
+        # Apply switch signals (prev=0, straight=1, diverging=2)
+        for idx, sid in enumerate(switch_ids):
+            signal_idx_base = idx * 3
+            
+            # Previous signal
+            if signal_idx_base < len(out_signals):
+                state = SignalState.GREEN if bool(out_signals[signal_idx_base]) else SignalState.RED
+                if self._switch_signals.get((sid, 0)) != state:
+                    try:
+                        self.set_signal(sid, state, signal_side=0)
+                    except Exception:
+                        logger.exception("Failed to set switch %d previous signal", sid)
+            
+            # Straight signal
+            if signal_idx_base + 1 < len(out_signals):
+                state = SignalState.GREEN if bool(out_signals[signal_idx_base + 1]) else SignalState.RED
+                if self._switch_signals.get((sid, 1)) != state:
+                    try:
+                        self.set_signal(sid, state, signal_side=1)
+                    except Exception:
+                        logger.exception("Failed to set switch %d straight signal", sid)
+            
+            # Diverging signal
+            if signal_idx_base + 2 < len(out_signals):
+                state = SignalState.GREEN if bool(out_signals[signal_idx_base + 2]) else SignalState.RED
+                if self._switch_signals.get((sid, 2)) != state:
+                    try:
+                        self.set_signal(sid, state, signal_side=2)
+                    except Exception:
+                        logger.exception("Failed to set switch %d diverging signal", sid)
+
+        # Apply crossing outputs
         for idx, cid in enumerate(crossing_ids):
             if idx < len(out_crossings):
                 desired = "Active" if bool(out_crossings[idx]) else "Inactive"
@@ -826,6 +914,7 @@ class HardwareTrackControllerBackend:
                     except Exception:
                         logger.exception("Failed to apply PLC crossing %s", cid)
 
+        # Apply stop flags and commanded speed/authority
         if out_stops:
             for b in blocks:
                 if b < len(out_stops) and bool(out_stops[b]):
@@ -833,6 +922,8 @@ class HardwareTrackControllerBackend:
                     self.set_commanded_authority(b, 0)
                 elif b in self._suggested_speed_mph:
                     self.set_commanded_speed(b, self._suggested_speed_mph[b])
+                    if b in self._suggested_auth_yd:
+                        self.set_commanded_authority(b, self._suggested_auth_yd[b])
                     if b in self._suggested_auth_yd:
                         self.set_commanded_authority(b, self._suggested_auth_yd[b])
 
@@ -843,19 +934,44 @@ class HardwareTrackControllerBackend:
     def get_line_block_ids(self) -> List[int]:
         return list(self._line_blocks)
 
+    def get_switch_signal(self, switch_id: int, signal_side: int) -> SignalState:
+        """Get the signal state for a switch signal.
+        
+        Args:
+            switch_id: The switch block ID.
+            signal_side: 0=previous, 1=straight, 2=diverging.
+            
+        Returns:
+            The signal state (defaults to RED).
+        """
+        return self._switch_signals.get((switch_id, signal_side), SignalState.RED)
+
+    @property
+    def switch_signals(self) -> Dict[Tuple[int, int], SignalState]:
+        """Get all switch signals as a dict of (switch_id, side) -> SignalState."""
+        return self._switch_signals.copy()
+
     @property
     def blocks(self) -> Dict[int, Dict[str, object]]:
-        return {
-            b: {
+        result = {}
+        for b in self.get_line_block_ids():
+            # Suggested: N/A if CTC hasn't sent anything
+            sug_spd = self._suggested_speed_mph.get(b)
+            sug_auth = self._suggested_auth_yd.get(b)
+            # Commanded: N/A if not set
+            cmd_spd = self._commanded_speed_mph.get(b)
+            cmd_auth = self._commanded_auth_yd.get(b)
+            
+            result[b] = {
                 "occupied": self._known_occupancy.get(b, "N/A"),
-                "suggested_speed": int(self._suggested_speed_mph.get(b, 50)),
-                "suggested_auth": int(self._suggested_auth_yd.get(b, 50)),
-                "commanded_speed": int(self._commanded_speed_mph.get(b, 0)) or "N/A",
-                "commanded_auth": int(self._commanded_auth_yd.get(b, 0)) or "N/A",
-                "signal": self._known_signal.get(b, "N/A"),
+                "suggested_speed": sug_spd if sug_spd is not None else "N/A",
+                "suggested_auth": sug_auth if sug_auth is not None else "N/A",
+                "commanded_speed": cmd_spd if cmd_spd is not None else "N/A",
+                "commanded_auth": cmd_auth if cmd_auth is not None else "N/A",
+                "signal": self._known_signal.get(b, SignalState.RED),  # Default RED
+                "view_only": b in self._view_blocks,  # Flag for UI to grey out
             }
-            for b in self.get_line_block_ids()
-        }
+        return result
 
     def report_state(self) -> Dict[str, Any]:
         return {
@@ -864,6 +980,7 @@ class HardwareTrackControllerBackend:
             "blocks": self.blocks,
             "switches": self.switches.copy(),
             "switch_map": self.switch_map.copy(),
+            "switch_signals": {f"{k[0]}_{k[1]}": v.name for k, v in self._switch_signals.items()},
             "crossings": self.crossings.copy(),
             "crossing_blocks": self.crossing_blocks.copy(),
         }

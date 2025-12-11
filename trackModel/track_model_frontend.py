@@ -1047,6 +1047,9 @@ class NetworkStatusUI(QWidget):
             Args:
                 segments_data: The segments data to extract IDs from.
         """
+        # Store current selection before clearing
+        current_selection = self.segment_dropdown.currentText()
+        
         self.segment_dropdown.clear()
         
         if isinstance(segments_data, dict):
@@ -1061,6 +1064,12 @@ class NetworkStatusUI(QWidget):
             segment_ids.sort()
             for seg_id in segment_ids:
                 self.segment_dropdown.addItem(str(seg_id))
+            
+            # Restore previous selection if it still exists
+            if current_selection:
+                index = self.segment_dropdown.findText(current_selection)
+                if index >= 0:
+                    self.segment_dropdown.setCurrentIndex(index)
     
     def apply_track_failures(self):
         """Applies or clears track failures based on checkbox states."""
@@ -1134,6 +1143,9 @@ class NetworkStatusUI(QWidget):
             Args:
                 segments_data: The segments data to extract IDs from.
         """
+        # Store current selection before clearing
+        current_selection = self.segment_dropdown.currentText()
+        
         self.segment_dropdown.clear()
         
         if isinstance(segments_data, dict):
@@ -1148,6 +1160,12 @@ class NetworkStatusUI(QWidget):
             segment_ids.sort()
             for seg_id in segment_ids:
                 self.segment_dropdown.addItem(str(seg_id))
+            
+            # Restore previous selection if it still exists
+            if current_selection:
+                index = self.segment_dropdown.findText(current_selection)
+                if index >= 0:
+                    self.segment_dropdown.setCurrentIndex(index)
     
     def populate_current_failures_table(self, segments_data):
         """Populates the current failures table with segments that have active failures.

@@ -1700,6 +1700,11 @@ class NetworkStatusUI(QWidget):
     
     def populate_segment_dropdown(self, segments_data):
         """Populate the segment dropdown with available segments"""
+        # Store current selections before clearing
+        current_segment_selection = self.segment_dropdown.currentText()
+        current_edit_segment_selection = self.edit_segment_dropdown.currentText()
+        current_switch_selection = self.switch_dropdown.currentText()
+        
         self.segment_dropdown.clear()
         self.edit_segment_dropdown.clear()  # also clear the edit dropdown
         self.switch_dropdown.clear()  # also clear the switch dropdown
@@ -1736,6 +1741,22 @@ class NetworkStatusUI(QWidget):
             switch_ids.sort()
             for switch_id in switch_ids:
                 self.switch_dropdown.addItem(str(switch_id))
+            
+            # Restore previous selections if they still exist
+            if current_segment_selection:
+                index = self.segment_dropdown.findText(current_segment_selection)
+                if index >= 0:
+                    self.segment_dropdown.setCurrentIndex(index)
+                    
+            if current_edit_segment_selection:
+                index = self.edit_segment_dropdown.findText(current_edit_segment_selection)
+                if index >= 0:
+                    self.edit_segment_dropdown.setCurrentIndex(index)
+                    
+            if current_switch_selection:
+                index = self.switch_dropdown.findText(current_switch_selection)
+                if index >= 0:
+                    self.switch_dropdown.setCurrentIndex(index)
     
     def populate_current_failures_table(self, segments_data):
         """Populate the current failures table with segments that have active failures"""
@@ -1850,10 +1871,19 @@ class NetworkStatusUI(QWidget):
                         station_list.append((block_id, station_name))
         
         #   populate station dropdown
+        # Store current selection before clearing
+        current_station_selection = self.station_dropdown.currentText()
+        
         self.station_dropdown.clear()
         station_list.sort(key=lambda x: int(x[0]))  # Sort by block ID
         for block_id, station_name in station_list:
             self.station_dropdown.addItem(f"{block_id} - {station_name}")
+        
+        # Restore previous selection if it still exists
+        if current_station_selection:
+            index = self.station_dropdown.findText(current_station_selection)
+            if index >= 0:
+                self.station_dropdown.setCurrentIndex(index)
         
         if station_data:
             # set up table for stations with custom column order

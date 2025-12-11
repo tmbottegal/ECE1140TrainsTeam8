@@ -1492,6 +1492,11 @@ class TrackState:
                 self.push_full_block_suggestions()
 
     def reset_all(self):
+        """Clear all trains and restore TrackModel to its initial state.
+
+    This is primarily used for debugging or UI reset buttons. Does not
+    reload controllers or schedules; only resets TrackModel’s train state.
+    """
         
         self.track_model.clear_trains()
         print(f"[CTC Backend] Reset all track and train data for {self.line_name}")

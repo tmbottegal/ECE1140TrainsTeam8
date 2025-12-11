@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from typing import TYPE_CHECKING, Dict, Optional
 
 from PyQt6.QtCore import Qt
@@ -109,6 +110,11 @@ class TrackControllerUI(QWidget):
         self.backend = next(iter(self.controllers.values()))
         self.manual_mode_enabled = False
         self.current_plc_file = None
+
+        # Debounce tracking
+        self._last_switch_click_time = {}
+        self._last_crossing_click_time = {}
+        self._debounce_delay = 0.5
 
         # Initialize fonts
         self.bold_font = QFont()
@@ -814,6 +820,22 @@ class TrackControllerUI(QWidget):
         try:
             if col == 1:  # Position column
                 switch_id = int(self.tableswitch.item(row, 0).text())
+                
+                # Check debounce
+                current_time = time.time()
+                last_click = self._last_switch_click_time.get(switch_id, 0)
+                
+                if current_time - last_click < self._debounce_delay:
+                    logger.debug(
+                        'Switch %d click ignored due to debounce (%.2fs since last click)',
+                        switch_id,
+                        current_time - last_click
+                    )
+                    return
+                
+                # Update last click time
+                self._last_switch_click_time[switch_id] = current_time
+                
                 current_position = self.backend.switches.get(switch_id, 0)
                 next_position = 1 if current_position == 0 else 0
                 self.backend.safe_set_switch(switch_id, next_position)
@@ -825,6 +847,7 @@ class TrackControllerUI(QWidget):
             )
             logger.exception('Failed to toggle switch in maintenance mode')
             self.refresh_tables()
+
 
     def _on_crossing_clicked(self, row: int, col: int) -> None:
         """Handle crossing table cell clicks in maintenance mode.
@@ -839,6 +862,22 @@ class TrackControllerUI(QWidget):
         try:
             if col == 2:  # Status column
                 crossing_id = int(self.tablecrossing.item(row, 0).text())
+                
+                # Check debounce
+                current_time = time.time()
+                last_click = self._last_crossing_click_time.get(crossing_id, 0)
+                
+                if current_time - last_click < self._debounce_delay:
+                    logger.debug(
+                        'Crossing %d click ignored due to debounce (%.2fs since last click)',
+                        crossing_id,
+                        current_time - last_click
+                    )
+                    return
+                
+                # Update last click time
+                self._last_crossing_click_time[crossing_id] = current_time
+                
                 current_status = self.backend.crossings.get(crossing_id, False)
                 next_status = not current_status
                 self.backend.safe_set_crossing(crossing_id, next_status)

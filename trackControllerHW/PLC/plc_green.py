@@ -1,31 +1,26 @@
-"""Green Line PLC Logic Module - Hardware Wayside.
+"""Green Line PLC Logic Module for Hardware Wayside.
 
-This module implements the Programmable Logic Controller (PLC) logic for the
-Green Line railway system (Hardware Wayside), controlling switches, signals,
-and crossings.
+Controls switches, signals, and crossings for Green Line blocks 63-121.
 
-Territory of Control (Hardware):
-    - Blocks 63-121 (main territory)
-    - Switch at block 77 (77-78; 77-101)
-    - Switch at block 85 (85-86; 100-85)
-    - Railway crossing at block 108
+Switches:
+    - Block 77: 77-78 (straight), 77-101 (diverging)
+    - Block 85: 85-86 (straight), 100-85 (diverging)
+
+Crossings:
+    - Block 108
 
 Signal Convention:
     - True = GREEN (safe to proceed)
     - False = RED (stop/danger)
 """
-
 from typing import List, Tuple
 
-# Territory definition
-TERRITORY = list(range(63, 122))  # Blocks 63-121 inclusive
+TERRITORY = list(range(63, 122))
 
-# Initialize static variables for legacy PLC support
-switch_77 = False   # False = Straight, True = Diverging
+switch_77 = False
 switch_85 = False
-crossing_1 = False  # False = Inactive (gates up), True = Active (gates down)
+crossing_1 = False
 
-# Initialize signals for all blocks in territory (True = GREEN, False = RED)
 for blk in TERRITORY:
     globals()[f"signal_{blk}"] = True
 
@@ -42,7 +37,7 @@ def plc_logic(
 
     Args:
         block_occupancies: Current occupancy status of all blocks.
-        switch_positions: Current positions of switches [switch_76, switch_85].
+        switch_positions: Current positions of switches [switch_77, switch_85].
         light_signals: Signal states (True=GREEN, False=RED).
         crossing_signals: Crossing gate states.
         previous_occupancies: Previous tick occupancy status.
@@ -56,60 +51,58 @@ def plc_logic(
     def occ(block: int) -> bool:
         return 0 <= block < n and bool(block_occupancies[block])
 
-    # --- Initialize: clear stop flags in territory ---
     for b in TERRITORY:
         if 0 <= b < len(stop):
             stop[b] = False
 
-    # --- COLLISION PREVENTION ---
+    # Collision prevention
     for b in TERRITORY:
         if 0 <= b < len(stop):
             next_block = b + 1
             if next_block <= 121 and occ(next_block):
                 stop[b] = True
 
-    # --- SIGNAL CONTROL (Boolean: True=GREEN, False=RED) ---
+    # Signal control
     for b in TERRITORY:
         if 0 <= b < len(light_signals):
             next_block = b + 1
             if next_block <= 121 and occ(next_block):
-                light_signals[b] = False  # RED
+                light_signals[b] = False
             else:
-                light_signals[b] = True   # GREEN
+                light_signals[b] = True
 
-    # --- SWITCH CONTROL (Boolean: False=Straight, True=Diverging) ---
     def switch_clear(blocks: List[int]) -> bool:
         return not any(occ(b) for b in blocks if b < n)
 
-    # Switch 77: (77, 78, 101)
+    # Switch 77 control
     blocks_77 = [77, 78, 101]
     train_approaching_77 = any(occ(b) for b in range(74, 77) if b < n)
     train_on_diverging_77 = occ(101) or occ(100)
 
     if switch_clear(blocks_77) and len(switch_positions) > 0:
         if train_on_diverging_77 and not train_approaching_77:
-            switch_positions[0] = True   # Diverging
+            switch_positions[0] = True
         elif train_approaching_77 and not train_on_diverging_77:
-            switch_positions[0] = False  # Straight
+            switch_positions[0] = False
 
-    # Switch 85: (85, 86, 100)
+    # Switch 85 control
     blocks_85 = [85, 86, 100]
     train_approaching_85 = any(occ(b) for b in range(82, 85) if b < n)
     train_on_diverging_85 = occ(100) or occ(99)
 
     if switch_clear(blocks_85) and len(switch_positions) > 1:
         if train_on_diverging_85 and not train_approaching_85:
-            switch_positions[1] = True   # Diverging
+            switch_positions[1] = True
         elif train_approaching_85 and not train_on_diverging_85:
-            switch_positions[1] = False  # Straight
+            switch_positions[1] = False
 
-    # --- SWITCH INTERLOCKING ---
+    # Switch interlocking
     if len(switch_positions) > 0:
-        if occ(76) and switch_positions[0]:  # Diverging when should be straight
+        if occ(76) and switch_positions[0]:
             for b in [75, 76]:
                 if 0 <= b < len(stop):
                     stop[b] = True
-        if occ(101) and not switch_positions[0]:  # Straight when should be diverging
+        if occ(101) and not switch_positions[0]:
             for b in [100, 101]:
                 if 0 <= b < len(stop):
                     stop[b] = True
@@ -124,20 +117,19 @@ def plc_logic(
                 if 0 <= b < len(stop):
                     stop[b] = True
 
-    # --- CROSSING CONTROL (Block 108) ---
+    # Crossing control (Block 108)
     crossing_range = range(105, 112)
     train_near_crossing = any(occ(b) for b in crossing_range if b < n)
 
     if len(crossing_signals) > 0:
         crossing_signals[0] = train_near_crossing
 
-    # Set signals to RED near active crossing
     if train_near_crossing:
         for b in range(106, 111):
             if 0 <= b < len(light_signals):
-                light_signals[b] = False  # RED
+                light_signals[b] = False
 
-    # --- BOUNDARY HANDLING ---
+    # Boundary handling
     if occ(63) and occ(64):
         if 0 <= 63 < len(stop):
             stop[63] = True

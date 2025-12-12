@@ -1124,7 +1124,7 @@ class TrackControllerBackend(FailureDetection):
         ext = os.path.splitext(filepath)[1].lower()
         logger.info('Uploading PLC file: %s', filepath)
 
-        # self._set_placeholder_suggested_values()
+        self._set_placeholder_suggested_values()
 
         if ext == '.py':
             self._upload_plc_python(filepath)
@@ -1137,12 +1137,12 @@ class TrackControllerBackend(FailureDetection):
         self._send_status_to_ctc()
         logger.info('PLC uploaded successfully for %s', self.line_name)
 
-    # def _set_placeholder_suggested_values(self) -> None:
-    #     default_speed_mps = 20
-    #     default_authority_m = 150
-    #     for block_id in self._line_block_ids():
-    #         if block_id not in self._suggested_speed_mps: self._suggested_speed_mps[block_id] = default_speed_mps
-    #         if block_id not in self._suggested_auth_m: self._suggested_auth_m[block_id] = default_authority_m
+    def _set_placeholder_suggested_values(self) -> None:
+         default_speed_mps = 20
+         default_authority_m = 150
+         for block_id in self._line_block_ids():
+             if block_id not in self._suggested_speed_mps: self._suggested_speed_mps[block_id] = default_speed_mps
+             if block_id not in self._suggested_auth_m: self._suggested_auth_m[block_id] = default_authority_m
 
     def _upload_plc_python(self, filepath: str) -> None:
         """Load and execute a Python PLC file.

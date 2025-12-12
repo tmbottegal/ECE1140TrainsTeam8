@@ -295,6 +295,7 @@ if __name__ == "__main__":
     create_train_with_controller(99, network1, 1)
     create_train_with_controller(98, network1, 3)
 
+    create_train(99, network1, 1)
 
     app.exec()
 

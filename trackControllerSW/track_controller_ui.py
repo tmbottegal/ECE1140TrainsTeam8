@@ -335,7 +335,7 @@ class TrackControllerUI(QWidget):
         )
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.clock_label.setStyleSheet(
-            'QLabel { border: 2px solid gray; padding: 5px; background-color: #000; }'
+            'QLabel { border: 2px solid gray; padding: 5px; background-color: #FFFFFF; }'
         )
         bottom_row.addWidget(self.clock_label)
 

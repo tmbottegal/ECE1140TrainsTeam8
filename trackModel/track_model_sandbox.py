@@ -12,7 +12,7 @@ from universal.universal import (
     ConversionFunctions
 )
 
-from track_model_frontend import NetworkStatusUI
+from track_model_test_frontend import NetworkStatusUI
 from PyQt6.QtWidgets import QApplication
 
 from trainModel.train_model_backend import Train

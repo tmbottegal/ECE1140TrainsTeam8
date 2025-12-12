@@ -47,7 +47,7 @@ def main() -> None:
     }
 
     # 3) Attach NetworkCTCProxy so HW controller sends status to laptop
-    LAPTOP_IP = "10.6.18.59"  # CHANGE THIS to your friend's laptop IP
+    LAPTOP_IP = "10.4.6.21"  # CHANGE THIS to your friend's laptop IP
     proxy = NetworkCTCProxy(host=LAPTOP_IP, port=6000)
     for backend in hw_controllers.values():
         backend.set_ctc_backend(proxy)
